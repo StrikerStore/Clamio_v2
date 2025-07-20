@@ -371,10 +371,7 @@ class AuthController {
     try {
       // In Basic Auth, logout is handled client-side
       // by removing the Authorization header
-      const userId = req.user.id;
-      
-      // Update last login to track logout time (optional)
-      database.updateLastLogin(userId);
+      // No need to track logout time since user is not authenticated
 
       res.json({
         success: true,
