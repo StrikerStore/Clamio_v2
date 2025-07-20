@@ -33,9 +33,9 @@ router.post('/login/phone', validatePhoneLogin, authController.loginWithPhone);
 /**
  * @route   POST /api/auth/logout
  * @desc    User logout
- * @access  Private
+ * @access  Public
  */
-router.post('/logout', authenticateToken, authController.logout);
+router.post('/logout', authController.logout);
 
 /**
  * @route   GET /api/auth/profile
