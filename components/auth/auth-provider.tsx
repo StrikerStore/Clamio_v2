@@ -3,12 +3,17 @@
 import type React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { apiClient } from "@/lib/api"
 
 interface User {
   id: string
   email: string
   role: "vendor" | "admin" | "superadmin"
   name: string
+  status: string
+  phone?: string
+  warehouseId?: string
+  contactNumber?: string
 }
 
 interface AuthContextType {
@@ -16,25 +21,30 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>
   logout: () => void
   loading: boolean
+  authHeader: string | null
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [authHeader, setAuthHeader] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
-    // Check for stored auth token on mount
-    const token = localStorage.getItem("auth_token")
+    // Check for stored auth data on mount
+    const storedAuthHeader = localStorage.getItem("authHeader")
     const userData = localStorage.getItem("user_data")
 
-    if (token && userData) {
+    if (storedAuthHeader && userData) {
       try {
-        setUser(JSON.parse(userData))
+        const parsedUser = JSON.parse(userData)
+        setUser(parsedUser)
+        setAuthHeader(storedAuthHeader)
       } catch (error) {
-        localStorage.removeItem("auth_token")
+        console.error("Error parsing stored user data:", error)
+        localStorage.removeItem("authHeader")
         localStorage.removeItem("user_data")
       }
     }
@@ -43,38 +53,67 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     try {
-      // Mock API call - replace with actual API
-      const response = await mockLogin(email, password)
+      // Call the backend API to generate Basic Auth header
+      const response = await apiClient.generateAuthHeader(email, password)
 
-      localStorage.setItem("auth_token", response.token)
-      localStorage.setItem("user_data", JSON.stringify(response.user))
-      setUser(response.user)
+      if (response.success) {
+        // Store auth header and user data
+        localStorage.setItem("authHeader", response.data.authHeader)
+        localStorage.setItem("user_data", JSON.stringify(response.data.user))
+        setUser(response.data.user)
+        setAuthHeader(response.data.authHeader)
 
-      // Redirect based on role
-      switch (response.user.role) {
-        case "vendor":
-          router.push("/vendor/dashboard")
-          break
-        case "admin":
-          router.push("/admin/orders")
-          break
-        case "superadmin":
-          router.push("/superadmin/settings")
-          break
+        // Redirect based on role
+        switch (response.data.user.role) {
+          case "vendor":
+            router.push("/vendor/dashboard")
+            break
+          case "admin":
+            router.push("/admin/orders")
+            break
+          case "superadmin":
+            router.push("/superadmin/settings")
+            break
+          default:
+            router.push("/")
+        }
+      } else {
+        throw new Error(response.message || 'Login failed')
       }
     } catch (error) {
-      throw new Error("Invalid credentials")
+      console.error("Login error:", error)
+      throw new Error(error instanceof Error ? error.message : "Login failed")
     }
   }
 
-  const logout = () => {
-    localStorage.removeItem("auth_token")
+  const logout = async () => {
+    // Immediately clear state and localStorage for faster response
+    localStorage.removeItem("authHeader")
     localStorage.removeItem("user_data")
     setUser(null)
-    router.push("/")
+    setAuthHeader(null)
+    
+    // Redirect immediately for better UX (use replace to prevent back button issues)
+    router.replace("/")
+    
+    // Then try to call backend logout (fire and forget)
+    try {
+      if (authHeader) {
+        // Don't await this - let it run in background
+        apiClient.logout().catch(error => {
+          console.error("Backend logout error:", error)
+        })
+      }
+    } catch (error) {
+      console.error("Logout error:", error)
+    }
   }
 
-  return <AuthContext.Provider value={{ user, login, logout, loading }}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={{ user, login, logout, loading, authHeader }}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {
@@ -83,31 +122,4 @@ export function useAuth() {
     throw new Error("useAuth must be used within an AuthProvider")
   }
   return context
-}
-
-// Mock login function - replace with actual API call
-async function mockLogin(email: string, password: string) {
-  await new Promise((resolve) => setTimeout(resolve, 1000)) // Simulate API delay
-
-  // Mock users for demo
-  const mockUsers = {
-    "vendor@example.com": { id: "1", email: "vendor@example.com", role: "vendor" as const, name: "John Vendor" },
-    "admin@example.com": { id: "2", email: "admin@example.com", role: "admin" as const, name: "Jane Admin" },
-    "superadmin@example.com": {
-      id: "3",
-      email: "superadmin@example.com",
-      role: "superadmin" as const,
-      name: "Super Admin",
-    },
-  }
-
-  const user = mockUsers[email as keyof typeof mockUsers]
-  if (user && password === "password123") {
-    return {
-      token: "mock_jwt_token_" + Date.now(),
-      user,
-    }
-  }
-
-  throw new Error("Invalid credentials")
 }
