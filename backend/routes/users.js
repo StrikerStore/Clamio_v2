@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
-const { authenticateToken, requireSuperadmin } = require('../middleware/auth');
+const { authenticateToken, requireSuperadmin, requireVendor } = require('../middleware/auth');
 const { 
   validateUserRegistration, 
   validateUserUpdate, 
@@ -75,5 +75,12 @@ router.get('/status/:status', userController.getUsersByStatus);
  * @access  Superadmin only
  */
 router.patch('/:id/toggle-status', validateUserId, userController.toggleUserStatus);
+
+/**
+ * @route   GET /api/users/vendor/address
+ * @desc    Get the vendor's warehouse address (for vendor panel)
+ * @access  Vendor only
+ */
+router.get('/vendor/address', userController.getVendorAddress);
 
 module.exports = router; 

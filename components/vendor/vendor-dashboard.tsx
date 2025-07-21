@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ import {
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { apiClient } from "@/lib/api"
 
 // Mock data - Version 4
 const mockOrders = [
@@ -163,6 +164,56 @@ export function VendorDashboard() {
   const [upiId, setUpiId] = useState("")
   const [selectedMyOrders, setSelectedMyOrders] = useState<string[]>([])
   const [selectedUnclaimedOrders, setSelectedUnclaimedOrders] = useState<string[]>([])
+  const [vendorAddress, setVendorAddress] = useState<null | {
+    warehouseId: string
+    address: string
+    city: string
+    pincode: string
+  }>(null)
+  const [addressLoading, setAddressLoading] = useState(false)
+  const [addressError, setAddressError] = useState("")
+
+  useEffect(() => {
+    async function fetchAddress() {
+      console.log("fetchAddress: Starting address fetch...");
+      console.log("fetchAddress: User object:", user);
+      console.log("fetchAddress: User role:", user?.role);
+      
+      setAddressLoading(true);
+      setAddressError("");
+      try {
+        if (user?.role !== "vendor") {
+          console.log("fetchAddress: User is not a vendor, throwing error");
+          throw new Error("User is not a vendor");
+        }
+        console.log("fetchAddress: User is a vendor, proceeding with API call");
+        const response = await apiClient.getVendorAddress();
+        console.log("fetchAddress: API response received:", response);
+        if (response.success) {
+          console.log("fetchAddress: Setting vendor address:", response.data);
+          setVendorAddress(response.data);
+        } else {
+          console.log("fetchAddress: API call failed:", response.message);
+          setAddressError(response.message || "Failed to fetch address");
+        }
+      } catch (err) {
+        console.error("fetchAddress: Error occurred:", err); // More detailed logging
+        setAddressError(err instanceof Error ? err.message : "Failed to fetch address");
+      } finally {
+        console.log("fetchAddress: Setting loading to false");
+        setAddressLoading(false);
+      }
+    }
+    
+    console.log("useEffect: User object:", user);
+    console.log("useEffect: User role:", user?.role);
+    if (user?.role === "vendor") {
+      console.log("useEffect: User is vendor, calling fetchAddress");
+      fetchAddress()
+    } else {
+      console.log("useEffect: User is not a vendor, skipping fetchAddress");
+    }
+  }, [user])
 
   const handleClaimOrder = (orderId: string) => {
     toast({
@@ -343,23 +394,44 @@ export function VendorDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - Fixed */}
+      {/* Header - Single Row Layout */}
       <div className="bg-white shadow-sm border-b sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
-              <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center">
+          <div className="flex items-center justify-between py-4 gap-4">
+            {/* Dashboard Name and Welcome */}
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
                 <BinaryIcon className="w-5 h-5 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-semibold text-gray-900">Vendor Dashboard v4</h1>
-                <p className="text-sm text-gray-500">Welcome back, {user?.name}</p>
+              <div className="min-w-0">
+                <h1 className="text-xl font-semibold text-gray-900 truncate">Vendor Dashboard v4</h1>
+                <p className="text-sm text-gray-500 truncate">
+                  Welcome back, {user?.name} ({user?.role})
+                </p>
               </div>
             </div>
-            <Button variant="outline" onClick={logout}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
+            {/* Vendor Address */}
+            <div className="flex-1 flex flex-col items-end min-w-0">
+              {addressLoading ? (
+                <span className="text-xs text-gray-400">Loading address...</span>
+              ) : addressError ? (
+                <span className="text-xs text-red-500">{addressError}</span>
+              ) : vendorAddress ? (
+                <div className="text-right truncate">
+                  <div className="text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
+                  <div className="text-xs text-gray-700 truncate">{vendorAddress.address}</div>
+                  <div className="text-xs text-gray-700 truncate">{vendorAddress.city}</div>
+                  <div className="text-xs text-gray-700 truncate">Pincode: {vendorAddress.pincode}</div>
+                </div>
+              ) : null}
+            </div>
+            {/* Logout Button */}
+            <div className="flex-shrink-0">
+              <Button variant="outline" onClick={logout}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout
+              </Button>
+            </div>
           </div>
         </div>
       </div>

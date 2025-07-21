@@ -77,4 +77,32 @@ router.get('/stats',
   shipwayController.getWarehouseStats
 );
 
+/**
+ * @route   GET /api/shipway/verify-warehouse/:warehouseId
+ * @desc    Verify a warehouse by ID and return address, city, pincode
+ * @access  Superadmin only
+ */
+router.get('/verify-warehouse/:warehouseId', authenticateToken, requireSuperadmin, async (req, res) => {
+  const { warehouseId } = req.params;
+  try {
+    const warehouseData = await require('../services/shipwayService').getWarehouseById(warehouseId);
+    if (!warehouseData.success) {
+      return res.status(404).json({ success: false, message: 'Warehouse not found' });
+    }
+    const details = require('../services/shipwayService').formatWarehouseData(warehouseData.data);
+    res.json({
+      success: true,
+      data: {
+        address: details.address,
+        city: details.city,
+        pincode: details.pincode,
+        state: details.state,
+        country: details.country
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router; 

@@ -1,6 +1,8 @@
 const database = require('../config/database');
 const { hashPassword } = require('../middleware/auth');
 const shipwayService = require('../services/shipwayService');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * User Management Controller
@@ -40,10 +42,8 @@ class UserController {
         });
       }
 
-      // For vendors, validate warehouse ID with Shipway API
       if (role === 'vendor' && warehouseId) {
         try {
-          // Validate warehouse ID format
           if (!shipwayService.validateWarehouseId(warehouseId)) {
             return res.status(400).json({
               success: false,
@@ -51,9 +51,7 @@ class UserController {
             });
           }
 
-          // Fetch warehouse details from Shipway
           const warehouseData = await shipwayService.getWarehouseById(warehouseId);
-          
           if (!warehouseData.success) {
             return res.status(400).json({
               success: false,
@@ -61,13 +59,10 @@ class UserController {
             });
           }
 
-          // Store warehouse details in user data
           const formattedWarehouse = shipwayService.formatWarehouseData(warehouseData.data);
-          
-          // Hash password
           const hashedPassword = await hashPassword(password);
 
-          // Create user with warehouse details
+          // Save address, city, pincode as top-level fields
           const userData = {
             name,
             email,
@@ -76,7 +71,9 @@ class UserController {
             role,
             status,
             warehouseId,
-            warehouseDetails: formattedWarehouse,
+            address: formattedWarehouse.address,
+            city: formattedWarehouse.city,
+            pincode: formattedWarehouse.pincode,
             contactNumber
           };
 
@@ -98,7 +95,6 @@ class UserController {
       } else {
         // For admins or users without warehouse
         const hashedPassword = await hashPassword(password);
-
         const userData = {
           name,
           email,
@@ -109,26 +105,21 @@ class UserController {
           warehouseId,
           contactNumber
         };
-
         const newUser = database.createUser(userData);
-
         res.status(201).json({
           success: true,
           message: `${role} created successfully`,
           data: newUser
         });
       }
-
     } catch (error) {
       console.error('Create user error:', error);
-      
       if (error.message.includes('already exists')) {
         return res.status(400).json({
           success: false,
           message: error.message
         });
       }
-
       res.status(500).json({
         success: false,
         message: 'Internal server error'
@@ -252,8 +243,6 @@ class UserController {
     try {
       const { id } = req.params;
       const updateData = req.body;
-
-      // Check if user exists
       const existingUser = database.getUserById(id);
       if (!existingUser) {
         return res.status(404).json({
@@ -261,8 +250,6 @@ class UserController {
           message: 'User not found'
         });
       }
-
-      // If updating warehouse ID for vendor, validate with Shipway
       if (updateData.warehouseId && existingUser.role === 'vendor') {
         try {
           if (!shipwayService.validateWarehouseId(updateData.warehouseId)) {
@@ -271,19 +258,17 @@ class UserController {
               message: 'Invalid warehouse ID format'
             });
           }
-
           const warehouseData = await shipwayService.getWarehouseById(updateData.warehouseId);
-          
           if (!warehouseData.success) {
             return res.status(400).json({
               success: false,
               message: 'Invalid warehouse ID or warehouse not found'
             });
           }
-
           const formattedWarehouse = shipwayService.formatWarehouseData(warehouseData.data);
-          updateData.warehouseDetails = formattedWarehouse;
-
+          updateData.address = formattedWarehouse.address;
+          updateData.city = formattedWarehouse.city;
+          updateData.pincode = formattedWarehouse.pincode;
         } catch (shipwayError) {
           console.error('Shipway API error:', shipwayError);
           return res.status(400).json({
@@ -292,33 +277,26 @@ class UserController {
           });
         }
       }
-
-      // Update user
       const updatedUser = database.updateUser(id, updateData);
-
       if (!updatedUser) {
         return res.status(500).json({
           success: false,
           message: 'Failed to update user'
         });
       }
-
       res.json({
         success: true,
         message: 'User updated successfully',
         data: updatedUser
       });
-
     } catch (error) {
       console.error('Update user error:', error);
-      
       if (error.message.includes('already exists')) {
         return res.status(400).json({
           success: false,
           message: error.message
         });
       }
-
       res.status(500).json({
         success: false,
         message: 'Internal server error'
@@ -487,6 +465,63 @@ class UserController {
 
     } catch (error) {
       console.error('Toggle user status error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      });
+    }
+  }
+
+  /**
+   * Get the vendor's warehouse address (for vendor panel)
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  async getVendorAddress(req, res) {
+    try {
+      const logDir = path.join(__dirname, '../logs');
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+      }
+      const logPath = path.join(logDir, 'vendor-debug.log');
+      const timestamp = new Date().toISOString();
+      const vendor = req.user;
+      // Log the incoming user object and all relevant fields
+      const logEntry = `[${timestamp}] vendor: ${JSON.stringify(vendor)}\n`;
+      fs.appendFileSync(logPath, logEntry);
+      const role = (vendor?.role || '').trim();
+      const warehouseId = (vendor?.warehouseId || '').toString().trim();
+      const address = (vendor?.address || '').trim();
+      const city = (vendor?.city || '').trim();
+      const pincode = (vendor?.pincode || '').toString().trim();
+      fs.appendFileSync(logPath, `[${timestamp}] role: '${role}', warehouseId: '${warehouseId}', address: '${address}', city: '${city}', pincode: '${pincode}'\n`);
+      if (!vendor || role !== 'vendor') {
+        fs.appendFileSync(logPath, `[${timestamp}] result: 403 (role check failed)\n`);
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. Only vendors can access this endpoint.'
+        });
+      }
+      if (!warehouseId || !address || !city || !pincode) {
+        fs.appendFileSync(logPath, `[${timestamp}] result: 404 (missing field)\n`);
+        return res.status(404).json({
+          success: false,
+          message: 'Warehouse address not found for this vendor.'
+        });
+      }
+      fs.appendFileSync(logPath, `[${timestamp}] result: 200 (success)\n`);
+      res.json({
+        success: true,
+        data: {
+          warehouseId,
+          address,
+          city,
+          pincode
+        }
+      });
+    } catch (error) {
+      console.error('Get vendor address error:', error);
+      fs.appendFileSync(path.join(__dirname, '../logs/vendor-debug.log'), `[${new Date().toISOString()}] error: ${error.message}\n`);
       res.status(500).json({
         success: false,
         message: 'Internal server error'

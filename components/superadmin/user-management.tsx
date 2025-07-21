@@ -52,6 +52,7 @@ import {
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/components/auth/auth-provider"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface User {
   id: string
@@ -112,6 +113,10 @@ export function UserManagement() {
   const [passwordLoading, setPasswordLoading] = useState(false)
   const [passwordError, setPasswordError] = useState("")
   const [passwordSuccess, setPasswordSuccess] = useState("")
+  const [warehouseInfo, setWarehouseInfo] = useState<null | { address: string, city: string, pincode: string, state: string, country: string }>(null)
+  const [warehouseVerifyLoading, setWarehouseVerifyLoading] = useState(false)
+  const [warehouseVerifyError, setWarehouseVerifyError] = useState("")
+  const [warehouseVerified, setWarehouseVerified] = useState(false)
 
   const [formData, setFormData] = useState<CreateUserForm>({
     name: "",
@@ -214,11 +219,35 @@ export function UserManagement() {
     }
   }
 
+  const handleVerifyWarehouse = async () => {
+    setWarehouseVerifyLoading(true)
+    setWarehouseVerifyError("")
+    setWarehouseInfo(null)
+    setWarehouseVerified(false)
+    try {
+      const response = await apiClient.verifyWarehouse(formData.warehouseId)
+      if (response.success) {
+        setWarehouseInfo(response.data)
+        setWarehouseVerified(true)
+      } else {
+        setWarehouseVerifyError(response.message)
+        setWarehouseVerified(false)
+      }
+    } catch (err) {
+      setWarehouseVerifyError(err instanceof Error ? err.message : "Failed to verify warehouse")
+      setWarehouseVerified(false)
+    } finally {
+      setWarehouseVerifyLoading(false)
+    }
+  }
+
   const handleInputChange = (field: keyof CreateUserForm, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
-    
-    // Auto-validate warehouse ID when it changes
     if (field === 'warehouseId') {
+      setWarehouseValid(null)
+      setWarehouseInfo(null)
+      setWarehouseVerified(false)
+      setWarehouseVerifyError("")
       validateWarehouse(value)
     }
   }
@@ -285,6 +314,8 @@ export function UserManagement() {
           contactNumber: ""
         })
         setWarehouseValid(null)
+        setWarehouseInfo(null)
+        setWarehouseVerified(false)
         // Reload users
         loadUsers()
       } else {
@@ -836,7 +867,7 @@ export function UserManagement() {
                           {formData.role === 'vendor' && (
                             <div className="space-y-2">
                               <Label htmlFor="warehouseId" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
-                              <div className="relative">
+                              <div className="flex items-center gap-2 relative">
                                 <Input
                                   id="warehouseId"
                                   value={formData.warehouseId}
@@ -849,20 +880,49 @@ export function UserManagement() {
                                   }`}
                                   placeholder="Enter warehouse ID"
                                 />
-                                {warehouseValidating && (
-                                  <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-blue-600" />
-                                )}
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="ml-2"
+                                        onClick={handleVerifyWarehouse}
+                                        disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating}
+                                      >
+                                        {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify Warehouse"}
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-xs">
+                                      {warehouseVerifyLoading ? (
+                                        <span>Verifying...</span>
+                                      ) : warehouseVerifyError ? (
+                                        <span className="text-red-600">{warehouseVerifyError}</span>
+                                      ) : warehouseInfo ? (
+                                        <div>
+                                          <div className="font-semibold text-sm">Address:</div>
+                                          <div className="text-xs text-gray-700">{warehouseInfo.address}</div>
+                                          <div className="text-xs text-gray-700">{warehouseInfo.city}, {warehouseInfo.state}, {warehouseInfo.country}</div>
+                                          <div className="text-xs text-gray-700">Pincode: {warehouseInfo.pincode}</div>
+                                        </div>
+                                      ) : (
+                                        <span>Click to verify warehouse and view details</span>
+                                      )}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
                               </div>
-                              {warehouseValid === true && (
-                                <p className="text-sm text-green-600 flex items-center gap-1">
+                              {warehouseVerified && warehouseInfo && (
+                                <p className="text-xs text-green-600 flex items-center gap-1 mt-1">
                                   <UserCheck className="h-3 w-3" />
-                                  Valid warehouse ID
+                                  Verified: {warehouseInfo.address}, {warehouseInfo.city}, {warehouseInfo.state}, {warehouseInfo.country} (Pincode: {warehouseInfo.pincode})
                                 </p>
                               )}
-                              {warehouseValid === false && (
-                                <p className="text-sm text-red-600 flex items-center gap-1">
+                              {warehouseVerifyError && !warehouseVerifyLoading && (
+                                <p className="text-xs text-red-600 flex items-center gap-1 mt-1">
                                   <Shield className="h-3 w-3" />
-                                  Invalid warehouse ID
+                                  {warehouseVerifyError}
                                 </p>
                               )}
                             </div>
@@ -928,7 +988,7 @@ export function UserManagement() {
                         <Button 
                           type="submit" 
                           className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg" 
-                          disabled={creating}
+                          disabled={creating || (formData.role === 'vendor' && !warehouseVerified)}
                         >
                           {creating ? (
                             <>

@@ -161,6 +161,10 @@ class ApiClient {
     })
   }
 
+  async getVendorAddress(): Promise<ApiResponse> {
+    return this.makeRequest('/users/vendor/address');
+  }
+
   // Shipway API methods (Superadmin only)
   async getWarehouseById(warehouseId: string): Promise<ApiResponse> {
     return this.makeRequest(`/shipway/warehouse/${warehouseId}`)
@@ -183,6 +187,10 @@ class ApiClient {
 
   async getShipwayStats(): Promise<ApiResponse> {
     return this.makeRequest('/shipway/stats')
+  }
+
+  async verifyWarehouse(warehouseId: string): Promise<ApiResponse> {
+    return this.makeRequest(`/shipway/verify-warehouse/${warehouseId}`);
   }
 }
 

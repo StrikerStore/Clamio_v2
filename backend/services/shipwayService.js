@@ -1,4 +1,6 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * Shipway API Service
@@ -29,6 +31,13 @@ class ShipwayService {
       const url = `${this.baseURL}/getwarehouses`;
       const params = { warehouseid: warehouseId };
 
+      this.logApiActivity({
+        type: 'shipway-request',
+        warehouseId,
+        url,
+        params,
+        headers: { Authorization: '***' },
+      });
       const response = await axios.get(url, {
         params,
         headers: {
@@ -36,6 +45,12 @@ class ShipwayService {
           'Content-Type': 'application/json'
         },
         timeout: 10000 // 10 second timeout
+      });
+      this.logApiActivity({
+        type: 'shipway-response',
+        warehouseId,
+        status: response.status,
+        data: response.data,
       });
 
       // Check if response is successful
@@ -62,6 +77,12 @@ class ShipwayService {
       };
 
     } catch (error) {
+      this.logApiActivity({
+        type: 'shipway-error',
+        warehouseId,
+        error: error.message,
+        stack: error.stack,
+      });
       console.error('Error fetching warehouse from Shipway API:', error.message);
       
       // Handle specific error cases
@@ -122,30 +143,28 @@ class ShipwayService {
    */
   formatWarehouseData(shipwayData) {
     try {
-      // Extract common warehouse fields
+      // If the response is wrapped in a 'message' key, use that
+      const data = shipwayData.message ? shipwayData.message : shipwayData;
       const warehouse = {
-        id: shipwayData.warehouseid || shipwayData.id,
-        name: shipwayData.warehousename || shipwayData.name,
-        address: shipwayData.address || shipwayData.warehouseaddress,
-        city: shipwayData.city,
-        state: shipwayData.state,
-        country: shipwayData.country,
-        pincode: shipwayData.pincode || shipwayData.postalcode,
-        contactPerson: shipwayData.contactperson || shipwayData.contact_person,
-        phone: shipwayData.phone || shipwayData.contactphone,
-        email: shipwayData.email || shipwayData.contactemail,
-        status: shipwayData.status || shipwayData.warehousestatus,
-        createdAt: shipwayData.createddate || shipwayData.created_at,
-        updatedAt: shipwayData.updateddate || shipwayData.updated_at
+        id: data.warehouse_id || data.warehouseid || data.id,
+        name: data.title || data.warehousename || data.name,
+        address: data.address_1 || data.address || data.warehouseaddress,
+        city: data.city,
+        state: data.state,
+        country: data.country,
+        pincode: data.pincode || data.postalcode,
+        contactPerson: data.contact_person_name || data.contactperson || data.contact_person,
+        phone: data.phone || data.contactphone,
+        email: data.email || data.contactemail,
+        status: data.status || data.warehousestatus,
+        createdAt: data.createddate || data.created_at,
+        updatedAt: data.updateddate || data.updated_at
       };
-
-      // Remove undefined values
       Object.keys(warehouse).forEach(key => {
         if (warehouse[key] === undefined) {
           delete warehouse[key];
         }
       });
-
       return warehouse;
     } catch (error) {
       console.error('Error formatting warehouse data:', error);
@@ -179,6 +198,15 @@ class ShipwayService {
         error: error.message
       };
     }
+  }
+
+  logApiActivity(activity) {
+    const logPath = path.join(__dirname, '../logs/api.log');
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] ${JSON.stringify(activity)}\n`;
+    fs.appendFile(logPath, logEntry, err => {
+      if (err) console.error('Failed to write API log:', err);
+    });
   }
 }
 
