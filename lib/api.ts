@@ -192,6 +192,11 @@ class ApiClient {
   async verifyWarehouse(warehouseId: string): Promise<ApiResponse> {
     return this.makeRequest(`/shipway/verify-warehouse/${warehouseId}`);
   }
+
+  // Orders API for vendor panel
+  async getOrders(): Promise<ApiResponse> {
+    return this.makeRequest('/orders');
+  }
 }
 
 // Export singleton instance
