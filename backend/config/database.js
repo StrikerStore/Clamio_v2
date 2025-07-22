@@ -248,6 +248,225 @@ class ExcelDatabase {
     const users = this.getAllUsers();
     return users.filter(user => user.status === status);
   }
+
+  // Settlement Management Methods
+
+  /**
+   * Get all settlement requests
+   * @returns {Array} Array of settlement requests
+   */
+  getAllSettlements() {
+    const data = this.loadSettlementData();
+    return data.settlements || [];
+  }
+
+  /**
+   * Load settlement data from Excel file
+   * @returns {Object} Parsed settlement data from Excel file
+   */
+  loadSettlementData() {
+    try {
+      const settlementPath = this.dbPath.replace('users.xlsx', 'settlements.xlsx');
+      if (!fs.existsSync(settlementPath)) {
+        return { settlements: [] };
+      }
+
+      const workbook = XLSX.readFile(settlementPath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      
+      const data = XLSX.utils.sheet_to_json(worksheet);
+      return { settlements: data };
+    } catch (error) {
+      console.error('Error loading settlement data from Excel:', error);
+      return { settlements: [] };
+    }
+  }
+
+  /**
+   * Save settlement data to Excel file
+   * @param {Object} data - Settlement data to save
+   */
+  saveSettlementData(data) {
+    try {
+      const settlementPath = this.dbPath.replace('users.xlsx', 'settlements.xlsx');
+      const worksheet = XLSX.utils.json_to_sheet(data.settlements || []);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Settlements');
+      XLSX.writeFile(workbook, settlementPath);
+    } catch (error) {
+      console.error('Error saving settlement data to Excel:', error);
+      throw new Error('Failed to save settlement data to database');
+    }
+  }
+
+  /**
+   * Create new settlement request
+   * @param {Object} settlementData - Settlement request data
+   * @returns {Object} Created settlement object
+   */
+  createSettlement(settlementData) {
+    const settlements = this.getAllSettlements();
+    
+    const newSettlement = {
+      id: `settlement_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      ...settlementData,
+      status: 'pending',
+      paymentStatus: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    settlements.push(newSettlement);
+    this.saveSettlementData({ settlements });
+    
+    return newSettlement;
+  }
+
+  /**
+   * Update settlement request
+   * @param {string} id - Settlement ID
+   * @param {Object} updateData - Data to update
+   * @returns {Object|null} Updated settlement object or null if not found
+   */
+  updateSettlement(id, updateData) {
+    const settlements = this.getAllSettlements();
+    const settlementIndex = settlements.findIndex(settlement => settlement.id === id);
+    
+    if (settlementIndex === -1) {
+      return null;
+    }
+
+    settlements[settlementIndex] = {
+      ...settlements[settlementIndex],
+      ...updateData,
+      updatedAt: new Date().toISOString()
+    };
+
+    this.saveSettlementData({ settlements });
+    return settlements[settlementIndex];
+  }
+
+  /**
+   * Get settlement by ID
+   * @param {string} id - Settlement ID
+   * @returns {Object|null} Settlement object or null if not found
+   */
+  getSettlementById(id) {
+    const settlements = this.getAllSettlements();
+    return settlements.find(settlement => settlement.id === id) || null;
+  }
+
+  /**
+   * Get settlements by vendor ID
+   * @param {string} vendorId - Vendor ID
+   * @returns {Array} Array of settlements for the vendor
+   */
+  getSettlementsByVendor(vendorId) {
+    const settlements = this.getAllSettlements();
+    return settlements.filter(settlement => settlement.vendorId === vendorId);
+  }
+
+  /**
+   * Get settlements by status
+   * @param {string} status - Settlement status (pending, approved, rejected)
+   * @returns {Array} Array of settlements with specified status
+   */
+  getSettlementsByStatus(status) {
+    const settlements = this.getAllSettlements();
+    return settlements.filter(settlement => settlement.status === status);
+  }
+
+  // Transaction History Methods
+
+  /**
+   * Get all transactions
+   * @returns {Array} Array of transaction records
+   */
+  getAllTransactions() {
+    const data = this.loadTransactionData();
+    return data.transactions || [];
+  }
+
+  /**
+   * Load transaction data from Excel file
+   * @returns {Object} Parsed transaction data from Excel file
+   */
+  loadTransactionData() {
+    try {
+      const transactionPath = this.dbPath.replace('users.xlsx', 'transactions.xlsx');
+      if (!fs.existsSync(transactionPath)) {
+        return { transactions: [] };
+      }
+
+      const workbook = XLSX.readFile(transactionPath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      
+      const data = XLSX.utils.sheet_to_json(worksheet);
+      return { transactions: data };
+    } catch (error) {
+      console.error('Error loading transaction data from Excel:', error);
+      return { transactions: [] };
+    }
+  }
+
+  /**
+   * Save transaction data to Excel file
+   * @param {Object} data - Transaction data to save
+   */
+  saveTransactionData(data) {
+    try {
+      const transactionPath = this.dbPath.replace('users.xlsx', 'transactions.xlsx');
+      const worksheet = XLSX.utils.json_to_sheet(data.transactions || []);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Transactions');
+      XLSX.writeFile(workbook, transactionPath);
+    } catch (error) {
+      console.error('Error saving transaction data to Excel:', error);
+      throw new Error('Failed to save transaction data to database');
+    }
+  }
+
+  /**
+   * Create new transaction record
+   * @param {Object} transactionData - Transaction data
+   * @returns {Object} Created transaction object
+   */
+  createTransaction(transactionData) {
+    const transactions = this.getAllTransactions();
+    
+    const newTransaction = {
+      id: `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      ...transactionData,
+      createdAt: new Date().toISOString()
+    };
+
+    transactions.push(newTransaction);
+    this.saveTransactionData({ transactions });
+    
+    return newTransaction;
+  }
+
+  /**
+   * Get transactions by vendor ID
+   * @param {string} vendorId - Vendor ID
+   * @returns {Array} Array of transactions for the vendor
+   */
+  getTransactionsByVendor(vendorId) {
+    const transactions = this.getAllTransactions();
+    return transactions.filter(transaction => transaction.vendorId === vendorId);
+  }
+
+  /**
+   * Get transaction by ID
+   * @param {string} id - Transaction ID
+   * @returns {Object|null} Transaction object or null if not found
+   */
+  getTransactionById(id) {
+    const transactions = this.getAllTransactions();
+    return transactions.find(transaction => transaction.id === id) || null;
+  }
 }
 
 module.exports = new ExcelDatabase(); 

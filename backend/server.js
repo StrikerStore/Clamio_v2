@@ -10,6 +10,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const shipwayRoutes = require('./routes/shipway');
 const ordersRoutes = require('./routes/orders');
+const settlementRoutes = require('./routes/settlements');
 
 // Import database to initialize it
 const database = require('./config/database');
@@ -102,6 +103,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/shipway', shipwayRoutes);
 app.use('/api/orders', ordersRoutes);
+app.use('/api/settlements', settlementRoutes);
+
 
 /**
  * API Documentation Endpoint

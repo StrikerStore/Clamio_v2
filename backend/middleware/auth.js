@@ -138,13 +138,8 @@ const authorizeRoles = (allowedRoles) => {
 
       const userRole = req.user.role;
       const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
-      // console.log('---------------------------------------roles:', roles);
-      // if (!roles.includes(userRole)) {
-      //   return res.status(403).json({
-      //     success: false,
-      //     message: 'Insufficient permissions to access this resource'
-      //   });
-      // }
+
+      
 
       next();
     } catch (error) {
