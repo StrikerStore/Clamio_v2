@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -12,6 +13,7 @@ const shipwayRoutes = require('./routes/shipway');
 
 // Import database to initialize it
 const database = require('./config/database');
+const fetchAndSaveShopifyProducts = require('./services/shopifyProductFetcher');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -237,6 +239,18 @@ app.listen(PORT, () => {
   
   // Log default superadmin credentials
   console.log('👤 Default superadmin: superadmin@example.com / password123');
+  console.log(process.env.SHOPIFY_ACCESS_TOKEN);
+  console.log(process.env.SHOPIFY_PRODUCTS_API_URL);
+
+  // Fetch Shopify products on startup
+  fetchAndSaveShopifyProducts(
+    process.env.SHOPIFY_PRODUCTS_API_URL || 'https://seq5t1-mz.myshopify.com/admin/api/2025-07/graphql.json',
+    {
+      'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+      'Content-Type': 'application/json',
+    },
+    path.join(__dirname, 'data', 'products.xlsx')
+  );
 });
 
 module.exports = app; 
