@@ -36,9 +36,12 @@ import {
   UserPlus,
   Trash2,
   Edit,
+  IndianRupee,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
+import { apiClient } from "@/lib/api"
+import { useEffect } from "react"
 
 // Mock data for admin dashboard
 const mockOrders = [
@@ -194,6 +197,20 @@ export function AdminDashboard() {
   })
   const [transactionProof, setTransactionProof] = useState<File | null>(null)
 
+  // Settlement management state
+  const [allSettlements, setAllSettlements] = useState<any[]>([])
+  const [settlementsLoading, setSettlementsLoading] = useState(false)
+  const [currentSettlement, setCurrentSettlement] = useState<any>(null)
+  const [showSettlementDialog, setShowSettlementDialog] = useState(false)
+  const [settlementModalAction, setSettlementModalAction] = useState<"view" | "approve" | "reject" | null>(null)
+  const [approvalData, setApprovalData] = useState({ amountPaid: "", transactionId: "", paymentProof: null as File | null })
+  const [settlementRejectionReason, setSettlementRejectionReason] = useState("")
+  const [settlementFilters, setSettlementFilters] = useState({ status: "all", vendorName: "", startDate: "", endDate: "" })
+  const [settlementPage, setSettlementPage] = useState(1)
+  const [settlementPagination, setSettlementPagination] = useState({ totalPages: 1, totalItems: 0 })
+  const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null)
+  const [showProofDialog, setShowProofDialog] = useState(false)
+
   const getStatusBadge = (status: string) => {
     const colors = {
       unclaimed: "bg-gray-100 text-gray-800",
@@ -340,6 +357,183 @@ export function AdminDashboard() {
     setTransactionProof(null)
   }
 
+  // Settlement Management Functions
+  const fetchSettlements = async () => {
+    setSettlementsLoading(true);
+    try {
+      const response = await apiClient.getAllSettlements({
+        page: settlementPage,
+        limit: 10,
+        ...settlementFilters
+      });
+      if (response.success) {
+        setAllSettlements(response.data.settlements);
+        setSettlementPagination(response.data.pagination);
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to fetch settlements",
+        variant: "destructive",
+      });
+    } finally {
+      setSettlementsLoading(false);
+    }
+  };
+
+  // Auto-load settlements when component mounts or settlement filters change
+  useEffect(() => {
+    fetchSettlements();
+  }, [settlementPage, settlementFilters]);
+
+  const handleViewSettlement = async (settlement: any) => {
+    setCurrentSettlement(settlement);
+    setSettlementModalAction("view");
+    setShowSettlementDialog(true);
+  };
+
+  const handleApproveSettlement = async (settlement: any) => {
+    setCurrentSettlement(settlement);
+    setSettlementModalAction("approve");
+    setApprovalData({ amountPaid: settlement.amount.toString(), transactionId: "", paymentProof: null });
+    setShowSettlementDialog(true);
+  };
+
+  const handleRejectSettlement = async (settlement: any) => {
+    setCurrentSettlement(settlement);
+    setSettlementModalAction("reject");
+    setSettlementRejectionReason("");
+    setShowSettlementDialog(true);
+  };
+
+  const submitSettlementAction = async () => {
+    if (!currentSettlement) return;
+
+    try {
+      if (settlementModalAction === "approve") {
+        if (!approvalData.amountPaid || !approvalData.transactionId) {
+          toast({
+            title: "Missing Information",
+            description: "Please provide amount and transaction ID",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const paidAmount = parseFloat(approvalData.amountPaid);
+        if (paidAmount > currentSettlement.amount) {
+          toast({
+            title: "Invalid Amount",
+            description: "Amount cannot exceed the requested amount",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const response = await apiClient.approveSettlement(
+          currentSettlement.id,
+          parseFloat(approvalData.amountPaid),
+          approvalData.transactionId,
+          approvalData.paymentProof || undefined
+        );
+
+        if (response.success) {
+          toast({
+            title: "Settlement Approved",
+            description: "Settlement has been approved successfully",
+          });
+          fetchSettlements();
+        } else {
+          toast({
+            title: "Error",
+            description: response.message || "Failed to approve settlement",
+            variant: "destructive",
+          });
+        }
+      } else if (settlementModalAction === "reject") {
+        if (!settlementRejectionReason.trim()) {
+          toast({
+            title: "Missing Rejection Reason",
+            description: "Please provide a reason for rejection",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const response = await apiClient.rejectSettlement(
+          currentSettlement.id,
+          settlementRejectionReason
+        );
+
+        if (response.success) {
+          toast({
+            title: "Settlement Rejected",
+            description: "Settlement has been rejected successfully",
+          });
+          fetchSettlements();
+        } else {
+          toast({
+            title: "Error",
+            description: response.message || "Failed to reject settlement",
+            variant: "destructive",
+          });
+        }
+      }
+
+      setShowSettlementDialog(false);
+      setCurrentSettlement(null);
+      setSettlementModalAction(null);
+      setApprovalData({ amountPaid: "", transactionId: "", paymentProof: null });
+      setSettlementRejectionReason("");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "An error occurred while processing the settlement",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleExportCSV = async () => {
+    try {
+      const blob = await apiClient.exportSettlementsCSV();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `settlements_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Export Successful",
+        description: "Settlement data has been exported to CSV",
+      });
+    } catch (error) {
+      toast({
+        title: "Export Failed",
+        description: "Failed to export settlement data",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleViewProof = async (filename: string) => {
+    try {
+      const blob = await apiClient.getPaymentProof(filename);
+      const url = URL.createObjectURL(blob);
+      setSelectedProofUrl(url);
+      setShowProofDialog(true);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load payment proof",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header - Fixed */}
@@ -405,7 +599,7 @@ export function AdminDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Pending Settlements</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {mockSettlements.filter((s) => s.status === "pending").length}
+                    {allSettlements.filter((s) => s.status === "pending").length}
                   </p>
                 </div>
               </div>
@@ -440,54 +634,49 @@ export function AdminDashboard() {
                 <TabsList className="grid w-full grid-cols-3 mb-6">
                   <TabsTrigger value="orders">Orders ({mockOrders.length})</TabsTrigger>
                   <TabsTrigger value="vendors">Vendors ({mockVendors.length})</TabsTrigger>
-                  <TabsTrigger value="settlements">Settlements ({mockSettlements.length})</TabsTrigger>
+                  <TabsTrigger value="settlement-management">Settlement Management</TabsTrigger>
                 </TabsList>
 
-                {/* Filters */}
-                <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                  <div className="flex-1">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                      <Input
-                        placeholder={`Search ${activeTab}...`}
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10"
-                      />
+                {/* Filters - Only show for orders and vendors tabs */}
+                {(activeTab === "orders" || activeTab === "vendors") && (
+                  <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                    <div className="flex-1">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <Input
+                          placeholder={`Search ${activeTab}...`}
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
                     </div>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-full sm:w-48">
+                        <Filter className="w-4 h-4 mr-2" />
+                        <SelectValue placeholder="Filter by status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        {activeTab === "orders" && (
+                          <>
+                            <SelectItem value="unclaimed">Unclaimed</SelectItem>
+                            <SelectItem value="in_pack">In Pack</SelectItem>
+                            <SelectItem value="handover">Handover</SelectItem>
+                            <SelectItem value="delivered">Delivered</SelectItem>
+                          </>
+                        )}
+                        {activeTab === "vendors" && (
+                          <>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="pending">Pending</SelectItem>
+                            <SelectItem value="inactive">Inactive</SelectItem>
+                          </>
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-full sm:w-48">
-                      <Filter className="w-4 h-4 mr-2" />
-                      <SelectValue placeholder="Filter by status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      {activeTab === "orders" && (
-                        <>
-                          <SelectItem value="unclaimed">Unclaimed</SelectItem>
-                          <SelectItem value="in_pack">In Pack</SelectItem>
-                          <SelectItem value="handover">Handover</SelectItem>
-                          <SelectItem value="delivered">Delivered</SelectItem>
-                        </>
-                      )}
-                      {activeTab === "vendors" && (
-                        <>
-                          <SelectItem value="active">Active</SelectItem>
-                          <SelectItem value="pending">Pending</SelectItem>
-                          <SelectItem value="inactive">Inactive</SelectItem>
-                        </>
-                      )}
-                      {activeTab === "settlements" && (
-                        <>
-                          <SelectItem value="pending">Pending</SelectItem>
-                          <SelectItem value="completed">Completed</SelectItem>
-                          <SelectItem value="rejected">Rejected</SelectItem>
-                        </>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
+                )}
 
                 {/* Tab-specific Actions */}
                 {activeTab === "orders" && (
@@ -758,76 +947,198 @@ export function AdminDashboard() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="settlements" className="mt-0">
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
-                        <TableRow>
-                          <TableHead>Settlement ID</TableHead>
-                          <TableHead>Vendor</TableHead>
-                          <TableHead>Amount</TableHead>
-                          <TableHead>Request Date</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>UPI ID</TableHead>
-                          <TableHead>Orders</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredSettlements().map((settlement) => (
-                          <TableRow key={settlement.id}>
-                            <TableCell className="font-medium">{settlement.id}</TableCell>
-                            <TableCell>{settlement.vendor}</TableCell>
-                            <TableCell>{settlement.amount}</TableCell>
-                            <TableCell>{settlement.requestDate}</TableCell>
-                            <TableCell>{getStatusBadge(settlement.status)}</TableCell>
-                            <TableCell>{settlement.upiId}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline">{settlement.orders.length} orders</Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSelectedSettlement(settlement)
-                                    setShowSettlementModal(true)
-                                  }}
-                                >
-                                  <Eye className="w-3 h-3" />
-                                </Button>
-                                {settlement.status === "pending" && (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      onClick={() => {
-                                        setSelectedSettlement(settlement)
-                                        setSettlementAction("approve")
-                                        setShowSettlementModal(true)
-                                      }}
-                                    >
-                                      <CheckCircle className="w-3 h-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="destructive"
-                                      onClick={() => {
-                                        setSelectedSettlement(settlement)
-                                        setSettlementAction("reject")
-                                        setShowSettlementModal(true)
-                                      }}
-                                    >
-                                      <XCircle className="w-3 h-3" />
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </TableCell>
+
+
+                {/* Settlement Management Tab */}
+                <TabsContent value="settlement-management" className="mt-0">
+                  <div className="space-y-4">
+                    {/* Settlement Filters */}
+                    <Card>
+                      <CardHeader>
+                        <div className="flex justify-between items-center">
+                          <CardTitle>Settlement Filters</CardTitle>
+                          <Button onClick={handleExportCSV} variant="outline">
+                            <Download className="w-4 h-4 mr-2" />
+                            Export CSV
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                          <div>
+                            <Label>Status</Label>
+                            <Select 
+                              value={settlementFilters.status} 
+                              onValueChange={(value) => setSettlementFilters({...settlementFilters, status: value})}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Status</SelectItem>
+                                <SelectItem value="pending">Pending</SelectItem>
+                                <SelectItem value="approved">Approved</SelectItem>
+                                <SelectItem value="rejected">Rejected</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label>Vendor Name</Label>
+                            <Input
+                              placeholder="Search by vendor..."
+                              value={settlementFilters.vendorName}
+                              onChange={(e) => setSettlementFilters({...settlementFilters, vendorName: e.target.value})}
+                            />
+                          </div>
+                          <div>
+                            <Label>Start Date</Label>
+                            <Input
+                              type="date"
+                              value={settlementFilters.startDate}
+                              onChange={(e) => setSettlementFilters({...settlementFilters, startDate: e.target.value})}
+                            />
+                          </div>
+                          <div>
+                            <Label>End Date</Label>
+                            <Input
+                              type="date"
+                              value={settlementFilters.endDate}
+                              onChange={(e) => setSettlementFilters({...settlementFilters, endDate: e.target.value})}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center mt-4">
+                          <Button onClick={fetchSettlements} disabled={settlementsLoading}>
+                            <Search className="w-4 h-4 mr-2" />
+                            {settlementsLoading ? "Loading..." : "Search"}
+                          </Button>
+                          <div className="text-sm text-gray-500">
+                            Page {settlementPage} of {settlementPagination.totalPages} ({settlementPagination.totalItems} total)
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Settlements Table */}
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Settlement ID</TableHead>
+                            <TableHead>Vendor Name</TableHead>
+                            <TableHead>Amount (₹)</TableHead>
+                            <TableHead>Request Date</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Payment Status</TableHead>
+                            <TableHead>UPI ID</TableHead>
+                            <TableHead>Orders</TableHead>
+                            <TableHead>Actions</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {settlementsLoading ? (
+                            <TableRow>
+                              <TableCell colSpan={9} className="text-center py-8">
+                                Loading settlements...
+                              </TableCell>
+                            </TableRow>
+                          ) : allSettlements.length > 0 ? (
+                            allSettlements.map((settlement: any) => (
+                              <TableRow key={settlement.id}>
+                                <TableCell className="font-medium">{settlement.id}</TableCell>
+                                <TableCell>{settlement.vendorName}</TableCell>
+                                <TableCell>₹{settlement.amount}</TableCell>
+                                <TableCell>{new Date(settlement.createdAt).toLocaleDateString('en-IN')}</TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={
+                                      settlement.status === "approved"
+                                        ? "bg-green-100 text-green-800"
+                                        : settlement.status === "rejected"
+                                        ? "bg-red-100 text-red-800"
+                                        : "bg-yellow-100 text-yellow-800"
+                                    }
+                                  >
+                                    {settlement.status.toUpperCase()}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    className={
+                                      settlement.paymentStatus === "settled_fully"
+                                        ? "bg-green-100 text-green-800"
+                                        : settlement.paymentStatus === "settled_partially"
+                                        ? "bg-orange-100 text-orange-800"
+                                        : "bg-gray-100 text-gray-800"
+                                    }
+                                  >
+                                    {settlement.paymentStatus ? settlement.paymentStatus.replace("_", " ").toUpperCase() : "PENDING"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="max-w-32 truncate">{settlement.upiId}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">{settlement.numberOfOrders} orders</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handleViewSettlement(settlement)}
+                                    >
+                                      <Eye className="w-3 h-3" />
+                                    </Button>
+                                    {settlement.status === "pending" && (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          onClick={() => handleApproveSettlement(settlement)}
+                                        >
+                                          <CheckCircle className="w-3 h-3" />
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="destructive"
+                                          onClick={() => handleRejectSettlement(settlement)}
+                                        >
+                                          <XCircle className="w-3 h-3" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={9} className="text-center py-8 text-gray-500">
+                                No settlements found
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {/* Pagination */}
+                    {settlementPagination.totalPages > 1 && (
+                      <div className="flex justify-center gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => setSettlementPage(Math.max(1, settlementPage - 1))}
+                          disabled={settlementPage === 1}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => setSettlementPage(Math.min(settlementPagination.totalPages, settlementPage + 1))}
+                          disabled={settlementPage === settlementPagination.totalPages}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
               </div>
@@ -929,6 +1240,216 @@ export function AdminDashboard() {
               )}
             </div>
           )}
+                  </DialogContent>
+        </Dialog>
+
+      {/* Settlement Management Dialog */}
+      <Dialog open={showSettlementDialog} onOpenChange={setShowSettlementDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {settlementModalAction === "view" ? "Settlement Details" :
+               settlementModalAction === "approve" ? "Approve Settlement" : "Reject Settlement"}
+            </DialogTitle>
+            <DialogDescription>
+              {settlementModalAction === "view" ? "View settlement request details" :
+               settlementModalAction === "approve" ? "Approve and process payment" : "Reject settlement request"}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {currentSettlement && (
+            <div className="space-y-6">
+              {/* Settlement Details */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="font-semibold">Settlement ID</Label>
+                  <p>{currentSettlement.id}</p>
+                </div>
+                <div>
+                  <Label className="font-semibold">Vendor Name</Label>
+                  <p>{currentSettlement.vendorName}</p>
+                </div>
+                <div>
+                  <Label className="font-semibold">Amount</Label>
+                  <p className="text-xl font-bold text-green-600">₹{currentSettlement.amount}</p>
+                </div>
+                <div>
+                  <Label className="font-semibold">Request Date</Label>
+                  <p>{new Date(currentSettlement.createdAt).toLocaleDateString('en-IN')}</p>
+                </div>
+                <div>
+                  <Label className="font-semibold">UPI ID</Label>
+                  <p className="font-mono">{currentSettlement.upiId}</p>
+                </div>
+                                 <div>
+                   <Label className="font-semibold">Number of Orders</Label>
+                   <p>{currentSettlement.numberOfOrders}</p>
+                 </div>
+                 {currentSettlement.status === "approved" && (
+                   <>
+                     <div>
+                       <Label className="font-semibold">Settled Amount</Label>
+                       <p className="text-xl font-bold text-green-600">₹{currentSettlement.amountPaid || currentSettlement.amount}</p>
+                     </div>
+                     <div>
+                       <Label className="font-semibold">Transaction ID</Label>
+                       <p className="font-mono">{currentSettlement.transactionId}</p>
+                     </div>
+                   </>
+                 )}
+                 {currentSettlement.status === "rejected" && (
+                   <div className="col-span-2">
+                     <Label className="font-semibold">Rejection Reason</Label>
+                     <p className="text-red-600 bg-red-50 p-3 rounded-lg mt-1">{currentSettlement.rejectionReason}</p>
+                   </div>
+                 )}
+               </div>
+
+                             {/* Order IDs */}
+               <div>
+                 <Label className="font-semibold">Order IDs</Label>
+                 <div className="flex flex-wrap gap-2 mt-2">
+                   {currentSettlement.orderIds && currentSettlement.orderIds.split(',').map((orderId: string) => (
+                     <Badge key={orderId.trim()} variant="outline">
+                       {orderId.trim()}
+                     </Badge>
+                   ))}
+                 </div>
+               </div>
+
+               {/* Payment Proof */}
+               {currentSettlement.status === "approved" && currentSettlement.paymentProofPath && (
+                 <div>
+                   <Label className="font-semibold">Payment Proof</Label>
+                   <div className="mt-2">
+                     <Button
+                       variant="outline"
+                       onClick={() => handleViewProof(currentSettlement.paymentProofPath)}
+                       className="flex items-center gap-2"
+                     >
+                       <Eye className="w-4 h-4" />
+                       View Payment Proof
+                     </Button>
+                   </div>
+                 </div>
+               )}
+
+              {/* Action-specific content */}
+              {settlementModalAction === "approve" && (
+                <div className="space-y-4 border-t pt-4">
+                  <h4 className="font-semibold">Approval Details</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                                         <div>
+                       <Label htmlFor="amount-paid">Amount to Pay (₹)</Label>
+                       <Input
+                         id="amount-paid"
+                         type="number"
+                         step="0.01"
+                         max={currentSettlement.amount}
+                         value={approvalData.amountPaid}
+                         onChange={(e) => setApprovalData({...approvalData, amountPaid: e.target.value})}
+                         placeholder="Enter amount to pay"
+                         className={
+                           approvalData.amountPaid && parseFloat(approvalData.amountPaid) > currentSettlement.amount
+                             ? "border-red-500 focus:border-red-500 focus:ring-red-500"
+                             : ""
+                         }
+                       />
+                       <p className="text-xs text-gray-500 mt-1">Max: ₹{currentSettlement.amount}</p>
+                       {approvalData.amountPaid && parseFloat(approvalData.amountPaid) > currentSettlement.amount && (
+                         <p className="text-xs text-red-500 mt-1">Amount cannot exceed requested amount</p>
+                       )}
+                     </div>
+                    <div>
+                      <Label htmlFor="transaction-id-approval">Transaction ID</Label>
+                      <Input
+                        id="transaction-id-approval"
+                        value={approvalData.transactionId}
+                        onChange={(e) => setApprovalData({...approvalData, transactionId: e.target.value})}
+                        placeholder="Enter transaction ID"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="payment-proof">Payment Proof (Screenshot)</Label>
+                    <Input
+                      id="payment-proof"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        setApprovalData({...approvalData, paymentProof: file || null});
+                      }}
+                      className="cursor-pointer"
+                    />
+                    {approvalData.paymentProof && (
+                      <p className="text-sm text-green-600 mt-1">✓ Proof uploaded: {approvalData.paymentProof.name}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {settlementModalAction === "reject" && (
+                <div className="space-y-4 border-t pt-4">
+                  <h4 className="font-semibold">Rejection Details</h4>
+                  <div>
+                    <Label htmlFor="rejection-reason-detailed">Rejection Reason</Label>
+                    <Textarea
+                      id="rejection-reason-detailed"
+                      value={settlementRejectionReason}
+                      onChange={(e) => setSettlementRejectionReason(e.target.value)}
+                      placeholder="Please provide a detailed reason for rejecting this settlement request..."
+                      rows={4}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex justify-end gap-2 border-t pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowSettlementDialog(false)}
+                >
+                  Cancel
+                </Button>
+                {settlementModalAction !== "view" && (
+                  <Button
+                    onClick={submitSettlementAction}
+                    className={settlementModalAction === "approve" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"}
+                  >
+                    {settlementModalAction === "approve" ? "Approve Settlement" : "Reject Settlement"}
+                  </Button>
+                )}
+              </div>
+            </div>
+                     )}
+         </DialogContent>
+       </Dialog>
+
+      {/* Payment Proof Dialog */}
+      <Dialog open={showProofDialog} onOpenChange={setShowProofDialog}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Payment Proof</DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center">
+            {selectedProofUrl && (
+              <img 
+                src={selectedProofUrl} 
+                alt="Payment Proof" 
+                className="max-w-full max-h-96 object-contain"
+                onLoad={() => {
+                  // Clean up object URL after image loads
+                  setTimeout(() => {
+                    if (selectedProofUrl) {
+                      URL.revokeObjectURL(selectedProofUrl);
+                    }
+                  }, 1000);
+                }}
+              />
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
