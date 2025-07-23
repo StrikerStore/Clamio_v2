@@ -23,6 +23,10 @@ import {
   Download,
   DollarSign,
   Eye,
+  IndianRupee,
+  CreditCard,
+  History,
+  FileText,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -30,108 +34,108 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { apiClient } from "@/lib/api"
 
 // Mock data - Version 4
-const mockOrders = [
-  {
-    id: "ORD-001",
-    customer: "John Doe",
-    product: "Wireless Headphones",
-    value: "$299.99",
-    status: "unclaimed",
-    sla: "2 days",
-    priority: "high",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 1,
-    lastUpdated: new Date(Date.now() - 2 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-002",
-    customer: "Jane Smith",
-    product: "Smart Watch",
-    value: "$199.99",
-    status: "unclaimed",
-    sla: "1 day",
-    priority: "urgent",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 2,
-    lastUpdated: new Date(Date.now() - 10 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-003",
-    customer: "Bob Johnson",
-    product: "Bluetooth Speaker",
-    value: "$89.99",
-    status: "in_pack",
-    sla: "3 days",
-    priority: "medium",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 1,
-    lastUpdated: new Date(Date.now() - 5 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-004",
-    customer: "Alice Brown",
-    product: "Phone Case",
-    value: "$29.99",
-    status: "handover",
-    sla: "2 days",
-    priority: "low",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 0,
-    lastUpdated: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
-    handoverDate: "2024-01-15",
-    pickupDate: "2024-01-16",
-  },
-  {
-    id: "ORD-005",
-    customer: "Charlie Wilson",
-    product: "Tablet Stand",
-    value: "$49.99",
-    status: "in_pack",
-    sla: "1 day",
-    priority: "high",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 0,
-    lastUpdated: new Date(Date.now() - 6 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-006",
-    customer: "David Lee",
-    product: "Gaming Mouse",
-    value: "$79.99",
-    status: "handover",
-    sla: "2 days",
-    priority: "medium",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 1,
-    lastUpdated: new Date(Date.now() - 8 * 60 * 60 * 1000),
-    handoverDate: "2024-01-14",
-    pickupDate: "2024-01-15",
-  },
-  {
-    id: "ORD-007",
-    customer: "Emma Davis",
-    product: "USB Cable",
-    value: "$19.99",
-    status: "unclaimed",
-    sla: "3 days",
-    priority: "low",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 0,
-    lastUpdated: new Date(Date.now() - 3 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-008",
-    customer: "Frank Miller",
-    product: "Laptop Charger",
-    value: "$59.99",
-    status: "in_pack",
-    sla: "1 day",
-    priority: "urgent",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 1,
-    lastUpdated: new Date(Date.now() - 4 * 60 * 60 * 1000),
-  },
-]
+// const mockOrders = [
+//   {
+//     id: "ORD-001",
+//     customer: "John Doe",
+//     product: "Wireless Headphones",
+//     value: "$299.99",
+//     status: "unclaimed",
+//     sla: "2 days",
+//     priority: "high",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 1,
+//     lastUpdated: new Date(Date.now() - 2 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-002",
+//     customer: "Jane Smith",
+//     product: "Smart Watch",
+//     value: "$199.99",
+//     status: "unclaimed",
+//     sla: "1 day",
+//     priority: "urgent",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 2,
+//     lastUpdated: new Date(Date.now() - 10 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-003",
+//     customer: "Bob Johnson",
+//     product: "Bluetooth Speaker",
+//     value: "$89.99",
+//     status: "in_pack",
+//     sla: "3 days",
+//     priority: "medium",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 1,
+//     lastUpdated: new Date(Date.now() - 5 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-004",
+//     customer: "Alice Brown",
+//     product: "Phone Case",
+//     value: "$29.99",
+//     status: "handover",
+//     sla: "2 days",
+//     priority: "low",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 0,
+//     lastUpdated: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+//     handoverDate: "2024-01-15",
+//     pickupDate: "2024-01-16",
+//   },
+//   {
+//     id: "ORD-005",
+//     customer: "Charlie Wilson",
+//     product: "Tablet Stand",
+//     value: "$49.99",
+//     status: "in_pack",
+//     sla: "1 day",
+//     priority: "high",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 0,
+//     lastUpdated: new Date(Date.now() - 6 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-006",
+//     customer: "David Lee",
+//     product: "Gaming Mouse",
+//     value: "$79.99",
+//     status: "handover",
+//     sla: "2 days",
+//     priority: "medium",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 1,
+//     lastUpdated: new Date(Date.now() - 8 * 60 * 60 * 1000),
+//     handoverDate: "2024-01-14",
+//     pickupDate: "2024-01-15",
+//   },
+//   {
+//     id: "ORD-007",
+//     customer: "Emma Davis",
+//     product: "USB Cable",
+//     value: "$19.99",
+//     status: "unclaimed",
+//     sla: "3 days",
+//     priority: "low",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 0,
+//     lastUpdated: new Date(Date.now() - 3 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-008",
+//     customer: "Frank Miller",
+//     product: "Laptop Charger",
+//     value: "$59.99",
+//     status: "in_pack",
+//     sla: "1 day",
+//     priority: "urgent",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 1,
+//     lastUpdated: new Date(Date.now() - 4 * 60 * 60 * 1000),
+//   },
+// ]
 
 export function VendorDashboard() {
   const { user, logout } = useAuth()
@@ -141,24 +145,6 @@ export function VendorDashboard() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [showRevenueModal, setShowRevenueModal] = useState(false)
-  const [settlementHistory, setSettlementHistory] = useState([
-    {
-      id: "1",
-      date: "2024-01-10",
-      amount: "$1,250",
-      status: "completed",
-      proof: "payment_proof_001.jpg",
-      transactionId: "TXN123456789",
-    },
-    {
-      id: "2",
-      date: "2024-01-05",
-      amount: "$890",
-      status: "pending",
-      proof: null,
-      transactionId: null,
-    },
-  ])
   const [labelFormat, setLabelFormat] = useState("thermal")
   const [selectedOrdersForDownload, setSelectedOrdersForDownload] = useState<string[]>([])
   const [upiId, setUpiId] = useState("")
@@ -172,6 +158,21 @@ export function VendorDashboard() {
   }>(null)
   const [addressLoading, setAddressLoading] = useState(false)
   const [addressError, setAddressError] = useState("")
+  const [orders, setOrders] = useState<any[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
+
+  // Settlement-related state
+  const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
+  const [paymentsLoading, setPaymentsLoading] = useState(false)
+  const [settlementLoading, setSettlementLoading] = useState(false)
+  const [settlements, setSettlements] = useState<any[]>([])
+  const [transactions, setTransactions] = useState<any[]>([])
+  const [showTransactionHistory, setShowTransactionHistory] = useState(false)
+  const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null)
+  const [showProofDialog, setShowProofDialog] = useState(false)
+  const [selectedSettlementForView, setSelectedSettlementForView] = useState<any>(null)
+  const [showViewRequestDialog, setShowViewRequestDialog] = useState(false)
 
   useEffect(() => {
     async function fetchAddress() {
@@ -204,16 +205,79 @@ export function VendorDashboard() {
         setAddressLoading(false);
       }
     }
+
+    async function fetchPayments() {
+      setPaymentsLoading(true);
+      try {
+        const response = await apiClient.getVendorPayments();
+        if (response.success) {
+          setPayments(response.data);
+        }
+      } catch (err) {
+        console.error("Error fetching payments:", err);
+      } finally {
+        setPaymentsLoading(false);
+      }
+    }
+
+    async function fetchSettlements() {
+      try {
+        const response = await apiClient.getVendorSettlements();
+        if (response.success) {
+          setSettlements(response.data);
+        }
+      } catch (err) {
+        console.error("Error fetching settlements:", err);
+      }
+    }
+
+    async function fetchTransactions() {
+      try {
+        const response = await apiClient.getVendorTransactions();
+        if (response.success) {
+          setTransactions(response.data);
+        }
+      } catch (err) {
+        console.error("Error fetching transactions:", err);
+      }
+    }
     
     console.log("useEffect: User object:", user);
     console.log("useEffect: User role:", user?.role);
     if (user?.role === "vendor") {
-      console.log("useEffect: User is vendor, calling fetchAddress");
-      fetchAddress()
+      console.log("useEffect: User is vendor, calling fetch functions");
+      fetchAddress();
+      fetchPayments();
+      fetchSettlements();
+      fetchTransactions();
     } else {
-      console.log("useEffect: User is not a vendor, skipping fetchAddress");
+      console.log("useEffect: User is not a vendor, skipping fetch functions");
     }
   }, [user])
+
+  useEffect(() => {
+    async function fetchOrders() {
+      setOrdersLoading(true);
+      setOrdersError("");
+      try {
+        const response = await apiClient.getOrders();
+        if (response.success && Array.isArray(response.orders)) {
+          setOrders(response.orders);
+        } else if (response.success && response.orders) {
+          setOrders([response.orders]);
+        } else {
+          setOrders([]);
+          setOrdersError("No orders found");
+        }
+      } catch (err: any) {
+        setOrdersError(err.message || "Failed to fetch orders");
+        setOrders([]);
+      } finally {
+        setOrdersLoading(false);
+      }
+    }
+    fetchOrders();
+  }, []);
 
   const handleClaimOrder = (orderId: string) => {
     toast({
@@ -296,41 +360,88 @@ export function VendorDashboard() {
 
   // Filter orders based on active tab and search/status filters
   const getFilteredOrdersForTab = (tab: string) => {
-    let baseOrders = mockOrders
-
-    // Filter by tab first
+    let baseOrders = orders;
+    // You may need to map backend fields to UI fields here
+    // For now, treat all as "unclaimed" for All Orders
     switch (tab) {
       case "all-orders":
-        baseOrders = mockOrders.filter((order) => order.status === "unclaimed")
-        break
+        baseOrders = orders;
+        break;
       case "my-orders":
-        baseOrders = mockOrders.filter((order) => order.status === "in_pack")
-        break
+        baseOrders = [];
+        break;
       case "handover":
-        baseOrders = mockOrders.filter((order) => order.status === "handover")
-        break
+        baseOrders = [];
+        break;
       default:
-        baseOrders = mockOrders
+        baseOrders = orders;
+    }
+    // Remove searchTerm filtering
+    return baseOrders;
+  }
+
+  const handleClaimRevenue = async () => {
+    if (!upiId.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid UPI ID",
+        variant: "destructive",
+      });
+      return;
     }
 
-    // Then apply search and status filters
-    return baseOrders.filter((order) => {
-      const matchesSearch =
-        order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.product.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = statusFilter === "all" || order.status === statusFilter
-      return matchesSearch && matchesStatus
-    })
-  }
+    setSettlementLoading(true);
+    try {
+      const response = await apiClient.createSettlementRequest(upiId.trim());
+      if (response.success) {
+        toast({
+          title: "Settlement Request Created",
+          description: "Your settlement request has been submitted to admin",
+        });
+        setUpiId("");
+        setShowRevenueModal(false);
+        // Refresh settlements
+        const settlementsResponse = await apiClient.getVendorSettlements();
+        if (settlementsResponse.success) {
+          setSettlements(settlementsResponse.data);
+        }
+      } else {
+        toast({
+          title: "Error",
+          description: response.message || "Failed to create settlement request",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to create settlement request",
+        variant: "destructive",
+      });
+    } finally {
+      setSettlementLoading(false);
+    }
+  };
 
-  const handleClaimRevenue = () => {
-    toast({
-      title: "Revenue Claim Requested",
-      description: "Your settlement request has been submitted to admin",
-    })
-    setShowRevenueModal(false)
-  }
+  const handleViewProof = async (filename: string) => {
+    try {
+      const blob = await apiClient.getPaymentProof(filename);
+      const url = URL.createObjectURL(blob);
+      setSelectedProofUrl(url);
+      setShowProofDialog(true);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load payment proof",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleViewRequest = (settlement: any) => {
+    setSelectedSettlementForView(settlement);
+    setShowViewRequestDialog(true);
+  };
 
   const handleRequestReverse = (orderId: string) => {
     toast({
@@ -395,7 +506,7 @@ export function VendorDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header - Single Row Layout */}
-      <div className="bg-white shadow-sm border-b sticky top-0 z-50">
+      <div className="bg-white shadow-sm border-b sticky top-0 z-50 w-full">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between py-4 gap-4">
             {/* Dashboard Name and Welcome */}
@@ -446,8 +557,8 @@ export function VendorDashboard() {
                   <Package className="w-6 h-6 text-blue-600" />
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">{mockOrders.length}</p>
+                  <p className="text-sm font-medium text-gray-600">All Orders</p>
+                  <p className="text-2xl font-bold text-gray-900">{orders.length}</p>
                 </div>
               </div>
             </CardContent>
@@ -462,7 +573,7 @@ export function VendorDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Unclaimed</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {mockOrders.filter((o) => o.status === "unclaimed").length}
+                    {orders.filter((o) => o.status === "unclaimed").length}
                   </p>
                 </div>
               </div>
@@ -478,7 +589,7 @@ export function VendorDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">My Orders</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {mockOrders.filter((o) => o.status === "in_pack").length}
+                    {orders.filter((o) => o.status === "in_pack").length}
                   </p>
                 </div>
               </div>
@@ -489,11 +600,13 @@ export function VendorDashboard() {
             <CardContent className="p-6">
               <div className="flex items-center">
                 <div className="p-2 bg-purple-100 rounded-lg">
-                  <Upload className="w-6 h-6 text-purple-600" />
+                  <IndianRupee className="w-6 h-6 text-purple-600" />
                 </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Revenue (Click to Claim)</p>
-                  <p className="text-2xl font-bold text-gray-900">$2,847</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {paymentsLoading ? "Loading..." : payments ? `₹${payments.currentPayment.toFixed(2)}` : "₹0.00"}
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -512,18 +625,18 @@ export function VendorDashboard() {
               <div className="sticky top-20 bg-white z-40 pb-4 border-b mb-4">
                 <TabsList className="grid w-full grid-cols-3 mb-6">
                   <TabsTrigger value="all-orders">
-                    All Orders ({mockOrders.filter((o) => o.status === "unclaimed").length})
+                    All Orders ({orders.length})
                   </TabsTrigger>
                   <TabsTrigger value="my-orders">
-                    My Orders ({mockOrders.filter((o) => o.status === "in_pack").length})
+                    My Orders ({orders.filter((o) => o.status === "in_pack").length})
                   </TabsTrigger>
                   <TabsTrigger value="handover">
-                    Handover ({mockOrders.filter((o) => o.status === "handover").length})
+                    Handover ({orders.filter((o) => o.status === "handover").length})
                   </TabsTrigger>
                 </TabsList>
 
                 {/* Filters */}
-                <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                <div className="flex flex-col sm:flex-row gap-4 mb-6 items-center">
                   <div className="flex-1">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -547,22 +660,11 @@ export function VendorDashboard() {
                       <SelectItem value="handover">Handover</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button onClick={() => handleBulkClaimOrders()} disabled={selectedUnclaimedOrders.length === 0} className="h-10">
+                    <Package className="w-4 h-4 mr-2" />
+                    Claim Selected ({selectedUnclaimedOrders.length})
+                  </Button>
                 </div>
-
-                {/* Tab-specific Bulk Actions */}
-                {activeTab === "all-orders" && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Bulk Actions</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Button onClick={() => handleBulkClaimOrders()} disabled={selectedUnclaimedOrders.length === 0}>
-                        <Package className="w-4 h-4 mr-2" />
-                        Claim Selected ({selectedUnclaimedOrders.length})
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
 
                 {activeTab === "my-orders" && (
                   <Card>
@@ -612,7 +714,7 @@ export function VendorDashboard() {
                               onChange={(e) => {
                                 const unclaimedOrders = getFilteredOrdersForTab("all-orders")
                                 if (e.target.checked) {
-                                  setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.id))
+                                  setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.order_id))
                                 } else {
                                   setSelectedUnclaimedOrders([])
                                 }
@@ -625,27 +727,25 @@ export function VendorDashboard() {
                           </TableHead>
                           <TableHead>Image</TableHead>
                           <TableHead>Order ID</TableHead>
-                          <TableHead>Customer</TableHead>
+                          <TableHead>Order Date</TableHead>
                           <TableHead>Product</TableHead>
+                          <TableHead>Product Code</TableHead>
                           <TableHead>Value</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Priority</TableHead>
-                          <TableHead>SLA</TableHead>
                           <TableHead>Action</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {getFilteredOrdersForTab("all-orders").map((order) => (
-                          <TableRow key={order.id}>
+                          <TableRow key={order.order_id}>
                             <TableCell>
                               <input
                                 type="checkbox"
-                                checked={selectedUnclaimedOrders.includes(order.id)}
+                                checked={selectedUnclaimedOrders.includes(order.order_id)}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.id])
+                                    setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.order_id])
                                   } else {
-                                    setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.id))
+                                    setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.order_id))
                                   }
                                 }}
                               />
@@ -653,19 +753,17 @@ export function VendorDashboard() {
                             <TableCell>
                               <img
                                 src={order.image || "/placeholder.svg"}
-                                alt={order.product}
+                                alt={order.product_name}
                                 className="w-12 h-12 rounded-lg object-cover"
                               />
                             </TableCell>
-                            <TableCell className="font-medium">{order.id}</TableCell>
-                            <TableCell>{order.customer}</TableCell>
-                            <TableCell>{order.product}</TableCell>
-                            <TableCell>{order.value}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
-                            <TableCell>{getPriorityBadge(order.priority)}</TableCell>
-                            <TableCell>{order.sla}</TableCell>
+                            <TableCell className="font-medium">{order.order_id}</TableCell>
+                            <TableCell>{order.order_date}</TableCell>
+                            <TableCell>{order.product_name}</TableCell>
+                            <TableCell>{order.product_code}</TableCell>
+                            <TableCell>{order.value || "-"}</TableCell>
                             <TableCell>
-                              <Button size="sm" onClick={() => handleClaimOrder(order.id)}>
+                              <Button size="sm" onClick={() => handleClaimOrder(order.order_id)}>
                                 Claim
                               </Button>
                             </TableCell>
@@ -815,18 +913,52 @@ export function VendorDashboard() {
       </div>
 
       <Dialog open={showRevenueModal} onOpenChange={setShowRevenueModal}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Revenue Management</DialogTitle>
             <DialogDescription>Claim your revenue and view settlement history</DialogDescription>
           </DialogHeader>
           <div className="space-y-6">
+            {/* Payment Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center text-green-600">
+                    <CreditCard className="w-5 h-5 mr-2" />
+                    Current Payment (Eligible)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-green-600">
+                    {paymentsLoading ? "Loading..." : payments ? `₹${payments.currentPayment.toFixed(2)}` : "₹0.00"}
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">From handover orders</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center text-blue-600">
+                    <Clock className="w-5 h-5 mr-2" />
+                    Future Payment (Pending)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-blue-600">
+                    {paymentsLoading ? "Loading..." : payments ? `₹${payments.futurePayment.toFixed(2)}` : "₹0.00"}
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">From packed orders</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Settlement Request */}
             <Card>
               <CardHeader>
-                <CardTitle>Settlement Request</CardTitle>
+                <CardTitle>Request Settlement</CardTitle>
+                <CardDescription>Only current payment amount is eligible for settlement</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="text-3xl font-bold text-green-600">$2,847.00</div>
                 <div>
                   <Label htmlFor="upi-id">UPI ID for Settlement</Label>
                   <Input
@@ -836,51 +968,271 @@ export function VendorDashboard() {
                     onChange={(e) => setUpiId(e.target.value)}
                   />
                 </div>
-                <Button onClick={handleClaimRevenue} className="w-full" disabled={!upiId.trim()}>
-                  <DollarSign className="w-4 h-4 mr-2" />
-                  Request Settlement
+                <Button 
+                  onClick={handleClaimRevenue} 
+                  className="w-full" 
+                  disabled={!upiId.trim() || settlementLoading || !payments || payments.currentPayment <= 0}
+                >
+                  <IndianRupee className="w-4 h-4 mr-2" />
+                  {settlementLoading ? "Processing..." : `Request Settlement (₹${payments ? payments.currentPayment.toFixed(2) : '0.00'})`}
                 </Button>
               </CardContent>
             </Card>
 
+            {/* Settlement History */}
             <Card>
               <CardHeader>
-                <CardTitle>Settlement History</CardTitle>
+                <div className="flex justify-between items-center">
+                  <CardTitle>Settlement History</CardTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowTransactionHistory(!showTransactionHistory)}
+                  >
+                    <History className="w-4 h-4 mr-2" />
+                    {showTransactionHistory ? "Hide Transactions" : "Show Transactions"}
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {settlementHistory.map((settlement) => (
-                    <div key={settlement.id} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div>
-                        <p className="font-medium">{settlement.amount}</p>
-                        <p className="text-sm text-gray-500">{settlement.date}</p>
-                        {settlement.transactionId && (
-                          <p className="text-xs text-blue-600">TXN: {settlement.transactionId}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Badge
-                          className={
-                            settlement.status === "completed"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-yellow-100 text-yellow-800"
-                          }
-                        >
-                          {settlement.status.toUpperCase()}
-                        </Badge>
-                        {settlement.proof && (
-                          <Button size="sm" variant="outline">
+                  {settlements.length > 0 ? (
+                    settlements.map((settlement: any) => (
+                      <div key={settlement.id} className="flex items-center justify-between p-4 border rounded-lg">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">₹{settlement.amount}</p>
+                            {settlement.status === "approved" && (
+                              <Badge 
+                                variant="secondary"
+                                className={
+                                  settlement.amountPaid && parseFloat(settlement.amountPaid) === parseFloat(settlement.amount)
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-orange-100 text-orange-800"
+                                }
+                              >
+                                {settlement.amountPaid && parseFloat(settlement.amountPaid) === parseFloat(settlement.amount) ? "Full" : "Partial"}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-500">
+                            {new Date(settlement.createdAt).toLocaleDateString('en-IN')}
+                          </p>
+                          {settlement.status === "approved" && settlement.amountPaid && (
+                            <p className="text-sm text-green-600">Settled: ₹{settlement.amountPaid}</p>
+                          )}
+                          {settlement.rejectionReason && (
+                            <p className="text-xs text-red-600">Reason: {settlement.rejectionReason}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Badge
+                            className={
+                              settlement.status === "approved"
+                                ? "bg-green-100 text-green-800"
+                                : settlement.status === "rejected"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-yellow-100 text-yellow-800"
+                            }
+                          >
+                            {settlement.status.toUpperCase()}
+                          </Badge>
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => handleViewRequest(settlement)}
+                          >
                             <Eye className="w-4 h-4 mr-1" />
-                            View Proof
+                            View Request
                           </Button>
-                        )}
+                          {settlement.paymentProofPath && (
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => handleViewProof(settlement.paymentProofPath)}
+                            >
+                              <FileText className="w-4 h-4 mr-1" />
+                              View Proof
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-gray-500 text-center py-4">No settlement requests yet</p>
+                  )}
                 </div>
+
+                {/* Transaction History */}
+                {showTransactionHistory && (
+                  <div className="mt-6 border-t pt-4">
+                    <h4 className="font-medium mb-3">Transaction History</h4>
+                    <div className="space-y-2">
+                      {transactions.length > 0 ? (
+                        transactions.map((transaction: any) => (
+                          <div key={transaction.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div>
+                              <p className="font-medium text-green-600">₹{transaction.amount}</p>
+                              <p className="text-sm text-gray-500">
+                                {new Date(transaction.createdAt).toLocaleDateString('en-IN')}
+                              </p>
+                              <p className="text-xs text-blue-600">TXN: {transaction.transactionId}</p>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Badge className="bg-green-100 text-green-800">
+                                {transaction.status.toUpperCase()}
+                              </Badge>
+                              {transaction.paymentProofPath && (
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleViewProof(transaction.paymentProofPath)}
+                                >
+                                  <Eye className="w-4 h-4 mr-1" />
+                                  Proof
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-gray-500 text-center py-4">No completed transactions yet</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Proof Dialog */}
+      <Dialog open={showProofDialog} onOpenChange={setShowProofDialog}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Payment Proof</DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center">
+            {selectedProofUrl && (
+              <img 
+                src={selectedProofUrl} 
+                alt="Payment Proof" 
+                className="max-w-full max-h-96 object-contain"
+                onLoad={() => {
+                  // Clean up object URL after image loads
+                  setTimeout(() => {
+                    if (selectedProofUrl) {
+                      URL.revokeObjectURL(selectedProofUrl);
+                    }
+                  }, 1000);
+                }}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Settlement Request Dialog */}
+      <Dialog open={showViewRequestDialog} onOpenChange={setShowViewRequestDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Settlement Request Details</DialogTitle>
+            <DialogDescription>Complete details of the settlement request</DialogDescription>
+          </DialogHeader>
+          
+          {selectedSettlementForView && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="font-semibold">Settlement ID</Label>
+                  <p className="font-mono">{selectedSettlementForView.id}</p>
+                </div>
+                <div>
+                  <Label className="font-semibold">Amount (₹)</Label>
+                  <p className="text-xl font-bold text-green-600">₹{selectedSettlementForView.amount}</p>
+                </div>
+                <div>
+                  <Label className="font-semibold">Request Date</Label>
+                  <p>{new Date(selectedSettlementForView.createdAt).toLocaleDateString('en-IN')}</p>
+                </div>
+                <div>
+                  <Label className="font-semibold">Status</Label>
+                  <Badge
+                    className={
+                      selectedSettlementForView.status === "approved"
+                        ? "bg-green-100 text-green-800"
+                        : selectedSettlementForView.status === "rejected"
+                        ? "bg-red-100 text-red-800"
+                        : "bg-yellow-100 text-yellow-800"
+                    }
+                  >
+                    {selectedSettlementForView.status.toUpperCase()}
+                  </Badge>
+                </div>
+                <div>
+                  <Label className="font-semibold">UPI ID</Label>
+                  <p className="font-mono">{selectedSettlementForView.upiId}</p>
+                </div>
+                <div>
+                  <Label className="font-semibold">Number of Orders</Label>
+                  <p>{selectedSettlementForView.numberOfOrders}</p>
+                </div>
+                {selectedSettlementForView.status === "approved" && (
+                  <>
+                    <div>
+                      <Label className="font-semibold">Payment Status</Label>
+                      <Badge 
+                        className={
+                          selectedSettlementForView.amountPaid && parseFloat(selectedSettlementForView.amountPaid) === parseFloat(selectedSettlementForView.amount)
+                            ? "bg-green-100 text-green-800"
+                            : "bg-orange-100 text-orange-800"
+                        }
+                      >
+                        {selectedSettlementForView.amountPaid && parseFloat(selectedSettlementForView.amountPaid) === parseFloat(selectedSettlementForView.amount) ? "Fully Settled" : "Partially Settled"}
+                      </Badge>
+                    </div>
+                    <div>
+                      <Label className="font-semibold">Paid Amount</Label>
+                      <p className="text-xl font-bold text-green-600">₹{selectedSettlementForView.amountPaid}</p>
+                    </div>
+                    <div>
+                      <Label className="font-semibold">Transaction ID</Label>
+                      <p className="font-mono">{selectedSettlementForView.transactionId}</p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Order IDs */}
+              <div>
+                <Label className="font-semibold">Order IDs</Label>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {selectedSettlementForView.orderIds && selectedSettlementForView.orderIds.split(',').map((orderId: string) => (
+                    <Badge key={orderId.trim()} variant="outline">
+                      {orderId.trim()}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              {selectedSettlementForView.rejectionReason && (
+                <div>
+                  <Label className="font-semibold">Rejection Reason</Label>
+                  <p className="text-red-600 bg-red-50 p-3 rounded-lg">{selectedSettlementForView.rejectionReason}</p>
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowViewRequestDialog(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

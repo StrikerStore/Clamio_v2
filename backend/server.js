@@ -10,10 +10,14 @@ const path = require('path');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const shipwayRoutes = require('./routes/shipway');
+const ordersRoutes = require('./routes/orders');
+const settlementRoutes = require('./routes/settlements');
 
 // Import database to initialize it
 const database = require('./config/database');
 const fetchAndSaveShopifyProducts = require('./services/shopifyProductFetcher');
+const shipwayService = require('./services/shipwayService');
+const cron = require('node-cron');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -100,6 +104,9 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/shipway', shipwayRoutes);
+app.use('/api/orders', ordersRoutes);
+app.use('/api/settlements', settlementRoutes);
+
 
 /**
  * API Documentation Endpoint
@@ -251,6 +258,25 @@ app.listen(PORT, () => {
     },
     path.join(__dirname, 'data', 'products.xlsx')
   );
+
+  // Start Shipway order sync cron job (every hour)
+  cron.schedule('0 * * * *', async () => {
+    try {
+      await shipwayService.syncOrdersToExcel();
+      console.log('[Shipway Sync] Orders synced to Excel.');
+    } catch (err) {
+      console.error('[Shipway Sync] Failed:', err.message);
+    }
+  });
+  // Run once immediately on startup
+  (async () => {
+    try {
+      await shipwayService.syncOrdersToExcel();
+      console.log('[Shipway Sync] Orders synced to Excel (startup).');
+    } catch (err) {
+      console.error('[Shipway Sync] Startup sync failed:', err.message);
+    }
+  })();
 });
 
 module.exports = app; 
