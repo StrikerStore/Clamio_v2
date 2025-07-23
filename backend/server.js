@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -14,6 +15,7 @@ const settlementRoutes = require('./routes/settlements');
 
 // Import database to initialize it
 const database = require('./config/database');
+const fetchAndSaveShopifyProducts = require('./services/shopifyProductFetcher');
 const shipwayService = require('./services/shipwayService');
 const cron = require('node-cron');
 
@@ -244,6 +246,18 @@ app.listen(PORT, () => {
   
   // Log default superadmin credentials
   console.log('👤 Default superadmin: superadmin@example.com / password123');
+  console.log(process.env.SHOPIFY_ACCESS_TOKEN);
+  console.log(process.env.SHOPIFY_PRODUCTS_API_URL);
+
+  // Fetch Shopify products on startup
+  fetchAndSaveShopifyProducts(
+    process.env.SHOPIFY_PRODUCTS_API_URL || 'https://seq5t1-mz.myshopify.com/admin/api/2025-07/graphql.json',
+    {
+      'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+      'Content-Type': 'application/json',
+    },
+    path.join(__dirname, 'data', 'products.xlsx')
+  );
 
   // Start Shipway order sync cron job (every hour)
   cron.schedule('0 * * * *', async () => {
