@@ -34,108 +34,108 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { apiClient } from "@/lib/api"
 
 // Mock data - Version 4
-const mockOrders = [
-  {
-    id: "ORD-001",
-    customer: "John Doe",
-    product: "Wireless Headphones",
-    value: "$299.99",
-    status: "unclaimed",
-    sla: "2 days",
-    priority: "high",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 1,
-    lastUpdated: new Date(Date.now() - 2 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-002",
-    customer: "Jane Smith",
-    product: "Smart Watch",
-    value: "$199.99",
-    status: "unclaimed",
-    sla: "1 day",
-    priority: "urgent",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 2,
-    lastUpdated: new Date(Date.now() - 10 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-003",
-    customer: "Bob Johnson",
-    product: "Bluetooth Speaker",
-    value: "$89.99",
-    status: "in_pack",
-    sla: "3 days",
-    priority: "medium",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 1,
-    lastUpdated: new Date(Date.now() - 5 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-004",
-    customer: "Alice Brown",
-    product: "Phone Case",
-    value: "$29.99",
-    status: "handover",
-    sla: "2 days",
-    priority: "low",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 0,
-    lastUpdated: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
-    handoverDate: "2024-01-15",
-    pickupDate: "2024-01-16",
-  },
-  {
-    id: "ORD-005",
-    customer: "Charlie Wilson",
-    product: "Tablet Stand",
-    value: "$49.99",
-    status: "in_pack",
-    sla: "1 day",
-    priority: "high",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 0,
-    lastUpdated: new Date(Date.now() - 6 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-006",
-    customer: "David Lee",
-    product: "Gaming Mouse",
-    value: "$79.99",
-    status: "handover",
-    sla: "2 days",
-    priority: "medium",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 1,
-    lastUpdated: new Date(Date.now() - 8 * 60 * 60 * 1000),
-    handoverDate: "2024-01-14",
-    pickupDate: "2024-01-15",
-  },
-  {
-    id: "ORD-007",
-    customer: "Emma Davis",
-    product: "USB Cable",
-    value: "$19.99",
-    status: "unclaimed",
-    sla: "3 days",
-    priority: "low",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 0,
-    lastUpdated: new Date(Date.now() - 3 * 60 * 60 * 1000),
-  },
-  {
-    id: "ORD-008",
-    customer: "Frank Miller",
-    product: "Laptop Charger",
-    value: "$59.99",
-    status: "in_pack",
-    sla: "1 day",
-    priority: "urgent",
-    image: "/placeholder.svg?height=60&width=60",
-    daysOld: 1,
-    lastUpdated: new Date(Date.now() - 4 * 60 * 60 * 1000),
-  },
-]
+// const mockOrders = [
+//   {
+//     id: "ORD-001",
+//     customer: "John Doe",
+//     product: "Wireless Headphones",
+//     value: "$299.99",
+//     status: "unclaimed",
+//     sla: "2 days",
+//     priority: "high",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 1,
+//     lastUpdated: new Date(Date.now() - 2 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-002",
+//     customer: "Jane Smith",
+//     product: "Smart Watch",
+//     value: "$199.99",
+//     status: "unclaimed",
+//     sla: "1 day",
+//     priority: "urgent",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 2,
+//     lastUpdated: new Date(Date.now() - 10 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-003",
+//     customer: "Bob Johnson",
+//     product: "Bluetooth Speaker",
+//     value: "$89.99",
+//     status: "in_pack",
+//     sla: "3 days",
+//     priority: "medium",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 1,
+//     lastUpdated: new Date(Date.now() - 5 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-004",
+//     customer: "Alice Brown",
+//     product: "Phone Case",
+//     value: "$29.99",
+//     status: "handover",
+//     sla: "2 days",
+//     priority: "low",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 0,
+//     lastUpdated: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+//     handoverDate: "2024-01-15",
+//     pickupDate: "2024-01-16",
+//   },
+//   {
+//     id: "ORD-005",
+//     customer: "Charlie Wilson",
+//     product: "Tablet Stand",
+//     value: "$49.99",
+//     status: "in_pack",
+//     sla: "1 day",
+//     priority: "high",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 0,
+//     lastUpdated: new Date(Date.now() - 6 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-006",
+//     customer: "David Lee",
+//     product: "Gaming Mouse",
+//     value: "$79.99",
+//     status: "handover",
+//     sla: "2 days",
+//     priority: "medium",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 1,
+//     lastUpdated: new Date(Date.now() - 8 * 60 * 60 * 1000),
+//     handoverDate: "2024-01-14",
+//     pickupDate: "2024-01-15",
+//   },
+//   {
+//     id: "ORD-007",
+//     customer: "Emma Davis",
+//     product: "USB Cable",
+//     value: "$19.99",
+//     status: "unclaimed",
+//     sla: "3 days",
+//     priority: "low",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 0,
+//     lastUpdated: new Date(Date.now() - 3 * 60 * 60 * 1000),
+//   },
+//   {
+//     id: "ORD-008",
+//     customer: "Frank Miller",
+//     product: "Laptop Charger",
+//     value: "$59.99",
+//     status: "in_pack",
+//     sla: "1 day",
+//     priority: "urgent",
+//     image: "/placeholder.svg?height=60&width=60",
+//     daysOld: 1,
+//     lastUpdated: new Date(Date.now() - 4 * 60 * 60 * 1000),
+//   },
+// ]
 
 export function VendorDashboard() {
   const { user, logout } = useAuth()
@@ -158,6 +158,9 @@ export function VendorDashboard() {
   }>(null)
   const [addressLoading, setAddressLoading] = useState(false)
   const [addressError, setAddressError] = useState("")
+  const [orders, setOrders] = useState<any[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -252,6 +255,30 @@ export function VendorDashboard() {
     }
   }, [user])
 
+  useEffect(() => {
+    async function fetchOrders() {
+      setOrdersLoading(true);
+      setOrdersError("");
+      try {
+        const response = await apiClient.getOrders();
+        if (response.success && Array.isArray(response.orders)) {
+          setOrders(response.orders);
+        } else if (response.success && response.orders) {
+          setOrders([response.orders]);
+        } else {
+          setOrders([]);
+          setOrdersError("No orders found");
+        }
+      } catch (err: any) {
+        setOrdersError(err.message || "Failed to fetch orders");
+        setOrders([]);
+      } finally {
+        setOrdersLoading(false);
+      }
+    }
+    fetchOrders();
+  }, []);
+
   const handleClaimOrder = (orderId: string) => {
     toast({
       title: "Order Claimed",
@@ -333,32 +360,24 @@ export function VendorDashboard() {
 
   // Filter orders based on active tab and search/status filters
   const getFilteredOrdersForTab = (tab: string) => {
-    let baseOrders = mockOrders
-
-    // Filter by tab first
+    let baseOrders = orders;
+    // You may need to map backend fields to UI fields here
+    // For now, treat all as "unclaimed" for All Orders
     switch (tab) {
       case "all-orders":
-        baseOrders = mockOrders.filter((order) => order.status === "unclaimed")
-        break
+        baseOrders = orders;
+        break;
       case "my-orders":
-        baseOrders = mockOrders.filter((order) => order.status === "in_pack")
-        break
+        baseOrders = [];
+        break;
       case "handover":
-        baseOrders = mockOrders.filter((order) => order.status === "handover")
-        break
+        baseOrders = [];
+        break;
       default:
-        baseOrders = mockOrders
+        baseOrders = orders;
     }
-
-    // Then apply search and status filters
-    return baseOrders.filter((order) => {
-      const matchesSearch =
-        order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.product.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = statusFilter === "all" || order.status === statusFilter
-      return matchesSearch && matchesStatus
-    })
+    // Remove searchTerm filtering
+    return baseOrders;
   }
 
   const handleClaimRevenue = async () => {
@@ -487,7 +506,7 @@ export function VendorDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header - Single Row Layout */}
-      <div className="bg-white shadow-sm border-b sticky top-0 z-50">
+      <div className="bg-white shadow-sm border-b sticky top-0 z-50 w-full">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between py-4 gap-4">
             {/* Dashboard Name and Welcome */}
@@ -538,8 +557,8 @@ export function VendorDashboard() {
                   <Package className="w-6 h-6 text-blue-600" />
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">{mockOrders.length}</p>
+                  <p className="text-sm font-medium text-gray-600">All Orders</p>
+                  <p className="text-2xl font-bold text-gray-900">{orders.length}</p>
                 </div>
               </div>
             </CardContent>
@@ -554,7 +573,7 @@ export function VendorDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Unclaimed</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {mockOrders.filter((o) => o.status === "unclaimed").length}
+                    {orders.filter((o) => o.status === "unclaimed").length}
                   </p>
                 </div>
               </div>
@@ -570,7 +589,7 @@ export function VendorDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">My Orders</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {mockOrders.filter((o) => o.status === "in_pack").length}
+                    {orders.filter((o) => o.status === "in_pack").length}
                   </p>
                 </div>
               </div>
@@ -606,18 +625,18 @@ export function VendorDashboard() {
               <div className="sticky top-20 bg-white z-40 pb-4 border-b mb-4">
                 <TabsList className="grid w-full grid-cols-3 mb-6">
                   <TabsTrigger value="all-orders">
-                    All Orders ({mockOrders.filter((o) => o.status === "unclaimed").length})
+                    All Orders ({orders.length})
                   </TabsTrigger>
                   <TabsTrigger value="my-orders">
-                    My Orders ({mockOrders.filter((o) => o.status === "in_pack").length})
+                    My Orders ({orders.filter((o) => o.status === "in_pack").length})
                   </TabsTrigger>
                   <TabsTrigger value="handover">
-                    Handover ({mockOrders.filter((o) => o.status === "handover").length})
+                    Handover ({orders.filter((o) => o.status === "handover").length})
                   </TabsTrigger>
                 </TabsList>
 
                 {/* Filters */}
-                <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                <div className="flex flex-col sm:flex-row gap-4 mb-6 items-center">
                   <div className="flex-1">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -641,22 +660,11 @@ export function VendorDashboard() {
                       <SelectItem value="handover">Handover</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button onClick={() => handleBulkClaimOrders()} disabled={selectedUnclaimedOrders.length === 0} className="h-10">
+                    <Package className="w-4 h-4 mr-2" />
+                    Claim Selected ({selectedUnclaimedOrders.length})
+                  </Button>
                 </div>
-
-                {/* Tab-specific Bulk Actions */}
-                {activeTab === "all-orders" && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Bulk Actions</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Button onClick={() => handleBulkClaimOrders()} disabled={selectedUnclaimedOrders.length === 0}>
-                        <Package className="w-4 h-4 mr-2" />
-                        Claim Selected ({selectedUnclaimedOrders.length})
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
 
                 {activeTab === "my-orders" && (
                   <Card>
@@ -706,7 +714,7 @@ export function VendorDashboard() {
                               onChange={(e) => {
                                 const unclaimedOrders = getFilteredOrdersForTab("all-orders")
                                 if (e.target.checked) {
-                                  setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.id))
+                                  setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.order_id))
                                 } else {
                                   setSelectedUnclaimedOrders([])
                                 }
@@ -719,27 +727,25 @@ export function VendorDashboard() {
                           </TableHead>
                           <TableHead>Image</TableHead>
                           <TableHead>Order ID</TableHead>
-                          <TableHead>Customer</TableHead>
+                          <TableHead>Order Date</TableHead>
                           <TableHead>Product</TableHead>
+                          <TableHead>Product Code</TableHead>
                           <TableHead>Value</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Priority</TableHead>
-                          <TableHead>SLA</TableHead>
                           <TableHead>Action</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {getFilteredOrdersForTab("all-orders").map((order) => (
-                          <TableRow key={order.id}>
+                          <TableRow key={order.order_id}>
                             <TableCell>
                               <input
                                 type="checkbox"
-                                checked={selectedUnclaimedOrders.includes(order.id)}
+                                checked={selectedUnclaimedOrders.includes(order.order_id)}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.id])
+                                    setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.order_id])
                                   } else {
-                                    setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.id))
+                                    setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.order_id))
                                   }
                                 }}
                               />
@@ -747,19 +753,17 @@ export function VendorDashboard() {
                             <TableCell>
                               <img
                                 src={order.image || "/placeholder.svg"}
-                                alt={order.product}
+                                alt={order.product_name}
                                 className="w-12 h-12 rounded-lg object-cover"
                               />
                             </TableCell>
-                            <TableCell className="font-medium">{order.id}</TableCell>
-                            <TableCell>{order.customer}</TableCell>
-                            <TableCell>{order.product}</TableCell>
-                            <TableCell>{order.value}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
-                            <TableCell>{getPriorityBadge(order.priority)}</TableCell>
-                            <TableCell>{order.sla}</TableCell>
+                            <TableCell className="font-medium">{order.order_id}</TableCell>
+                            <TableCell>{order.order_date}</TableCell>
+                            <TableCell>{order.product_name}</TableCell>
+                            <TableCell>{order.product_code}</TableCell>
+                            <TableCell>{order.value || "-"}</TableCell>
                             <TableCell>
-                              <Button size="sm" onClick={() => handleClaimOrder(order.id)}>
+                              <Button size="sm" onClick={() => handleClaimOrder(order.order_id)}>
                                 Claim
                               </Button>
                             </TableCell>

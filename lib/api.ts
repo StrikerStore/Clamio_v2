@@ -193,6 +193,11 @@ class ApiClient {
     return this.makeRequest(`/shipway/verify-warehouse/${warehouseId}`);
   }
 
+
+  // Orders API for vendor panel
+  async getOrders(): Promise<ApiResponse> {
+    return this.makeRequest('/orders');
+  }
   // Settlement API methods
   
   // Vendor settlement methods
