@@ -13,8 +13,8 @@ const {
  * Handles user authentication and profile management with Basic Auth
  */
 
-// Apply rate limiting to all auth routes
-router.use(rateLimit(5, 15 * 60 * 1000)); // 5 attempts per 15 minutes
+// Apply rate limiting to all auth routes - increased limit for better UX
+router.use(rateLimit(20, 15 * 60 * 1000)); // 20 attempts per 15 minutes
 
 /**
  * @route   POST /api/auth/login

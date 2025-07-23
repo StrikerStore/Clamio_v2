@@ -192,6 +192,146 @@ class ApiClient {
   async verifyWarehouse(warehouseId: string): Promise<ApiResponse> {
     return this.makeRequest(`/shipway/verify-warehouse/${warehouseId}`);
   }
+
+
+  // Orders API for vendor panel
+  async getOrders(): Promise<ApiResponse> {
+    return this.makeRequest('/orders');
+  }
+  // Settlement API methods
+  
+  // Vendor settlement methods
+  async getVendorPayments(): Promise<ApiResponse> {
+    return this.makeRequest('/settlements/vendor/payments');
+  }
+
+  async createSettlementRequest(upiId: string): Promise<ApiResponse> {
+    return this.makeRequest('/settlements/vendor/request', {
+      method: 'POST',
+      body: JSON.stringify({ upiId })
+    });
+  }
+
+  async getVendorSettlements(): Promise<ApiResponse> {
+    return this.makeRequest('/settlements/vendor/history');
+  }
+
+  async getVendorTransactions(): Promise<ApiResponse> {
+    return this.makeRequest('/settlements/vendor/transactions');
+  }
+
+  // Admin settlement methods
+  async getAllSettlements(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    vendorName?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<ApiResponse> {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.vendorName) queryParams.append('vendorName', params.vendorName);
+    if (params?.startDate) queryParams.append('startDate', params.startDate);
+    if (params?.endDate) queryParams.append('endDate', params.endDate);
+
+    const queryString = queryParams.toString();
+    const endpoint = queryString ? `/settlements/admin/all?${queryString}` : '/settlements/admin/all';
+    
+    return this.makeRequest(endpoint);
+  }
+
+  async getSettlementById(settlementId: string): Promise<ApiResponse> {
+    return this.makeRequest(`/settlements/admin/${settlementId}`);
+  }
+
+  async approveSettlement(settlementId: string, amountPaid: number, transactionId: string, paymentProof?: File): Promise<ApiResponse> {
+    const formData = new FormData();
+    formData.append('amountPaid', amountPaid.toString());
+    formData.append('transactionId', transactionId);
+    if (paymentProof) {
+      formData.append('paymentProof', paymentProof);
+    }
+
+    const authHeader = this.getAuthHeader();
+    
+    const config: RequestInit = {
+      method: 'POST',
+      headers: {
+        ...(authHeader && { 'Authorization': authHeader }),
+      },
+      body: formData,
+    };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/settlements/admin/${settlementId}/approve`, config);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || `HTTP error! status: ${response.status}`);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('API request failed:', error);
+      throw error;
+    }
+  }
+
+  async rejectSettlement(settlementId: string, rejectionReason: string): Promise<ApiResponse> {
+    return this.makeRequest(`/settlements/admin/${settlementId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ rejectionReason })
+    });
+  }
+
+  async exportSettlementsCSV(): Promise<Blob> {
+    const authHeader = this.getAuthHeader();
+    
+    const config: RequestInit = {
+      headers: {
+        ...(authHeader && { 'Authorization': authHeader }),
+      },
+    };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/settlements/admin/export-csv`, config);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      return response.blob();
+    } catch (error) {
+      console.error('CSV export failed:', error);
+      throw error;
+    }
+  }
+
+  async getPaymentProof(filename: string): Promise<Blob> {
+    const authHeader = this.getAuthHeader();
+    
+    const config: RequestInit = {
+      headers: {
+        ...(authHeader && { 'Authorization': authHeader }),
+      },
+    };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/settlements/proof/${filename}`, config);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      return response.blob();
+    } catch (error) {
+      console.error('Payment proof fetch failed:', error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

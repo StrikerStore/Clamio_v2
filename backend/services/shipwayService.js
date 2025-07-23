@@ -1,6 +1,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const XLSX = require('xlsx');
 
 /**
  * Shipway API Service
@@ -198,6 +199,109 @@ class ShipwayService {
         error: error.message
       };
     }
+  }
+
+  /**
+   * Fetch all orders with status 'O' from Shipway, update orders.xlsx, and remove missing orders/products.
+   * Each product in an order gets its own row. Creates the Excel file if it doesn't exist.
+   * Logs all API activity.
+   */
+  async syncOrdersToExcel() {
+    const ordersExcelPath = path.join(__dirname, '../data/orders.xlsx');
+    const url = `${this.baseURL}/getorders`;
+    const params = { status: 'O' };
+    let shipwayOrders = [];
+    try {
+      this.logApiActivity({ type: 'shipway-request', url, params, headers: { Authorization: '***' } });
+      const response = await axios.get(url, {
+        params,
+        headers: {
+          'Authorization': this.basicAuthHeader,
+          'Content-Type': 'application/json',
+        },
+        timeout: 20000,
+      });
+      this.logApiActivity({ type: 'shipway-response', status: response.status, dataType: typeof response.data, dataKeys: response.data && typeof response.data === 'object' ? Object.keys(response.data) : undefined });
+      // Accept array, or object with 'orders' array, or single order object, or 'message' array
+      if (response.status !== 200 || !response.data) {
+        throw new Error('Invalid response from Shipway API');
+      }
+      if (Array.isArray(response.data)) {
+        shipwayOrders = response.data;
+      } else if (Array.isArray(response.data.orders)) {
+        shipwayOrders = response.data.orders;
+      } else if (typeof response.data === 'object' && Array.isArray(response.data.message) && response.data.success === 1) {
+        shipwayOrders = response.data.message;
+      } else if (typeof response.data === 'object' && response.data.order_id) {
+        shipwayOrders = [response.data];
+      } else {
+        this.logApiActivity({ type: 'shipway-unexpected-format', data: response.data });
+        throw new Error('Unexpected Shipway API response format');
+      }
+    } catch (error) {
+      this.logApiActivity({ type: 'shipway-error', error: error.message, stack: error.stack });
+      throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
+    }
+
+    // Flatten Shipway orders to one row per product
+    const flatOrders = [];
+    let uniqueIdCounter = 1;
+    for (const order of shipwayOrders) {
+      if (!Array.isArray(order.products)) continue;
+      for (const product of order.products) {
+        flatOrders.push({
+          unique_id: uniqueIdCounter++,
+          order_id: order.order_id,
+          order_date: order.order_date,
+          product_name: product.product,
+          product_code: product.product_code,
+        });
+      }
+    }
+
+    // Read existing Excel data (if file exists)
+    let existingRows = [];
+    if (fs.existsSync(ordersExcelPath)) {
+      try {
+        const workbook = XLSX.readFile(ordersExcelPath);
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        existingRows = XLSX.utils.sheet_to_json(worksheet);
+      } catch (e) {
+        this.logApiActivity({ type: 'excel-read-error', error: e.message });
+      }
+    }
+
+    // Compare and update Excel only if changed
+    const existingKeySet = new Set(existingRows.map(r => `${r.order_id}|${r.product_code}`));
+    const newKeySet = new Set(flatOrders.map(r => `${r.order_id}|${r.product_code}`));
+    let changed = false;
+    // Add new rows
+    for (const row of flatOrders) {
+      if (!existingKeySet.has(`${row.order_id}|${row.product_code}`)) {
+        changed = true;
+        break;
+      }
+    }
+    // Remove missing rows
+    if (!changed) {
+      for (const row of existingRows) {
+        if (!newKeySet.has(`${row.order_id}|${row.product_code}`)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (changed || !fs.existsSync(ordersExcelPath)) {
+      // Write new Excel file
+      const worksheet = XLSX.utils.json_to_sheet(flatOrders);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders');
+      XLSX.writeFile(workbook, ordersExcelPath);
+      this.logApiActivity({ type: 'excel-write', rows: flatOrders.length });
+    } else {
+      this.logApiActivity({ type: 'excel-no-change', rows: flatOrders.length });
+    }
+    return { success: true, count: flatOrders.length };
   }
 
   logApiActivity(activity) {
