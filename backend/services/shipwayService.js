@@ -204,6 +204,7 @@ class ShipwayService {
   /**
    * Fetch all orders with status 'O' from Shipway, update orders.xlsx, and remove missing orders/products.
    * Each product in an order gets its own row. Creates the Excel file if it doesn't exist.
+   * Preserves existing claim data (status, claimed_by, etc.) when syncing new orders.
    * Logs all API activity.
    */
   async syncOrdersToExcel() {
@@ -243,31 +244,74 @@ class ShipwayService {
       throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
     }
 
-    // Flatten Shipway orders to one row per product
-    const flatOrders = [];
-    let uniqueIdCounter = 1;
-    for (const order of shipwayOrders) {
-      if (!Array.isArray(order.products)) continue;
-      for (const product of order.products) {
-        flatOrders.push({
-          unique_id: uniqueIdCounter++,
-          order_id: order.order_id,
-          order_date: order.order_date,
-          product_name: product.product,
-          product_code: product.product_code,
-        });
-      }
-    }
-
     // Read existing Excel data (if file exists)
     let existingRows = [];
+    let existingClaimData = new Map(); // Map to store claim data by order_id|product_code
+    let maxUniqueId = 0;
+    
     if (fs.existsSync(ordersExcelPath)) {
       try {
         const workbook = XLSX.readFile(ordersExcelPath);
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         existingRows = XLSX.utils.sheet_to_json(worksheet);
+        
+        // Build map of existing claim data
+        existingRows.forEach(row => {
+          const key = `${row.order_id}|${row.product_code}`;
+          existingClaimData.set(key, {
+            unique_id: row.unique_id,
+            status: row.status || 'unclaimed',
+            claimed_by: row.claimed_by || '',
+            claimed_at: row.claimed_at || '',
+            last_claimed_by: row.last_claimed_by || '',
+            last_claimed_at: row.last_claimed_at || '',
+            clone_status: row.clone_status || 'not_cloned',
+            cloned_order_id: row.cloned_order_id || '',
+            is_cloned_row: row.is_cloned_row || '',
+            label_downloaded: row.label_downloaded || '',
+            handover_at: row.handover_at || ''
+          });
+          
+          // Track max unique_id for new rows
+          if (row.unique_id && row.unique_id > maxUniqueId) {
+            maxUniqueId = row.unique_id;
+          }
+        });
       } catch (e) {
         this.logApiActivity({ type: 'excel-read-error', error: e.message });
+      }
+    }
+
+    // Flatten Shipway orders to one row per product, preserving existing claim data
+    const flatOrders = [];
+    let uniqueIdCounter = maxUniqueId + 1;
+    
+    for (const order of shipwayOrders) {
+      if (!Array.isArray(order.products)) continue;
+      for (const product of order.products) {
+        const key = `${order.order_id}|${product.product_code}`;
+        const existingClaim = existingClaimData.get(key);
+        
+        const orderRow = {
+          unique_id: existingClaim ? existingClaim.unique_id : uniqueIdCounter++,
+          order_id: order.order_id,
+          order_date: order.order_date,
+          product_name: product.product,
+          product_code: product.product_code,
+          // Preserve existing claim data or use defaults for new orders
+          status: existingClaim ? existingClaim.status : 'unclaimed',
+          claimed_by: existingClaim ? existingClaim.claimed_by : '',
+          claimed_at: existingClaim ? existingClaim.claimed_at : '',
+          last_claimed_by: existingClaim ? existingClaim.last_claimed_by : '',
+          last_claimed_at: existingClaim ? existingClaim.last_claimed_at : '',
+          clone_status: existingClaim ? existingClaim.clone_status : 'not_cloned',
+          cloned_order_id: existingClaim ? existingClaim.cloned_order_id : '',
+          is_cloned_row: existingClaim ? existingClaim.is_cloned_row : '',
+          label_downloaded: existingClaim ? existingClaim.label_downloaded : '',
+          handover_at: existingClaim ? existingClaim.handover_at : ''
+        };
+        
+        flatOrders.push(orderRow);
       }
     }
 
@@ -275,14 +319,16 @@ class ShipwayService {
     const existingKeySet = new Set(existingRows.map(r => `${r.order_id}|${r.product_code}`));
     const newKeySet = new Set(flatOrders.map(r => `${r.order_id}|${r.product_code}`));
     let changed = false;
-    // Add new rows
+    
+    // Check for new rows
     for (const row of flatOrders) {
       if (!existingKeySet.has(`${row.order_id}|${row.product_code}`)) {
         changed = true;
         break;
       }
     }
-    // Remove missing rows
+    
+    // Check for removed rows
     if (!changed) {
       for (const row of existingRows) {
         if (!newKeySet.has(`${row.order_id}|${row.product_code}`)) {
@@ -291,17 +337,19 @@ class ShipwayService {
         }
       }
     }
+    
     if (changed || !fs.existsSync(ordersExcelPath)) {
-      // Write new Excel file
+      // Write updated Excel file with preserved claim data
       const worksheet = XLSX.utils.json_to_sheet(flatOrders);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders');
       XLSX.writeFile(workbook, ordersExcelPath);
-      this.logApiActivity({ type: 'excel-write', rows: flatOrders.length });
+      this.logApiActivity({ type: 'excel-write-with-preserved-claims', rows: flatOrders.length, preservedClaims: existingClaimData.size });
     } else {
       this.logApiActivity({ type: 'excel-no-change', rows: flatOrders.length });
     }
-    return { success: true, count: flatOrders.length };
+    
+    return { success: true, count: flatOrders.length, preservedClaims: existingClaimData.size };
   }
 
   logApiActivity(activity) {

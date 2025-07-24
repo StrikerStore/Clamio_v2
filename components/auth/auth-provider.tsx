@@ -22,6 +22,7 @@ interface AuthContextType {
   logout: () => void
   loading: boolean
   authHeader: string | null
+  vendorToken: string | null
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -29,12 +30,14 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [authHeader, setAuthHeader] = useState<string | null>(null)
+  const [vendorToken, setVendorToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
     // Check for stored auth data on mount
     const storedAuthHeader = localStorage.getItem("authHeader")
+    const storedVendorToken = localStorage.getItem("vendorToken")
     const userData = localStorage.getItem("user_data")
 
     if (storedAuthHeader && userData) {
@@ -42,9 +45,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const parsedUser = JSON.parse(userData)
         setUser(parsedUser)
         setAuthHeader(storedAuthHeader)
+        setVendorToken(storedVendorToken)
       } catch (error) {
         console.error("Error parsing stored user data:", error)
         localStorage.removeItem("authHeader")
+        localStorage.removeItem("vendorToken")
         localStorage.removeItem("user_data")
       }
     }
@@ -62,6 +67,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem("user_data", JSON.stringify(response.data.user))
         setUser(response.data.user)
         setAuthHeader(response.data.authHeader)
+
+        // Store vendor token if present (for vendors)
+        if (response.data.vendorToken) {
+          localStorage.setItem("vendorToken", response.data.vendorToken)
+          setVendorToken(response.data.vendorToken)
+        }
 
         // Redirect based on role
         switch (response.data.user.role) {
@@ -89,9 +100,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     // Immediately clear state and localStorage for faster response
     localStorage.removeItem("authHeader")
+    localStorage.removeItem("vendorToken")
     localStorage.removeItem("user_data")
     setUser(null)
     setAuthHeader(null)
+    setVendorToken(null)
     
     // Redirect immediately for better UX (use replace to prevent back button issues)
     router.replace("/")
@@ -110,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading, authHeader }}>
+    <AuthContext.Provider value={{ user, login, logout, loading, authHeader, vendorToken }}>
       {children}
     </AuthContext.Provider>
   )
