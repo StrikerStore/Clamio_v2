@@ -260,6 +260,31 @@ class ApiClient {
       body: JSON.stringify({ unique_ids }),
     })
   }
+
+  async getGroupedOrders(): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: getGroupedOrders called');
+    
+    // Use vendor token for grouped orders endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/grouped');
+    console.log('  - Method: GET');
+    console.log('  - Headers: Authorization');
+
+    return this.makeRequest('/orders/grouped', {
+      method: 'GET',
+      headers: {
+        'Authorization': vendorToken
+      },
+    })
+  }
   // Settlement API methods
   
   // Vendor settlement methods

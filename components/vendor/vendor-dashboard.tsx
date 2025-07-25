@@ -33,6 +33,7 @@ import {
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DatePicker } from "@/components/ui/date-picker"
 import { apiClient } from "@/lib/api"
 
 // Mock data - Version 4
@@ -143,11 +144,25 @@ export function VendorDashboard() {
   const { user, logout } = useAuth()
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("all-orders")
-  const [searchTerm, setSearchTerm] = useState("")
-  const [dateFrom, setDateFrom] = useState("")
-  const [dateTo, setDateTo] = useState("")
-  const dateFromRef = useRef<HTMLInputElement>(null)
-  const dateToRef = useRef<HTMLInputElement>(null)
+  
+  // Separate filters for each tab
+  const [tabFilters, setTabFilters] = useState({
+    "all-orders": {
+      searchTerm: "",
+      dateFrom: undefined as Date | undefined,
+      dateTo: undefined as Date | undefined,
+    },
+    "my-orders": {
+      searchTerm: "",
+      dateFrom: undefined as Date | undefined,
+      dateTo: undefined as Date | undefined,
+    },
+    "handover": {
+      searchTerm: "",
+      dateFrom: undefined as Date | undefined,
+      dateTo: undefined as Date | undefined,
+    },
+  })
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [showRevenueModal, setShowRevenueModal] = useState(false)
   const [labelFormat, setLabelFormat] = useState("thermal")
@@ -167,6 +182,11 @@ export function VendorDashboard() {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+  // Grouped orders for My Orders tab
+  const [groupedOrders, setGroupedOrders] = useState<any[]>([]);
+  const [groupedOrdersLoading, setGroupedOrdersLoading] = useState(true);
+  const [groupedOrdersError, setGroupedOrdersError] = useState("");
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -288,7 +308,28 @@ export function VendorDashboard() {
         setOrdersLoading(false);
       }
     }
+
+    async function fetchGroupedOrders() {
+      setGroupedOrdersLoading(true);
+      setGroupedOrdersError("");
+      try {
+        const response = await apiClient.getGroupedOrders();
+        if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
+          setGroupedOrders(response.data.groupedOrders);
+        } else {
+          setGroupedOrders([]);
+          setGroupedOrdersError("No grouped orders found");
+        }
+      } catch (err: any) {
+        setGroupedOrdersError(err.message || "Failed to fetch grouped orders");
+        setGroupedOrders([]);
+      } finally {
+        setGroupedOrdersLoading(false);
+      }
+    }
+
     fetchOrders();
+    fetchGroupedOrders();
   }, []);
 
   // Real-time polling for order updates
@@ -353,17 +394,24 @@ export function VendorDashboard() {
           description: `Successfully claimed order row ${unique_id}`,
         });
         
-        // Refresh orders to ensure tabs are updated correctly
+                // Refresh orders to ensure tabs are updated correctly
         console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
-                 try {
-           const refreshResponse = await apiClient.getOrders();
-           if (refreshResponse.success && refreshResponse.data && Array.isArray(refreshResponse.data.orders)) {
-             setOrders(refreshResponse.data.orders);
-             console.log('✅ FRONTEND: Orders refreshed successfully');
-           }
-         } catch (refreshError) {
-           console.log('⚠️ FRONTEND: Failed to refresh orders, but claim was successful');
-         }
+        try {
+          const refreshResponse = await apiClient.getOrders();
+          if (refreshResponse.success && refreshResponse.data && Array.isArray(refreshResponse.data.orders)) {
+            setOrders(refreshResponse.data.orders);
+            console.log('✅ FRONTEND: Orders refreshed successfully');
+          }
+          
+          // Also refresh grouped orders for My Orders tab
+          const groupedRefreshResponse = await apiClient.getGroupedOrders();
+          if (groupedRefreshResponse.success && groupedRefreshResponse.data && Array.isArray(groupedRefreshResponse.data.groupedOrders)) {
+            setGroupedOrders(groupedRefreshResponse.data.groupedOrders);
+            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
+          }
+        } catch (refreshError) {
+          console.log('⚠️ FRONTEND: Failed to refresh orders, but claim was successful');
+        }
         
       } else {
         console.log('❌ FRONTEND: Claim failed');
@@ -460,9 +508,60 @@ export function VendorDashboard() {
     return <Badge className={colors[priority as keyof typeof colors]}>{priority.toUpperCase()}</Badge>
   }
 
+  // Helper functions to get current tab's filters
+  const getCurrentTabFilters = () => tabFilters[activeTab as keyof typeof tabFilters];
+  
+  const updateCurrentTabFilter = (filterName: string, value: any) => {
+    setTabFilters(prev => {
+      const currentTabFilters = prev[activeTab as keyof typeof prev];
+      let updatedFilters = { ...currentTabFilters, [filterName]: value };
+      
+      // Date validation logic
+      if (filterName === 'dateFrom' && value) {
+        // If setting from date and to date exists, ensure from date is not after to date
+        if (currentTabFilters.dateTo && new Date(value) > new Date(currentTabFilters.dateTo)) {
+          // Clear to date if from date is after it
+          updatedFilters.dateTo = undefined;
+          // Defer toast to avoid render cycle issue
+          setTimeout(() => {
+            toast({
+              title: "Date Range Adjusted",
+              description: "To date was cleared because it was before the selected from date",
+              variant: "default",
+            });
+          }, 0);
+        }
+      } else if (filterName === 'dateTo' && value) {
+        // If setting to date and from date exists, ensure to date is not before from date
+        if (currentTabFilters.dateFrom && new Date(value) < new Date(currentTabFilters.dateFrom)) {
+          // Clear from date if to date is before it
+          updatedFilters.dateFrom = undefined;
+          // Defer toast to avoid render cycle issue
+          setTimeout(() => {
+            toast({
+              title: "Date Range Adjusted", 
+              description: "From date was cleared because it was after the selected to date",
+              variant: "default",
+            });
+          }, 0);
+        }
+      }
+      
+      return {
+        ...prev,
+        [activeTab]: updatedFilters
+      };
+    });
+  };
+
   // Filter orders based on active tab and search/date filters
   const getFilteredOrdersForTab = (tab: string) => {
+    if (tab === "my-orders") {
+      return getFilteredGroupedOrdersForTab(tab);
+    }
+    
     let baseOrders = orders;
+    const tabFilter = tabFilters[tab as keyof typeof tabFilters];
     
     // Get current vendor's warehouseId
     const currentVendorId = user?.warehouseId;
@@ -471,12 +570,6 @@ export function VendorDashboard() {
       case "all-orders":
         // Show only unclaimed orders
         baseOrders = orders.filter(order => order.status === 'unclaimed');
-        break;
-      case "my-orders":
-        // Show orders claimed by current vendor
-        baseOrders = orders.filter(order => 
-          order.status === 'claimed' && order.claimed_by === currentVendorId
-        );
         break;
       case "handover":
         // Show orders ready for handover by current vendor
@@ -489,23 +582,23 @@ export function VendorDashboard() {
     }
     
     // Apply product name search filter
-    if (searchTerm.trim()) {
+    if (tabFilter.searchTerm.trim()) {
       baseOrders = baseOrders.filter(order => {
         const productName = order.product_name || order.product || '';
-        return productName.toLowerCase().includes(searchTerm.toLowerCase());
+        return productName.toLowerCase().includes(tabFilter.searchTerm.toLowerCase());
       });
     }
     
     // Apply date range filter
-    if (dateFrom && dateTo) {
+    if (tabFilter.dateFrom && tabFilter.dateTo) {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date || order.created_at || order.date;
         if (!orderDate) return true; // Show orders without dates if no date filter
         
         try {
           const orderDateObj = new Date(orderDate);
-          const fromDateObj = new Date(dateFrom);
-          const toDateObj = new Date(dateTo);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          const toDateObj = new Date(tabFilter.dateTo!);
           toDateObj.setHours(23, 59, 59, 999); // Include the entire end date
           
           return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
@@ -513,27 +606,91 @@ export function VendorDashboard() {
           return true; // Show orders with invalid dates
         }
       });
-    } else if (dateFrom) {
+    } else if (tabFilter.dateFrom) {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date || order.created_at || order.date;
         if (!orderDate) return true;
         
         try {
           const orderDateObj = new Date(orderDate);
-          const fromDateObj = new Date(dateFrom);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
           return orderDateObj >= fromDateObj;
         } catch (error) {
           return true;
         }
       });
-    } else if (dateTo) {
+    } else if (tabFilter.dateTo) {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date || order.created_at || order.date;
         if (!orderDate) return true;
         
         try {
           const orderDateObj = new Date(orderDate);
-          const toDateObj = new Date(dateTo);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          return orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    }
+    
+    return baseOrders;
+  }
+
+  // Filter grouped orders for My Orders tab
+  const getFilteredGroupedOrdersForTab = (tab: string) => {
+    let baseOrders = groupedOrders;
+    const tabFilter = tabFilters[tab as keyof typeof tabFilters];
+    
+    // Apply search filter (search across all products in each order)
+    if (tabFilter.searchTerm.trim()) {
+      baseOrders = baseOrders.filter(order => {
+        return order.products.some((product: any) => {
+          const productName = product.product_name || '';
+          return productName.toLowerCase().includes(tabFilter.searchTerm.toLowerCase());
+        });
+      });
+    }
+    
+    // Apply date range filter
+    if (tabFilter.dateFrom && tabFilter.dateTo) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          
+          return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateFrom) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          return orderDateObj >= fromDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateTo) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const toDateObj = new Date(tabFilter.dateTo!);
           toDateObj.setHours(23, 59, 59, 999);
           return orderDateObj <= toDateObj;
         } catch (error) {
@@ -696,6 +853,13 @@ export function VendorDashboard() {
             setOrders(refreshResponse.data.orders);
             console.log('✅ FRONTEND: Orders refreshed successfully');
           }
+          
+          // Also refresh grouped orders for My Orders tab
+          const groupedRefreshResponse = await apiClient.getGroupedOrders();
+          if (groupedRefreshResponse.success && groupedRefreshResponse.data && Array.isArray(groupedRefreshResponse.data.groupedOrders)) {
+            setGroupedOrders(groupedRefreshResponse.data.groupedOrders);
+            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
+          }
         } catch (refreshError) {
           console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim was successful');
         }
@@ -845,13 +1009,13 @@ export function VendorDashboard() {
               <div className="sticky top-20 bg-white z-40 pb-4 border-b mb-4">
                 <TabsList className="grid w-full grid-cols-3 mb-6">
                   <TabsTrigger value="all-orders">
-                    All Orders ({orders.filter((o) => o.status === "unclaimed").length})
+                    All Orders ({getFilteredOrdersForTab("all-orders").length})
                   </TabsTrigger>
                   <TabsTrigger value="my-orders">
-                    My Orders ({orders.filter((o) => o.status === "claimed" && o.claimed_by === user?.warehouseId).length})
+                    My Orders ({getFilteredOrdersForTab("my-orders").length})
                   </TabsTrigger>
                   <TabsTrigger value="handover">
-                    Handover ({orders.filter((o) => o.status === "ready_for_handover" && o.claimed_by === user?.warehouseId).length})
+                    Handover ({getFilteredOrdersForTab("handover").length})
                   </TabsTrigger>
                 </TabsList>
 
@@ -862,64 +1026,26 @@ export function VendorDashboard() {
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                       <Input
                         placeholder="Search product names..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
+                        value={getCurrentTabFilters().searchTerm}
+                        onChange={(e) => updateCurrentTabFilter('searchTerm', e.target.value)}
                         className="pl-10"
                       />
                     </div>
                   </div>
                   <div className="flex gap-3 items-center">
-                    <div 
-                      className="relative cursor-pointer"
-                      onClick={() => dateFromRef.current?.click()}
-                    >
-                      <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 z-10" />
-                      <Input
-                        ref={dateFromRef}
-                        type="date"
-                        value={dateFrom}
-                        onChange={(e) => setDateFrom(e.target.value)}
-                        className={`pl-10 w-25 text-sm ${
-                          !dateFrom 
-                            ? '[&::-webkit-datetime-edit-text]:opacity-0 [&::-webkit-datetime-edit-month-field]:opacity-0 [&::-webkit-datetime-edit-day-field]:opacity-0 [&::-webkit-datetime-edit-year-field]:opacity-0 [&::-webkit-inner-spin-button]:opacity-0 [&::-webkit-calendar-picker-indicator]:opacity-0' 
-                            : '[&::-webkit-datetime-edit-text]:opacity-100 [&::-webkit-datetime-edit-month-field]:opacity-100 [&::-webkit-datetime-edit-day-field]:opacity-100 [&::-webkit-datetime-edit-year-field]:opacity-100'
-                        }`}
-                        style={{
-                          colorScheme: 'light'
-                        }}
-                      />
-                      {!dateFrom && (
-                        <div className="absolute left-10 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm pointer-events-none z-20">
-                          from date
-                        </div>
-                      )}
-                    </div>
+                    <DatePicker
+                      date={getCurrentTabFilters().dateFrom}
+                      onDateChange={(date) => updateCurrentTabFilter('dateFrom', date)}
+                      placeholder="From date"
+                      className="w-40"
+                    />
                     <span className="text-gray-500 text-sm px-1">to</span>
-                    <div 
-                      className="relative cursor-pointer"
-                      onClick={() => dateToRef.current?.focus()}
-                    >
-                      <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 z-10" />
-                      <Input
-                        ref={dateToRef}
-                        type="date"
-                        value={dateTo}
-                        onChange={(e) => setDateTo(e.target.value)}
-                        className={`pl-10 w-25 text-sm ${
-                          !dateTo 
-                            ? '[&::-webkit-datetime-edit-text]:opacity-0 [&::-webkit-datetime-edit-month-field]:opacity-0 [&::-webkit-datetime-edit-day-field]:opacity-0 [&::-webkit-datetime-edit-year-field]:opacity-0 [&::-webkit-inner-spin-button]:opacity-0 [&::-webkit-calendar-picker-indicator]:opacity-0' 
-                            : '[&::-webkit-datetime-edit-text]:opacity-100 [&::-webkit-datetime-edit-month-field]:opacity-100 [&::-webkit-datetime-edit-day-field]:opacity-100 [&::-webkit-datetime-edit-year-field]:opacity-100'
-                        }`}
-                        style={{
-                          colorScheme: 'light'
-                        }}
-                      />
-                      {!dateTo && (
-                        <div className="absolute left-10 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm pointer-events-none z-20">
-                          to date
-                        </div>
-                      )}
-                    </div>
+                    <DatePicker
+                      date={getCurrentTabFilters().dateTo}
+                      onDateChange={(date) => updateCurrentTabFilter('dateTo', date)}
+                      placeholder="To date"
+                      className="w-40"
+                    />
                   </div>
                   
                   {/* Tab-specific Actions */}
@@ -962,7 +1088,7 @@ export function VendorDashboard() {
               </div>
 
               {/* Scrollable Content Section */}
-              <div className="max-h-[600px] overflow-y-auto">
+              <div className="max-h-[600px] overflow-y-auto relative">
                 <TabsContent value="all-orders" className="mt-0">
                   <div className="rounded-md border">
                     <Table>
@@ -1035,95 +1161,139 @@ export function VendorDashboard() {
                 </TabsContent>
 
                 <TabsContent value="my-orders" className="mt-0">
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
-                        <TableRow>
-                          <TableHead className="w-12">
-                            <input
-                              type="checkbox"
-                              onChange={(e) => {
-                                const myOrders = getFilteredOrdersForTab("my-orders")
-                                if (e.target.checked) {
-                                  setSelectedMyOrders(myOrders.map((o) => o.unique_id))
-                                } else {
-                                  setSelectedMyOrders([])
-                                }
-                              }}
-                              checked={
-                                selectedMyOrders.length > 0 &&
-                                selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
-                              }
-                            />
-                          </TableHead>
-                          <TableHead>Image</TableHead>
-                          <TableHead>Order ID</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead>Value</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredOrdersForTab("my-orders").map((order) => (
-                          <TableRow key={order.unique_id}>
-                            <TableCell>
+                  {groupedOrdersLoading ? (
+                    <div className="flex items-center justify-center p-8">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                        <p className="text-gray-500">Loading orders...</p>
+                      </div>
+                    </div>
+                  ) : groupedOrdersError ? (
+                    <div className="flex items-center justify-center p-8">
+                      <p className="text-red-500">{groupedOrdersError}</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-white z-30">
+                          <TableRow>
+                            <TableHead className="w-12">
                               <input
                                 type="checkbox"
-                                checked={selectedMyOrders.includes(order.unique_id)}
                                 onChange={(e) => {
+                                  const myOrders = getFilteredOrdersForTab("my-orders")
                                   if (e.target.checked) {
-                                    setSelectedMyOrders([...selectedMyOrders, order.unique_id])
+                                    setSelectedMyOrders(myOrders.map((o) => o.order_id))
                                   } else {
-                                    setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.unique_id))
+                                    setSelectedMyOrders([])
                                   }
                                 }}
+                                checked={
+                                  selectedMyOrders.length > 0 &&
+                                  selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
+                                }
                               />
-                            </TableCell>
-                            <TableCell>
-                              <img
-                                src={order.image || "/placeholder.svg"}
-                                alt={order.product_name}
-                                className="w-12 h-12 rounded-lg object-cover"
-                              />
-                            </TableCell>
-                            <TableCell className="font-medium">{order.order_id}</TableCell>
-                            <TableCell>{order.product_name}</TableCell>
-                            <TableCell>{order.value || "N/A"}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-1 min-w-fit">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleDownloadLabel(order.order_id, "single")}
-                                  className="text-xs px-2 py-1 h-8"
-                                >
-                                  <Download className="w-3 h-3 mr-1" />
-                                  Label
-                                </Button>
-                                <Button 
-                                  size="sm" 
-                                  onClick={() => handleMarkReady(order.order_id)}
-                                  className="text-xs px-2 py-1 h-8"
-                                >
-                                  Ready
-                                </Button>
-                                <Button 
-                                  size="sm" 
-                                  variant="destructive" 
-                                  onClick={() => handleRequestReverse(order.order_id)}
-                                  className="text-xs px-2 py-1 h-8"
-                                >
-                                  Reverse
-                                </Button>
-                              </div>
-                            </TableCell>
+                            </TableHead>
+                            <TableHead>Order ID</TableHead>
+                            <TableHead>Order Date</TableHead>
+                            <TableHead>Products</TableHead>
+                            <TableHead className="w-16 text-center">Count</TableHead>
+                            <TableHead>Total Value</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Actions</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {getFilteredOrdersForTab("my-orders").map((order) => (
+                            <TableRow key={order.order_id} className="group">
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedMyOrders.includes(order.order_id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                                    } else {
+                                      setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                                    }
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell>
+                                {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-2 max-w-md">
+                                  {order.products.map((product: any, index: number) => (
+                                    <div key={product.unique_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
+                                      <img
+                                        src={product.image || "/placeholder.svg"}
+                                        alt={product.product_name}
+                                        className="w-10 h-10 rounded-md object-cover flex-shrink-0"
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium text-gray-900 break-words">
+                                          {product.product_name}
+                                        </p>
+                                        <p className="text-xs text-gray-500">
+                                          Code: {product.product_code || "N/A"}
+                                        </p>
+                                      </div>
+                                      <div className="text-right flex-shrink-0">
+                                        <p className="text-sm font-medium">
+                                          ₹{product.value || 0}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center align-middle">
+                                <div className="text-lg font-semibold text-blue-600">
+                                  {order.total_products}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium text-green-600">
+                                  ₹{order.total_value.toFixed(2)}
+                                </div>
+                              </TableCell>
+                              <TableCell>{getStatusBadge(order.status)}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-1 min-w-fit">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleDownloadLabel(order.order_id, "single")}
+                                    className="text-xs px-2 py-1 h-8"
+                                  >
+                                    <Download className="w-3 h-3 mr-1" />
+                                    Label
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    onClick={() => handleMarkReady(order.order_id)}
+                                    className="text-xs px-2 py-1 h-8"
+                                  >
+                                    Ready
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="destructive" 
+                                    onClick={() => handleRequestReverse(order.order_id)}
+                                    className="text-xs px-2 py-1 h-8"
+                                  >
+                                    Reverse
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="handover" className="mt-0">

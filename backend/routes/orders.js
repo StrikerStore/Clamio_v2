@@ -299,4 +299,123 @@ router.post('/bulk-claim', (req, res) => {
   }
 });
 
+/**
+ * @route   GET /api/orders/grouped
+ * @desc    Get vendor's claimed orders grouped by order_id
+ * @access  Vendor (token required)
+ */
+router.get('/grouped', (req, res) => {
+  const token = req.headers['authorization'];
+  
+  console.log('🔵 GROUPED ORDERS REQUEST START');
+  console.log('  - token received:', token ? 'YES' : 'NO');
+  
+  if (!token) {
+    console.log('❌ GROUPED ORDERS FAILED: Missing token');
+    return res.status(400).json({ success: false, message: 'Authorization token required' });
+  }
+
+  // Load users.xlsx
+  const usersPath = path.join(__dirname, '../data/users.xlsx');
+  console.log('📂 Loading users from:', usersPath);
+  
+  try {
+    const usersWb = XLSX.readFile(usersPath);
+    const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
+    const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
+    
+    const vendor = users.find(u => u.token === token && u.active_session === 'TRUE');
+    
+    if (!vendor) {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE');
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+    
+    console.log('✅ VENDOR FOUND');
+    console.log('  - warehouseId:', vendor.warehouseId);
+    
+    const warehouseId = vendor.warehouseId;
+
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    console.log('📂 Loading orders from:', ordersPath);
+    
+    if (!fs.existsSync(ordersPath)) {
+      return res.status(200).json({ success: true, data: { groupedOrders: [] } });
+    }
+    
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+    
+    console.log('📦 Orders loaded:', orders.length);
+    
+    // Filter orders claimed by this vendor
+    const vendorOrders = orders.filter(order => 
+      order.claimed_by === warehouseId && 
+      (order.status === 'claimed' || order.status === 'ready_for_handover')
+    );
+    
+    console.log('🏪 Vendor orders found:', vendorOrders.length);
+    
+    // Group orders by order_id
+    const groupedOrders = {};
+    
+    vendorOrders.forEach(order => {
+      const orderId = order.order_id;
+      
+      if (!groupedOrders[orderId]) {
+        groupedOrders[orderId] = {
+          order_id: orderId,
+          status: order.status,
+          order_date: order.order_date || order.created_at,
+          customer_name: order.customer_name || order.customer,
+          claimed_at: order.claimed_at,
+          total_value: 0,
+          total_products: 0,
+          products: []
+        };
+      }
+      
+      // Add product to the group
+      groupedOrders[orderId].products.push({
+        unique_id: order.unique_id,
+        product_name: order.product_name || order.product,
+        product_code: order.product_code,
+        value: order.value || order.price || 0,
+        image: order.image || order.product_image,
+        quantity: order.quantity || 1
+      });
+      
+      // Update totals
+      const productValue = parseFloat(order.value || order.price || 0);
+      groupedOrders[orderId].total_value += productValue;
+      groupedOrders[orderId].total_products += 1;
+    });
+    
+    // Convert to array and sort by order_date
+    const groupedOrdersArray = Object.values(groupedOrders).sort((a, b) => {
+      const dateA = new Date(a.order_date || 0);
+      const dateB = new Date(b.order_date || 0);
+      return dateB - dateA; // Most recent first
+    });
+    
+    console.log('📊 Grouped orders created:', groupedOrdersArray.length);
+    console.log('🟢 GROUPED ORDERS SUCCESS');
+    
+    return res.json({ 
+      success: true, 
+      data: { 
+        groupedOrders: groupedOrdersArray,
+        totalOrders: groupedOrdersArray.length,
+        totalProducts: vendorOrders.length
+      }
+    });
+    
+  } catch (error) {
+    console.log('💥 GROUPED ORDERS ERROR:', error.message);
+    return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
+  }
+});
+
 module.exports = router; 
