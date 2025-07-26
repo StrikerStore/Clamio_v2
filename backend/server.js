@@ -15,7 +15,7 @@ const settlementRoutes = require('./routes/settlements');
 
 // Import database to initialize it
 const database = require('./config/database');
-const fetchAndSaveShopifyProducts = require('./services/shopifyProductFetcher');
+const { fetchAndSaveShopifyProducts } = require('./services/shopifyProductFetcher');
 const shipwayService = require('./services/shipwayService');
 const cron = require('node-cron');
 
