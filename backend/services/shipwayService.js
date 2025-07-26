@@ -204,13 +204,18 @@ class ShipwayService {
   /**
    * Fetch all orders with status 'O' from Shipway, update orders.xlsx, and remove missing orders/products.
    * Each product in an order gets its own row. Creates the Excel file if it doesn't exist.
+   * Preserves existing claim data (status, claimed_by, etc.) when syncing new orders.
    * Logs all API activity.
+   * Stores raw API response in JSON file for reference.
    */
   async syncOrdersToExcel() {
     const ordersExcelPath = path.join(__dirname, '../data/orders.xlsx');
+    const rawDataJsonPath = path.join(__dirname, '../data/raw_shipway_orders.json');
     const url = `${this.baseURL}/getorders`;
     const params = { status: 'O' };
     let shipwayOrders = [];
+    let rawApiResponse = null;
+    
     try {
       this.logApiActivity({ type: 'shipway-request', url, params, headers: { Authorization: '***' } });
       const response = await axios.get(url, {
@@ -221,7 +226,18 @@ class ShipwayService {
         },
         timeout: 20000,
       });
+      
+      // Store raw API response in JSON file
+      rawApiResponse = response.data;
+      try {
+        fs.writeFileSync(rawDataJsonPath, JSON.stringify(rawApiResponse, null, 2));
+        this.logApiActivity({ type: 'raw-data-stored', path: rawDataJsonPath });
+      } catch (fileError) {
+        this.logApiActivity({ type: 'raw-data-store-error', error: fileError.message });
+      }
+      
       this.logApiActivity({ type: 'shipway-response', status: response.status, dataType: typeof response.data, dataKeys: response.data && typeof response.data === 'object' ? Object.keys(response.data) : undefined });
+      
       // Accept array, or object with 'orders' array, or single order object, or 'message' array
       if (response.status !== 200 || !response.data) {
         throw new Error('Invalid response from Shipway API');
@@ -243,46 +259,171 @@ class ShipwayService {
       throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
     }
 
-    // Flatten Shipway orders to one row per product
-    const flatOrders = [];
-    let uniqueIdCounter = 1;
-    for (const order of shipwayOrders) {
-      if (!Array.isArray(order.products)) continue;
-      for (const product of order.products) {
-        flatOrders.push({
-          unique_id: uniqueIdCounter++,
-          order_id: order.order_id,
-          order_date: order.order_date,
-          product_name: product.product,
-          product_code: product.product_code,
-        });
-      }
+    // Ensure data directory exists
+    const dataDir = path.dirname(ordersExcelPath);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
 
     // Read existing Excel data (if file exists)
     let existingRows = [];
+    let existingClaimData = new Map(); // Map to store claim data by order_id|product_code
+    let maxUniqueId = 0;
+    
     if (fs.existsSync(ordersExcelPath)) {
       try {
         const workbook = XLSX.readFile(ordersExcelPath);
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         existingRows = XLSX.utils.sheet_to_json(worksheet);
+        
+        // Build map of existing claim data
+        existingRows.forEach(row => {
+          const key = `${row.order_id}|${row.product_code}`;
+          existingClaimData.set(key, {
+            unique_id: row.unique_id,
+            status: row.status || 'unclaimed',
+            claimed_by: row.claimed_by || '',
+            claimed_at: row.claimed_at || '',
+            last_claimed_by: row.last_claimed_by || '',
+            last_claimed_at: row.last_claimed_at || '',
+            clone_status: row.clone_status || 'not_cloned',
+            cloned_order_id: row.cloned_order_id || '',
+            is_cloned_row: row.is_cloned_row || '',
+            label_downloaded: row.label_downloaded || '',
+            handover_at: row.handover_at || ''
+          });
+          
+          // Track max unique_id for new rows
+          if (row.unique_id && row.unique_id > maxUniqueId) {
+            maxUniqueId = row.unique_id;
+          }
+        });
       } catch (e) {
         this.logApiActivity({ type: 'excel-read-error', error: e.message });
       }
     }
 
-    // Compare and update Excel only if changed
+    // Flatten Shipway orders to one row per product, preserving existing claim data
+    const flatOrders = [];
+    let uniqueIdCounter = maxUniqueId + 1;
+    
+    for (const order of shipwayOrders) {
+      if (!Array.isArray(order.products)) continue;
+      
+      // Extract order-level financial information and convert to number
+      const orderTotal = parseFloat(order.order_total) || 0;
+      
+      // Determine payment type based on order_tags
+      const orderTags = Array.isArray(order.order_tags) ? order.order_tags : [];
+      const paymentType = orderTags.includes('PPCOD') ? 'C' : 'P';
+      
+             // Calculate total prepaid amount for the entire order based on payment type
+       const totalPrepaidAmount = paymentType === 'P' 
+         ? parseFloat(orderTotal.toFixed(2)) 
+         : parseFloat((orderTotal * 0.1).toFixed(2));
+      
+      // Calculate total selling price for all products in this order for ratio calculation
+      const totalSellingPriceInOrder = order.products.reduce((sum, prod) => {
+        return sum + (parseFloat(prod.price) || 0);
+      }, 0);
+      
+             // Calculate ratio parts for each product
+       let productRatios = [];
+       if (totalSellingPriceInOrder > 0) {
+         const prices = order.products.map(prod => parseFloat(prod.price) || 0);
+         
+         // Convert prices to integers to handle decimals (multiply by 100 for 2 decimal places)
+         const intPrices = prices.map(price => Math.round(price * 100));
+         
+         // Find GCD of all prices to get simplest integer ratio
+         const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+         const findGCD = (arr) => arr.reduce((acc, val) => gcd(acc, val));
+         
+         const pricesGCD = findGCD(intPrices.filter(p => p > 0));
+         
+         if (pricesGCD > 0) {
+           productRatios = intPrices.map(price => Math.round(price / pricesGCD));
+         } else {
+           productRatios = prices.map(() => 1);
+         }
+       } else {
+         productRatios = order.products.map(() => 1); // Equal ratio if no selling prices
+       }
+       
+       // Calculate total of all ratios for this order
+       const totalRatios = productRatios.reduce((sum, ratio) => sum + ratio, 0);
+      
+      for (let i = 0; i < order.products.length; i++) {
+        const product = order.products[i];
+        const key = `${order.order_id}|${product.product_code}`;
+        const existingClaim = existingClaimData.get(key);
+        
+                          // Get selling price from product data and convert to number
+         const sellingPrice = parseFloat(product.price) || 0;
+         
+         // Get the ratio for this product
+         const orderTotalRatio = productRatios[i] || 1;
+         
+         // Calculate the actual split amount for this product
+         const orderTotalSplit = totalRatios > 0 
+           ? parseFloat(((orderTotalRatio / totalRatios) * orderTotal).toFixed(2))
+           : parseFloat((orderTotal / order.products.length).toFixed(2)); // Equal split if no ratios
+         
+         // Calculate the prepaid amount split for this product based on ratio
+         const prepaidAmount = totalRatios > 0 
+           ? parseFloat(((orderTotalRatio / totalRatios) * totalPrepaidAmount).toFixed(2))
+           : parseFloat((totalPrepaidAmount / order.products.length).toFixed(2)); // Equal split if no ratios
+         
+         // Calculate collectable amount: 0 for prepaid, order_total_split - prepaid_amount for COD
+         const collectableAmount = paymentType === 'P' 
+           ? 0 
+           : parseFloat((orderTotalSplit - prepaidAmount).toFixed(2));
+         
+                             const orderRow = {
+           unique_id: existingClaim ? existingClaim.unique_id : uniqueIdCounter++,
+           order_id: order.order_id,
+           order_date: order.order_date,
+           product_name: product.product,
+           product_code: product.product_code,
+           // The 7 additional columns with correct logic
+           selling_price: sellingPrice,
+           order_total: orderTotal,
+           payment_type: paymentType,
+           prepaid_amount: prepaidAmount,
+           order_total_ratio: orderTotalRatio,
+           order_total_split: orderTotalSplit,
+           collectable_amount: collectableAmount,
+          // Preserve existing claim data or use defaults for new orders
+          status: existingClaim ? existingClaim.status : 'unclaimed',
+          claimed_by: existingClaim ? existingClaim.claimed_by : '',
+          claimed_at: existingClaim ? existingClaim.claimed_at : '',
+          last_claimed_by: existingClaim ? existingClaim.last_claimed_by : '',
+          last_claimed_at: existingClaim ? existingClaim.last_claimed_at : '',
+          clone_status: existingClaim ? existingClaim.clone_status : 'not_cloned',
+          cloned_order_id: existingClaim ? existingClaim.cloned_order_id : '',
+          is_cloned_row: existingClaim ? existingClaim.is_cloned_row : '',
+          label_downloaded: existingClaim ? existingClaim.label_downloaded : '',
+          handover_at: existingClaim ? existingClaim.handover_at : ''
+        };
+        
+        flatOrders.push(orderRow);
+      }
+    }
+
+    // Compare and update Excel only if changed or file doesn't exist
     const existingKeySet = new Set(existingRows.map(r => `${r.order_id}|${r.product_code}`));
     const newKeySet = new Set(flatOrders.map(r => `${r.order_id}|${r.product_code}`));
     let changed = false;
-    // Add new rows
+    
+    // Check for new rows
     for (const row of flatOrders) {
       if (!existingKeySet.has(`${row.order_id}|${row.product_code}`)) {
         changed = true;
         break;
       }
     }
-    // Remove missing rows
+    
+    // Check for removed rows
     if (!changed) {
       for (const row of existingRows) {
         if (!newKeySet.has(`${row.order_id}|${row.product_code}`)) {
@@ -291,17 +432,25 @@ class ShipwayService {
         }
       }
     }
+    
+    // Always create/update Excel file if it doesn't exist or if there are changes
     if (changed || !fs.existsSync(ordersExcelPath)) {
-      // Write new Excel file
+      // Write updated Excel file with preserved claim data and new columns
       const worksheet = XLSX.utils.json_to_sheet(flatOrders);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders');
       XLSX.writeFile(workbook, ordersExcelPath);
-      this.logApiActivity({ type: 'excel-write', rows: flatOrders.length });
+             this.logApiActivity({ 
+         type: 'excel-write-with-new-columns', 
+         rows: flatOrders.length, 
+         preservedClaims: existingClaimData.size,
+         newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount']
+       });
     } else {
       this.logApiActivity({ type: 'excel-no-change', rows: flatOrders.length });
     }
-    return { success: true, count: flatOrders.length };
+    
+    return { success: true, count: flatOrders.length, preservedClaims: existingClaimData.size, rawDataStored: rawDataJsonPath };
   }
 
   logApiActivity(activity) {

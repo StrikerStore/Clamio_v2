@@ -1,5 +1,6 @@
 const database = require('../config/database');
 const { hashPassword, comparePassword, encodeBasicAuth } = require('../middleware/auth');
+const userSessionService = require('../services/userSessionService');
 
 /**
  * Authentication Controller
@@ -47,6 +48,19 @@ class AuthController {
       // Generate Basic Auth header for client
       const basicAuthHeader = encodeBasicAuth(email, password);
 
+      // If user has warehouseId (vendor), set active session and get token
+      let vendorToken = null;
+      if (user.warehouseId) {
+        try {
+          // Ensure tokens and sessions are initialized
+          userSessionService.ensureTokensAndSessions();
+          // Login vendor and get token
+          vendorToken = userSessionService.loginVendor(user.warehouseId);
+        } catch (error) {
+          console.error('Error setting vendor session:', error);
+        }
+      }
+
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
 
@@ -56,7 +70,8 @@ class AuthController {
         data: {
           user: userWithoutPassword,
           authHeader: basicAuthHeader,
-          authType: 'Basic'
+          authType: 'Basic',
+          vendorToken: vendorToken // Include vendor token for frontend
         }
       });
 
@@ -461,6 +476,19 @@ class AuthController {
       // Generate Basic Auth header
       const basicAuthHeader = encodeBasicAuth(email, password);
 
+      // If user has warehouseId (vendor), set active session and get token
+      let vendorToken = null;
+      if (user.warehouseId) {
+        try {
+          // Ensure tokens and sessions are initialized
+          userSessionService.ensureTokensAndSessions();
+          // Login vendor and get token
+          vendorToken = userSessionService.loginVendor(user.warehouseId);
+        } catch (error) {
+          console.error('Error setting vendor session:', error);
+        }
+      }
+
       // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
 
@@ -471,6 +499,7 @@ class AuthController {
           user: userWithoutPassword,
           authHeader: basicAuthHeader,
           authType: 'Basic',
+          vendorToken: vendorToken, // Include vendor token for frontend
           usage: 'Include this header in your requests: Authorization: ' + basicAuthHeader
         }
       });

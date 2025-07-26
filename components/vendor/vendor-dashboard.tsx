@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -27,10 +27,13 @@ import {
   CreditCard,
   History,
   FileText,
+  Calendar,
+  Settings,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DatePicker } from "@/components/ui/date-picker"
 import { apiClient } from "@/lib/api"
 
 // Mock data - Version 4
@@ -141,8 +144,25 @@ export function VendorDashboard() {
   const { user, logout } = useAuth()
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("all-orders")
-  const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
+  
+  // Separate filters for each tab
+  const [tabFilters, setTabFilters] = useState({
+    "all-orders": {
+      searchTerm: "",
+      dateFrom: undefined as Date | undefined,
+      dateTo: undefined as Date | undefined,
+    },
+    "my-orders": {
+      searchTerm: "",
+      dateFrom: undefined as Date | undefined,
+      dateTo: undefined as Date | undefined,
+    },
+    "handover": {
+      searchTerm: "",
+      dateFrom: undefined as Date | undefined,
+      dateTo: undefined as Date | undefined,
+    },
+  })
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [showRevenueModal, setShowRevenueModal] = useState(false)
   const [labelFormat, setLabelFormat] = useState("thermal")
@@ -161,6 +181,12 @@ export function VendorDashboard() {
   const [orders, setOrders] = useState<any[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+  // Grouped orders for My Orders tab
+  const [groupedOrders, setGroupedOrders] = useState<any[]>([]);
+  const [groupedOrdersLoading, setGroupedOrdersLoading] = useState(true);
+  const [groupedOrdersError, setGroupedOrdersError] = useState("");
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -261,13 +287,19 @@ export function VendorDashboard() {
       setOrdersError("");
       try {
         const response = await apiClient.getOrders();
-        if (response.success && Array.isArray(response.orders)) {
-          setOrders(response.orders);
-        } else if (response.success && response.orders) {
-          setOrders([response.orders]);
+        if (response.success && response.data && Array.isArray(response.data.orders)) {
+          setOrders(response.data.orders);
+        } else if (response.success && response.data && response.data.orders) {
+          setOrders([response.data.orders]);
         } else {
           setOrders([]);
           setOrdersError("No orders found");
+        }
+        
+        // Get initial last updated timestamp
+        const lastUpdatedResponse = await apiClient.getOrdersLastUpdated();
+        if (lastUpdatedResponse.success && lastUpdatedResponse.data) {
+          setLastUpdated(lastUpdatedResponse.data.lastUpdated);
         }
       } catch (err: any) {
         setOrdersError(err.message || "Failed to fetch orders");
@@ -276,14 +308,132 @@ export function VendorDashboard() {
         setOrdersLoading(false);
       }
     }
+
+    async function fetchGroupedOrders() {
+      setGroupedOrdersLoading(true);
+      setGroupedOrdersError("");
+      try {
+        const response = await apiClient.getGroupedOrders();
+        if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
+          setGroupedOrders(response.data.groupedOrders);
+        } else {
+          setGroupedOrders([]);
+          setGroupedOrdersError("No grouped orders found");
+        }
+      } catch (err: any) {
+        setGroupedOrdersError(err.message || "Failed to fetch grouped orders");
+        setGroupedOrders([]);
+      } finally {
+        setGroupedOrdersLoading(false);
+      }
+    }
+
     fetchOrders();
+    fetchGroupedOrders();
   }, []);
 
-  const handleClaimOrder = (orderId: string) => {
-    toast({
-      title: "Order Claimed",
-      description: `Successfully claimed order ${orderId}`,
-    })
+  // Real-time polling for order updates
+  useEffect(() => {
+    if (!user?.role || user.role !== "vendor") return;
+
+    const pollForUpdates = async () => {
+      try {
+        const response = await apiClient.getOrdersLastUpdated();
+        if (response.success && response.data && response.data.lastUpdated !== lastUpdated && lastUpdated !== null) {
+          console.log('🔄 Orders updated by another vendor, refreshing...');
+          
+          // Refresh orders
+          const ordersResponse = await apiClient.getOrders();
+          if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
+            setOrders(ordersResponse.data.orders);
+            console.log('✅ Orders refreshed due to external update');
+          }
+          
+          setLastUpdated(response.data.lastUpdated);
+        } else if (response.success && response.data && lastUpdated === null) {
+          setLastUpdated(response.data.lastUpdated);
+        }
+      } catch (error) {
+        console.error('Error polling for updates:', error);
+      }
+    };
+
+    // Poll every 5 seconds
+    const interval = setInterval(pollForUpdates, 5000);
+    
+    return () => clearInterval(interval);
+  }, [user, lastUpdated]);
+
+  const handleClaimOrder = async (unique_id: string) => {
+    console.log('🔵 FRONTEND: Starting claim process');
+    console.log('  - unique_id:', unique_id);
+    console.log('  - vendorToken from localStorage:', localStorage.getItem('vendorToken')?.substring(0, 8) + '...');
+    
+    try {
+      console.log('📤 FRONTEND: Calling apiClient.claimOrder...');
+      const response = await apiClient.claimOrder(unique_id);
+      
+      console.log('📥 FRONTEND: Response received');
+      console.log('  - success:', response.success);
+      console.log('  - message:', response.message);
+      console.log('  - data:', response.data);
+      
+      if (response.success && response.data) {
+        console.log('✅ FRONTEND: Claim successful, updating UI');
+        
+        // Update the order in the orders array with the new data
+        setOrders((prevOrders) =>
+          prevOrders.map((order) =>
+            order.unique_id === unique_id ? { ...order, ...response.data } : order
+          )
+        );
+        
+        // Show success message
+        toast({
+          title: 'Order Claimed',
+          description: `Successfully claimed order row ${unique_id}`,
+        });
+        
+                // Refresh orders to ensure tabs are updated correctly
+        console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
+        try {
+          const refreshResponse = await apiClient.getOrders();
+          if (refreshResponse.success && refreshResponse.data && Array.isArray(refreshResponse.data.orders)) {
+            setOrders(refreshResponse.data.orders);
+            console.log('✅ FRONTEND: Orders refreshed successfully');
+          }
+          
+          // Also refresh grouped orders for My Orders tab
+          const groupedRefreshResponse = await apiClient.getGroupedOrders();
+          if (groupedRefreshResponse.success && groupedRefreshResponse.data && Array.isArray(groupedRefreshResponse.data.groupedOrders)) {
+            setGroupedOrders(groupedRefreshResponse.data.groupedOrders);
+            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
+          }
+        } catch (refreshError) {
+          console.log('⚠️ FRONTEND: Failed to refresh orders, but claim was successful');
+        }
+        
+      } else {
+        console.log('❌ FRONTEND: Claim failed');
+        console.log('  - Error message:', response.message);
+        toast({
+          title: 'Claim Failed',
+          description: response.message || 'Could not claim order',
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
+      console.log('💥 FRONTEND: Exception occurred');
+      console.log('  - Error:', err);
+      console.log('  - Error message:', err.message);
+      console.log('  - Error stack:', err.stack);
+      
+      toast({
+        title: 'Claim Failed',
+        description: err.message || 'Network error occurred',
+        variant: 'destructive',
+      });
+    }
   }
 
   const handleMarkReady = (orderId: string) => {
@@ -358,25 +508,197 @@ export function VendorDashboard() {
     return <Badge className={colors[priority as keyof typeof colors]}>{priority.toUpperCase()}</Badge>
   }
 
-  // Filter orders based on active tab and search/status filters
+  // Helper functions to get current tab's filters
+  const getCurrentTabFilters = () => tabFilters[activeTab as keyof typeof tabFilters];
+  
+  const updateCurrentTabFilter = (filterName: string, value: any) => {
+    setTabFilters(prev => {
+      const currentTabFilters = prev[activeTab as keyof typeof prev];
+      let updatedFilters = { ...currentTabFilters, [filterName]: value };
+      
+      // Date validation logic
+      if (filterName === 'dateFrom' && value) {
+        // If setting from date and to date exists, ensure from date is not after to date
+        if (currentTabFilters.dateTo && new Date(value) > new Date(currentTabFilters.dateTo)) {
+          // Clear to date if from date is after it
+          updatedFilters.dateTo = undefined;
+          // Defer toast to avoid render cycle issue
+          setTimeout(() => {
+            toast({
+              title: "Date Range Adjusted",
+              description: "To date was cleared because it was before the selected from date",
+              variant: "default",
+            });
+          }, 0);
+        }
+      } else if (filterName === 'dateTo' && value) {
+        // If setting to date and from date exists, ensure to date is not before from date
+        if (currentTabFilters.dateFrom && new Date(value) < new Date(currentTabFilters.dateFrom)) {
+          // Clear from date if to date is before it
+          updatedFilters.dateFrom = undefined;
+          // Defer toast to avoid render cycle issue
+          setTimeout(() => {
+            toast({
+              title: "Date Range Adjusted", 
+              description: "From date was cleared because it was after the selected to date",
+              variant: "default",
+            });
+          }, 0);
+        }
+      }
+      
+      return {
+        ...prev,
+        [activeTab]: updatedFilters
+      };
+    });
+  };
+
+  // Filter orders based on active tab and search/date filters
   const getFilteredOrdersForTab = (tab: string) => {
+    if (tab === "my-orders") {
+      return getFilteredGroupedOrdersForTab(tab);
+    }
+    
     let baseOrders = orders;
-    // You may need to map backend fields to UI fields here
-    // For now, treat all as "unclaimed" for All Orders
+    const tabFilter = tabFilters[tab as keyof typeof tabFilters];
+    
+    // Get current vendor's warehouseId
+    const currentVendorId = user?.warehouseId;
+    
     switch (tab) {
       case "all-orders":
-        baseOrders = orders;
-        break;
-      case "my-orders":
-        baseOrders = [];
+        // Show only unclaimed orders
+        baseOrders = orders.filter(order => order.status === 'unclaimed');
         break;
       case "handover":
-        baseOrders = [];
+        // Show orders ready for handover by current vendor
+        baseOrders = orders.filter(order => 
+          order.status === 'ready_for_handover' && order.claimed_by === currentVendorId
+        );
         break;
       default:
         baseOrders = orders;
     }
-    // Remove searchTerm filtering
+    
+    // Apply product name search filter
+    if (tabFilter.searchTerm.trim()) {
+      baseOrders = baseOrders.filter(order => {
+        const productName = order.product_name || order.product || '';
+        return productName.toLowerCase().includes(tabFilter.searchTerm.toLowerCase());
+      });
+    }
+    
+    // Apply date range filter
+    if (tabFilter.dateFrom && tabFilter.dateTo) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date || order.created_at || order.date;
+        if (!orderDate) return true; // Show orders without dates if no date filter
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999); // Include the entire end date
+          
+          return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
+        } catch (error) {
+          return true; // Show orders with invalid dates
+        }
+      });
+    } else if (tabFilter.dateFrom) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date || order.created_at || order.date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          return orderDateObj >= fromDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateTo) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date || order.created_at || order.date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          return orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    }
+    
+    return baseOrders;
+  }
+
+  // Filter grouped orders for My Orders tab
+  const getFilteredGroupedOrdersForTab = (tab: string) => {
+    let baseOrders = groupedOrders;
+    const tabFilter = tabFilters[tab as keyof typeof tabFilters];
+    
+    // Apply search filter (search across all products in each order)
+    if (tabFilter.searchTerm.trim()) {
+      baseOrders = baseOrders.filter(order => {
+        return order.products.some((product: any) => {
+          const productName = product.product_name || '';
+          return productName.toLowerCase().includes(tabFilter.searchTerm.toLowerCase());
+        });
+      });
+    }
+    
+    // Apply date range filter
+    if (tabFilter.dateFrom && tabFilter.dateTo) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          
+          return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateFrom) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const fromDateObj = new Date(tabFilter.dateFrom!);
+          return orderDateObj >= fromDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    } else if (tabFilter.dateTo) {
+      baseOrders = baseOrders.filter(order => {
+        const orderDate = order.order_date;
+        if (!orderDate) return true;
+        
+        try {
+          const orderDateObj = new Date(orderDate);
+          const toDateObj = new Date(tabFilter.dateTo!);
+          toDateObj.setHours(23, 59, 59, 999);
+          return orderDateObj <= toDateObj;
+        } catch (error) {
+          return true;
+        }
+      });
+    }
+    
     return baseOrders;
   }
 
@@ -486,7 +808,7 @@ export function VendorDashboard() {
     }
   }
 
-  const handleBulkClaimOrders = () => {
+  const handleBulkClaimOrders = async () => {
     if (selectedUnclaimedOrders.length === 0) {
       toast({
         title: "No Orders Selected",
@@ -496,11 +818,72 @@ export function VendorDashboard() {
       return
     }
 
-    toast({
-      title: "Orders Claimed",
-      description: `Successfully claimed ${selectedUnclaimedOrders.length} orders`,
-    })
-    setSelectedUnclaimedOrders([])
+    console.log('🔵 FRONTEND: Starting bulk claim process');
+    console.log('  - selected orders:', selectedUnclaimedOrders);
+
+    try {
+      console.log('📤 FRONTEND: Calling apiClient.bulkClaimOrders...');
+      const response = await apiClient.bulkClaimOrders(selectedUnclaimedOrders);
+      
+      console.log('📥 FRONTEND: Bulk claim response received');
+      console.log('  - success:', response.success);
+      console.log('  - data:', response.data);
+      
+      if (response.success && response.data) {
+        const { successful_claims, failed_claims, total_successful, total_failed } = response.data;
+        
+        console.log('✅ FRONTEND: Bulk claim successful');
+        console.log('  - Successful:', total_successful);
+        console.log('  - Failed:', total_failed);
+        
+        // Show success message
+        toast({
+          title: "Bulk Claim Complete",
+          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `. ${total_failed} orders failed to claim.` : ''}`,
+        });
+        
+        // Clear selected orders
+        setSelectedUnclaimedOrders([]);
+        
+        // Refresh orders to update the UI
+        console.log('🔄 FRONTEND: Refreshing orders after bulk claim...');
+        try {
+          const refreshResponse = await apiClient.getOrders();
+          if (refreshResponse.success && refreshResponse.data && Array.isArray(refreshResponse.data.orders)) {
+            setOrders(refreshResponse.data.orders);
+            console.log('✅ FRONTEND: Orders refreshed successfully');
+          }
+          
+          // Also refresh grouped orders for My Orders tab
+          const groupedRefreshResponse = await apiClient.getGroupedOrders();
+          if (groupedRefreshResponse.success && groupedRefreshResponse.data && Array.isArray(groupedRefreshResponse.data.groupedOrders)) {
+            setGroupedOrders(groupedRefreshResponse.data.groupedOrders);
+            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
+          }
+        } catch (refreshError) {
+          console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim was successful');
+        }
+        
+      } else {
+        console.log('❌ FRONTEND: Bulk claim failed');
+        console.log('  - Error message:', response.message);
+        toast({
+          title: 'Bulk Claim Failed',
+          description: response.message || 'Could not claim selected orders',
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
+      console.log('💥 FRONTEND: Exception occurred during bulk claim');
+      console.log('  - Error:', err);
+      console.log('  - Error message:', err.message);
+      
+      toast({
+        title: 'Bulk Claim Failed',
+        description: err.message || 'Network error occurred',
+        variant: 'destructive',
+      });
+    }
   }
 
   return (
@@ -511,13 +894,13 @@ export function VendorDashboard() {
           <div className="flex items-center justify-between py-4 gap-4">
             {/* Dashboard Name and Welcome */}
             <div className="flex items-center gap-4 min-w-0">
-              <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
-                <BinaryIcon className="w-5 h-5 text-white" />
+              <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center flex-shrink-0">
+                <Settings className="w-5 h-5 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-xl font-semibold text-gray-900 truncate">Vendor Dashboard v4</h1>
+                <h1 className="text-xl font-semibold text-gray-900 truncate">Vendor Dashboard</h1>
                 <p className="text-sm text-gray-500 truncate">
-                  Welcome back, {user?.name} ({user?.role})
+                  Welcome back, {user?.name}
                 </p>
               </div>
             </div>
@@ -531,8 +914,7 @@ export function VendorDashboard() {
                 <div className="text-right truncate">
                   <div className="text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
                   <div className="text-xs text-gray-700 truncate">{vendorAddress.address}</div>
-                  <div className="text-xs text-gray-700 truncate">{vendorAddress.city}</div>
-                  <div className="text-xs text-gray-700 truncate">Pincode: {vendorAddress.pincode}</div>
+                  <div className="text-xs text-gray-700 truncate">{vendorAddress.city}, {vendorAddress.pincode}</div>
                 </div>
               ) : null}
             </div>
@@ -558,20 +940,6 @@ export function VendorDashboard() {
                 </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">All Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">{orders.length}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-yellow-100 rounded-lg">
-                  <Clock className="w-6 h-6 text-yellow-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Unclaimed</p>
                   <p className="text-2xl font-bold text-gray-900">
                     {orders.filter((o) => o.status === "unclaimed").length}
                   </p>
@@ -589,7 +957,23 @@ export function VendorDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">My Orders</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {orders.filter((o) => o.status === "in_pack").length}
+                    {orders.filter((o) => o.status === "claimed" && o.claimed_by === user?.warehouseId).length}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center">
+                <div className="p-2 bg-orange-100 rounded-lg">
+                  <Upload className="w-6 h-6 text-orange-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Handover</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {orders.filter((o) => o.status === "ready_for_handover" && o.claimed_by === user?.warehouseId).length}
                   </p>
                 </div>
               </div>
@@ -617,7 +1001,7 @@ export function VendorDashboard() {
         <Card>
           <CardHeader>
             <CardTitle>Order Management</CardTitle>
-            <CardDescription>Manage your Shopify orders across different stages</CardDescription>
+            <CardDescription>Manage your orders across different stages</CardDescription>
           </CardHeader>
           <CardContent>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -625,84 +1009,86 @@ export function VendorDashboard() {
               <div className="sticky top-20 bg-white z-40 pb-4 border-b mb-4">
                 <TabsList className="grid w-full grid-cols-3 mb-6">
                   <TabsTrigger value="all-orders">
-                    All Orders ({orders.length})
+                    All Orders ({getFilteredOrdersForTab("all-orders").length})
                   </TabsTrigger>
                   <TabsTrigger value="my-orders">
-                    My Orders ({orders.filter((o) => o.status === "in_pack").length})
+                    My Orders ({getFilteredOrdersForTab("my-orders").length})
                   </TabsTrigger>
                   <TabsTrigger value="handover">
-                    Handover ({orders.filter((o) => o.status === "handover").length})
+                    Handover ({getFilteredOrdersForTab("handover").length})
                   </TabsTrigger>
                 </TabsList>
 
                 {/* Filters */}
                 <div className="flex flex-col sm:flex-row gap-4 mb-6 items-center">
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                       <Input
-                        placeholder="Search orders..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Search product names..."
+                        value={getCurrentTabFilters().searchTerm}
+                        onChange={(e) => updateCurrentTabFilter('searchTerm', e.target.value)}
                         className="pl-10"
                       />
                     </div>
                   </div>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-full sm:w-48">
-                      <Filter className="w-4 h-4 mr-2" />
-                      <SelectValue placeholder="Filter by status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="unclaimed">Unclaimed</SelectItem>
-                      <SelectItem value="in_pack">In Pack</SelectItem>
-                      <SelectItem value="handover">Handover</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={() => handleBulkClaimOrders()} disabled={selectedUnclaimedOrders.length === 0} className="h-10">
-                    <Package className="w-4 h-4 mr-2" />
-                    Claim Selected ({selectedUnclaimedOrders.length})
-                  </Button>
+                  <div className="flex gap-3 items-center">
+                    <DatePicker
+                      date={getCurrentTabFilters().dateFrom}
+                      onDateChange={(date) => updateCurrentTabFilter('dateFrom', date)}
+                      placeholder="From date"
+                      className="w-40"
+                    />
+                    <span className="text-gray-500 text-sm px-1">to</span>
+                    <DatePicker
+                      date={getCurrentTabFilters().dateTo}
+                      onDateChange={(date) => updateCurrentTabFilter('dateTo', date)}
+                      placeholder="To date"
+                      className="w-40"
+                    />
+                  </div>
+                  
+                  {/* Tab-specific Actions */}
+                  {activeTab === "all-orders" && (
+                    <Button 
+                      onClick={() => handleBulkClaimOrders()} 
+                      disabled={selectedUnclaimedOrders.length === 0} 
+                      className="h-10 whitespace-nowrap px-6 text-sm min-w-fit"
+                    >
+                      <Package className="w-4 h-4 mr-2" />
+                      Claim Selected ({selectedUnclaimedOrders.length})
+                    </Button>
+                  )}
+                  
+                  {activeTab === "my-orders" && (
+                    <div className="flex gap-3 items-center">
+                      <Select value={labelFormat} onValueChange={setLabelFormat}>
+                        <SelectTrigger className="w-36 h-10 text-sm">
+                          <SelectValue placeholder="Label Format" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="thermal">Thermal (4x6)</SelectItem>
+                          <SelectItem value="a4">A4 Format</SelectItem>
+                          <SelectItem value="four-in-one">Four in One</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        onClick={() => handleBulkDownloadLabels("my-orders")}
+                        disabled={selectedMyOrders.length === 0}
+                        className="h-10 whitespace-nowrap px-6 text-sm min-w-fit"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Download ({selectedMyOrders.length})
+                      </Button>
+                    </div>
+                  )}
                 </div>
 
-                {activeTab === "my-orders" && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Bulk Actions</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-col sm:flex-row gap-4 items-end">
-                        <div className="flex-1">
-                          <Label>Label Format</Label>
-                          <Select value={labelFormat} onValueChange={setLabelFormat}>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="thermal">Thermal (4x6)</SelectItem>
-                              <SelectItem value="a4">A4 Format</SelectItem>
-                              <SelectItem value="four-in-one">Four in One</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <Button
-                          onClick={() => handleBulkDownloadLabels("my-orders")}
-                          disabled={selectedMyOrders.length === 0}
-                        >
-                          <Download className="w-4 h-4 mr-2" />
-                          Download Selected ({selectedMyOrders.length})
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
 
-                {activeTab === "handover" && null}
               </div>
 
               {/* Scrollable Content Section */}
-              <div className="max-h-[600px] overflow-y-auto">
+              <div className="max-h-[600px] overflow-y-auto relative">
                 <TabsContent value="all-orders" className="mt-0">
                   <div className="rounded-md border">
                     <Table>
@@ -714,7 +1100,7 @@ export function VendorDashboard() {
                               onChange={(e) => {
                                 const unclaimedOrders = getFilteredOrdersForTab("all-orders")
                                 if (e.target.checked) {
-                                  setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.order_id))
+                                  setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.unique_id))
                                 } else {
                                   setSelectedUnclaimedOrders([])
                                 }
@@ -736,16 +1122,16 @@ export function VendorDashboard() {
                       </TableHeader>
                       <TableBody>
                         {getFilteredOrdersForTab("all-orders").map((order) => (
-                          <TableRow key={order.order_id}>
+                          <TableRow key={order.unique_id}>
                             <TableCell>
                               <input
                                 type="checkbox"
-                                checked={selectedUnclaimedOrders.includes(order.order_id)}
+                                checked={selectedUnclaimedOrders.includes(order.unique_id)}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.order_id])
+                                    setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
                                   } else {
-                                    setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.order_id))
+                                    setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
                                   }
                                 }}
                               />
@@ -763,7 +1149,7 @@ export function VendorDashboard() {
                             <TableCell>{order.product_code}</TableCell>
                             <TableCell>{order.value || "-"}</TableCell>
                             <TableCell>
-                              <Button size="sm" onClick={() => handleClaimOrder(order.order_id)}>
+                              <Button size="sm" onClick={() => handleClaimOrder(order.unique_id)}>
                                 Claim
                               </Button>
                             </TableCell>
@@ -775,91 +1161,139 @@ export function VendorDashboard() {
                 </TabsContent>
 
                 <TabsContent value="my-orders" className="mt-0">
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
-                        <TableRow>
-                          <TableHead className="w-12">
-                            <input
-                              type="checkbox"
-                              onChange={(e) => {
-                                const myOrders = getFilteredOrdersForTab("my-orders")
-                                if (e.target.checked) {
-                                  setSelectedMyOrders(myOrders.map((o) => o.id))
-                                } else {
-                                  setSelectedMyOrders([])
-                                }
-                              }}
-                              checked={
-                                selectedMyOrders.length > 0 &&
-                                selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
-                              }
-                            />
-                          </TableHead>
-                          <TableHead>Image</TableHead>
-                          <TableHead>Order ID</TableHead>
-                          <TableHead>Customer</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead>Value</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Priority</TableHead>
-                          <TableHead>SLA</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredOrdersForTab("my-orders").map((order) => (
-                          <TableRow key={order.id}>
-                            <TableCell>
+                  {groupedOrdersLoading ? (
+                    <div className="flex items-center justify-center p-8">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                        <p className="text-gray-500">Loading orders...</p>
+                      </div>
+                    </div>
+                  ) : groupedOrdersError ? (
+                    <div className="flex items-center justify-center p-8">
+                      <p className="text-red-500">{groupedOrdersError}</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-white z-30">
+                          <TableRow>
+                            <TableHead className="w-12">
                               <input
                                 type="checkbox"
-                                checked={selectedMyOrders.includes(order.id)}
                                 onChange={(e) => {
+                                  const myOrders = getFilteredOrdersForTab("my-orders")
                                   if (e.target.checked) {
-                                    setSelectedMyOrders([...selectedMyOrders, order.id])
+                                    setSelectedMyOrders(myOrders.map((o) => o.order_id))
                                   } else {
-                                    setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.id))
+                                    setSelectedMyOrders([])
                                   }
                                 }}
+                                checked={
+                                  selectedMyOrders.length > 0 &&
+                                  selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
+                                }
                               />
-                            </TableCell>
-                            <TableCell>
-                              <img
-                                src={order.image || "/placeholder.svg"}
-                                alt={order.product}
-                                className="w-12 h-12 rounded-lg object-cover"
-                              />
-                            </TableCell>
-                            <TableCell className="font-medium">{order.id}</TableCell>
-                            <TableCell>{order.customer}</TableCell>
-                            <TableCell>{order.product}</TableCell>
-                            <TableCell>{order.value}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
-                            <TableCell>{getPriorityBadge(order.priority)}</TableCell>
-                            <TableCell>{order.sla}</TableCell>
-                            <TableCell>
-                              <div className="flex flex-wrap gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleDownloadLabel(order.id, "single")}
-                                >
-                                  <Download className="w-3 h-3 mr-1" />
-                                  Label
-                                </Button>
-                                <Button size="sm" onClick={() => handleMarkReady(order.id)}>
-                                  Ready
-                                </Button>
-                                <Button size="sm" variant="destructive" onClick={() => handleRequestReverse(order.id)}>
-                                  Reverse
-                                </Button>
-                              </div>
-                            </TableCell>
+                            </TableHead>
+                            <TableHead>Order ID</TableHead>
+                            <TableHead>Order Date</TableHead>
+                            <TableHead>Products</TableHead>
+                            <TableHead className="w-16 text-center">Count</TableHead>
+                            <TableHead>Total Value</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Actions</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {getFilteredOrdersForTab("my-orders").map((order) => (
+                            <TableRow key={order.order_id} className="group">
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedMyOrders.includes(order.order_id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                                    } else {
+                                      setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                                    }
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell>
+                                {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-2 max-w-md">
+                                  {order.products.map((product: any, index: number) => (
+                                    <div key={product.unique_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
+                                      <img
+                                        src={product.image || "/placeholder.svg"}
+                                        alt={product.product_name}
+                                        className="w-10 h-10 rounded-md object-cover flex-shrink-0"
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium text-gray-900 break-words">
+                                          {product.product_name}
+                                        </p>
+                                        <p className="text-xs text-gray-500">
+                                          Code: {product.product_code || "N/A"}
+                                        </p>
+                                      </div>
+                                      <div className="text-right flex-shrink-0">
+                                        <p className="text-sm font-medium">
+                                          ₹{product.value || 0}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center align-middle">
+                                <div className="text-lg font-semibold text-blue-600">
+                                  {order.total_products}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium text-green-600">
+                                  ₹{order.total_value.toFixed(2)}
+                                </div>
+                              </TableCell>
+                              <TableCell>{getStatusBadge(order.status)}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-1 min-w-fit">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleDownloadLabel(order.order_id, "single")}
+                                    className="text-xs px-2 py-1 h-8"
+                                  >
+                                    <Download className="w-3 h-3 mr-1" />
+                                    Label
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    onClick={() => handleMarkReady(order.order_id)}
+                                    className="text-xs px-2 py-1 h-8"
+                                  >
+                                    Ready
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="destructive" 
+                                    onClick={() => handleRequestReverse(order.order_id)}
+                                    className="text-xs px-2 py-1 h-8"
+                                  >
+                                    Reverse
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="handover" className="mt-0">

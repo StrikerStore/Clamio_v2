@@ -198,6 +198,93 @@ class ApiClient {
   async getOrders(): Promise<ApiResponse> {
     return this.makeRequest('/orders');
   }
+  async getOrdersLastUpdated(): Promise<ApiResponse> {
+    return this.makeRequest('/orders/last-updated')
+  }
+
+  async claimOrder(unique_id: string): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: claimOrder called');
+    console.log('  - unique_id:', unique_id);
+    
+    // Use vendor token for claim endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    console.log('  - vendorToken value:', vendorToken ? vendorToken.substring(0, 8) + '...' : 'null');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/claim');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ unique_id }));
+
+    return this.makeRequest('/orders/claim', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ unique_id }),
+    })
+  }
+
+  async bulkClaimOrders(unique_ids: string[]): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: bulkClaimOrders called');
+    console.log('  - unique_ids:', unique_ids);
+    
+    // Use vendor token for bulk claim endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/bulk-claim');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ unique_ids }));
+
+    return this.makeRequest('/orders/bulk-claim', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ unique_ids }),
+    })
+  }
+
+  async getGroupedOrders(): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: getGroupedOrders called');
+    
+    // Use vendor token for grouped orders endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/grouped');
+    console.log('  - Method: GET');
+    console.log('  - Headers: Authorization');
+
+    return this.makeRequest('/orders/grouped', {
+      method: 'GET',
+      headers: {
+        'Authorization': vendorToken
+      },
+    })
+  }
   // Settlement API methods
   
   // Vendor settlement methods
