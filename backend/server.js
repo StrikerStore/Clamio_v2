@@ -12,11 +12,15 @@ const userRoutes = require('./routes/users');
 const shipwayRoutes = require('./routes/shipway');
 const ordersRoutes = require('./routes/orders');
 const settlementRoutes = require('./routes/settlements');
+const carrierRoutes = require('./routes/carriers');
+const pincodeServiceabilityRoutes = require('./routes/pincodeServiceability');
 
 // Import database to initialize it
 const database = require('./config/database');
 const { fetchAndSaveShopifyProducts } = require('./services/shopifyProductFetcher');
 const shipwayService = require('./services/shipwayService');
+const carrierService = require('./services/carrierService');
+const pincodeServiceabilityService = require('./services/pincodeServiceabilityService');
 const cron = require('node-cron');
 
 const app = express();
@@ -106,6 +110,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/shipway', shipwayRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/settlements', settlementRoutes);
+app.use('/api/carriers', carrierRoutes);
+app.use('/api/pincode-serviceability', pincodeServiceabilityRoutes);
 
 
 /**
@@ -142,6 +148,18 @@ app.get('/api', (req, res) => {
         'POST /api/shipway/validate-warehouse': 'Validate warehouse for user creation',
         'POST /api/shipway/multiple-warehouses': 'Get multiple warehouses',
         'GET /api/shipway/stats': 'Get warehouse API statistics'
+      },
+      carriers: {
+        'GET /api/carriers': 'Get all carriers from Excel file',
+        'GET /api/carriers/:id': 'Get carrier by ID',
+        'POST /api/carriers/fetch': 'Fetch carriers from Shipway API (Admin only)',
+        'GET /api/carriers/test-connection': 'Test Shipway Carrier API connection'
+      },
+      pincodeServiceability: {
+        'GET /api/pincode-serviceability/:pincode': 'Check carrier serviceability at pincode',
+        'POST /api/pincode-serviceability/process-orders': 'Process orders and assign carriers (Admin only)',
+        'GET /api/pincode-serviceability/processed-orders': 'Get processed orders with assigned carriers',
+        'GET /api/pincode-serviceability/carrier-priorities': 'Get carrier priorities from Excel'
       }
     },
     authentication: 'Bearer token required for protected routes',
@@ -258,6 +276,36 @@ app.listen(PORT, () => {
     },
     path.join(__dirname, 'data', 'products.xlsx')
   );
+
+  // Fetch carrier data on startup
+  (async () => {
+    try {
+      const result = await carrierService.fetchAndSaveCarriers();
+      if (result.success) {
+        console.log(`🚚 [Carrier Sync] ${result.message}`);
+      } else {
+        console.error(`❌ [Carrier Sync] Failed: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('[Carrier Sync] Startup sync failed:', err.message);
+    }
+  })();
+
+  // Process orders and assign carriers on startup
+  (async () => {
+    try {
+      console.log('🔄 [Pincode Serviceability] Starting order processing...');
+      const result = await pincodeServiceabilityService.processOrdersAndAssignCarriers();
+      if (result.success) {
+        console.log(`✅ [Pincode Serviceability] ${result.processedCount} orders processed successfully`);
+        console.log(`📁 [Pincode Serviceability] Output saved to: ${result.outputFile}`);
+      } else {
+        console.error(`❌ [Pincode Serviceability] Failed: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('[Pincode Serviceability] Startup processing failed:', err.message);
+    }
+  })();
 
   // Start Shipway order sync cron job (every hour)
   cron.schedule('0 * * * *', async () => {
