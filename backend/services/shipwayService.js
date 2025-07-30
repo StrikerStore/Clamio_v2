@@ -293,7 +293,9 @@ class ShipwayService {
             label_downloaded: row.label_downloaded || '',
             handover_at: row.handover_at || '',
             customer_name: row.customer_name || '',
-            product_image: row.product_image || ''
+            product_image: row.product_image || '',
+            priority_carrier: row.priority_carrier || '',
+            pincode: row.pincode || ''
           });
           
           // Track max unique_id for new rows
@@ -396,6 +398,8 @@ class ShipwayService {
           order_total_ratio: orderTotalRatio,
           order_total_split: orderTotalSplit,
           collectable_amount: collectableAmount,
+          // Add pincode from s_zipcode, preserve existing if available
+          pincode: existingClaim ? existingClaim.pincode : (order.s_zipcode || ''),
          // Preserve existing claim data or use defaults for new orders
          status: existingClaim ? existingClaim.status : 'unclaimed',
          claimed_by: existingClaim ? existingClaim.claimed_by : '',
@@ -409,7 +413,9 @@ class ShipwayService {
          handover_at: existingClaim ? existingClaim.handover_at : '',
          // Preserve custom columns or use empty defaults for new orders
          customer_name: existingClaim ? existingClaim.customer_name : '',
-         product_image: existingClaim ? existingClaim.product_image : ''
+         product_image: existingClaim ? existingClaim.product_image : '',
+         // Add priority_carrier column (empty for new orders, preserve existing)
+         priority_carrier: existingClaim ? existingClaim.priority_carrier : ''
         };
         
         flatOrders.push(orderRow);
@@ -450,7 +456,7 @@ class ShipwayService {
         type: 'excel-write-with-new-columns', 
         rows: flatOrders.length, 
         preservedClaims: existingClaimData.size,
-        newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image']
+        newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image', 'priority_carrier', 'pincode']
       });
 
       // Automatically enhance orders with customer names and product images

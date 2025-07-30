@@ -4,6 +4,7 @@ const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
 const { authenticateBasicAuth, requireAdminOrSuperadmin } = require('../middleware/auth');
+const carrierServiceabilityService = require('../services/carrierServiceabilityService');
 
 /**
  * @route   GET /api/orders
@@ -63,7 +64,7 @@ router.get('/last-updated', (req, res) => {
  * @desc    Vendor claims an order row by unique_id
  * @access  Vendor (token required)
  */
-router.post('/claim', (req, res) => {
+router.post('/claim', async (req, res) => {
   const { unique_id } = req.body;
   const token = req.headers['authorization'];
   
@@ -149,6 +150,17 @@ router.post('/claim', (req, res) => {
     order.last_claimed_by = warehouseId;
     order.last_claimed_at = now;
     
+    // Automatically assign priority carrier for claimed order
+    try {
+      console.log('🚚 ASSIGNING PRIORITY CARRIER...');
+      const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(order);
+      order.priority_carrier = carrierResult.data.carrier_id;
+      console.log(`✅ Carrier assigned: ${carrierResult.data.carrier_id} (${carrierResult.data.carrier_name})`);
+    } catch (carrierError) {
+      console.log(`⚠️ Carrier assignment failed: ${carrierError.message}`);
+      order.priority_carrier = ''; // Leave empty if assignment fails
+    }
+    
     // Write back to worksheet
     console.log('💾 SAVING TO EXCEL');
     const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
@@ -182,7 +194,7 @@ router.post('/claim', (req, res) => {
  * @desc    Vendor claims multiple orders by unique_ids
  * @access  Vendor (token required)
  */
-router.post('/bulk-claim', (req, res) => {
+router.post('/bulk-claim', async (req, res) => {
   const { unique_ids } = req.body;
   const token = req.headers['authorization'];
   
@@ -235,13 +247,13 @@ router.post('/bulk-claim', (req, res) => {
     const failedClaims = [];
     
     // Process each unique_id
-    unique_ids.forEach(unique_id => {
+    for (const unique_id of unique_ids) {
       const orderIdx = orders.findIndex(o => String(o.unique_id) === String(unique_id));
       
       if (orderIdx === -1) {
         console.log('❌ ORDER NOT FOUND:', unique_id);
         failedClaims.push({ unique_id, reason: 'Order not found' });
-        return;
+        continue;
       }
       
       const order = orders[orderIdx];
@@ -249,7 +261,7 @@ router.post('/bulk-claim', (req, res) => {
       if (order.status !== 'unclaimed') {
         console.log('❌ ORDER NOT UNCLAIMED:', unique_id, 'Status:', order.status);
         failedClaims.push({ unique_id, reason: 'Order is not unclaimed' });
-        return;
+        continue;
       }
       
       // Update order
@@ -260,8 +272,19 @@ router.post('/bulk-claim', (req, res) => {
       order.last_claimed_by = warehouseId;
       order.last_claimed_at = now;
       
+      // Automatically assign priority carrier for claimed order
+      try {
+        console.log(`🚚 ASSIGNING PRIORITY CARRIER for order ${order.order_id}...`);
+        const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(order);
+        order.priority_carrier = carrierResult.data.carrier_id;
+        console.log(`✅ Carrier assigned: ${carrierResult.data.carrier_id} (${carrierResult.data.carrier_name})`);
+      } catch (carrierError) {
+        console.log(`⚠️ Carrier assignment failed for order ${order.order_id}: ${carrierError.message}`);
+        order.priority_carrier = ''; // Leave empty if assignment fails
+      }
+      
       successfulClaims.push({ unique_id, order_id: order.order_id });
-    });
+    }
     
     if (successfulClaims.length > 0) {
       // Write back to worksheet
@@ -736,6 +759,103 @@ router.get('/admin/vendors', authenticateBasicAuth, requireAdminOrSuperadmin, (r
       success: false, 
       message: 'Failed to fetch vendors', 
       error: error.message 
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/assign-priority-carriers
+ * @desc    Assign priority carriers to all claimed orders based on serviceability
+ * @access  Admin/Superadmin only
+ */
+router.post('/assign-priority-carriers', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  console.log('🔵 PRIORITY CARRIER ASSIGNMENT REQUEST START');
+  
+  try {
+    console.log('📡 Starting priority carrier assignment process for claimed orders...');
+    
+    // Start the assignment process
+    const result = await carrierServiceabilityService.assignPriorityCarriersToOrders();
+    
+    console.log('✅ PRIORITY CARRIER ASSIGNMENT COMPLETED');
+    console.log('📊 Results:', result);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Priority carriers assigned successfully to claimed orders',
+      data: result
+    });
+    
+  } catch (error) {
+    console.error('💥 PRIORITY CARRIER ASSIGNMENT ERROR:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to assign priority carriers',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/assign-priority-carrier/:orderId
+ * @desc    Assign priority carrier to a specific claimed order
+ * @access  Admin/Superadmin only
+ */
+router.post('/assign-priority-carrier/:orderId', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  const { orderId } = req.params;
+  
+  console.log('🔵 SINGLE ORDER PRIORITY CARRIER ASSIGNMENT REQUEST START');
+  console.log('  - Order ID:', orderId);
+  
+  try {
+    console.log('📡 Starting priority carrier assignment for single order...');
+    
+    // Start the assignment process for single order
+    const result = await carrierServiceabilityService.assignPriorityCarrierToOrder(orderId);
+    
+    console.log('✅ SINGLE ORDER PRIORITY CARRIER ASSIGNMENT COMPLETED');
+    console.log('📊 Results:', result);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Priority carrier assigned successfully to order',
+      data: result
+    });
+    
+  } catch (error) {
+    console.error('💥 SINGLE ORDER PRIORITY CARRIER ASSIGNMENT ERROR:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to assign priority carrier to order',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   GET /api/orders/priority-carrier-stats
+ * @desc    Get statistics about priority carrier assignments (claimed vs unclaimed orders)
+ * @access  Admin/Superadmin only
+ */
+router.get('/priority-carrier-stats', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+  console.log('🔵 PRIORITY CARRIER STATS REQUEST START');
+  
+  try {
+    const stats = carrierServiceabilityService.getAssignmentStatistics();
+    
+    console.log('✅ PRIORITY CARRIER STATS RETRIEVED');
+    
+    return res.status(200).json({
+      success: true,
+      data: stats
+    });
+    
+  } catch (error) {
+    console.error('💥 PRIORITY CARRIER STATS ERROR:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get priority carrier statistics',
+      error: error.message
     });
   }
 });
