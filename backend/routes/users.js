@@ -18,6 +18,15 @@ const {
 
 // Apply authentication and authorization to all routes
 router.use(authenticateToken);
+
+/**
+ * @route   GET /api/users/vendor/address
+ * @desc    Get the vendor's warehouse address (for vendor panel)
+ * @access  Vendor only
+ */
+router.get('/vendor/address', requireVendor, userController.getVendorAddress);
+
+// Apply superadmin authorization to all other routes
 router.use(requireSuperadmin);
 
 /**
@@ -75,12 +84,5 @@ router.get('/status/:status', userController.getUsersByStatus);
  * @access  Superadmin only
  */
 router.patch('/:id/toggle-status', validateUserId, userController.toggleUserStatus);
-
-/**
- * @route   GET /api/users/vendor/address
- * @desc    Get the vendor's warehouse address (for vendor panel)
- * @access  Vendor only
- */
-router.get('/vendor/address', userController.getVendorAddress);
 
 module.exports = router; 

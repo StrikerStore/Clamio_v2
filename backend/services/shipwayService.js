@@ -1,6 +1,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const orderEnhancementService = require('./orderEnhancementService');
 const XLSX = require('xlsx');
 
 /**
@@ -290,7 +291,9 @@ class ShipwayService {
             cloned_order_id: row.cloned_order_id || '',
             is_cloned_row: row.is_cloned_row || '',
             label_downloaded: row.label_downloaded || '',
-            handover_at: row.handover_at || ''
+            handover_at: row.handover_at || '',
+            customer_name: row.customer_name || '',
+            product_image: row.product_image || ''
           });
           
           // Track max unique_id for new rows
@@ -379,31 +382,34 @@ class ShipwayService {
            ? 0 
            : parseFloat((orderTotalSplit - prepaidAmount).toFixed(2));
          
-                             const orderRow = {
-           unique_id: existingClaim ? existingClaim.unique_id : uniqueIdCounter++,
-           order_id: order.order_id,
-           order_date: order.order_date,
-           product_name: product.product,
-           product_code: product.product_code,
-           // The 7 additional columns with correct logic
-           selling_price: sellingPrice,
-           order_total: orderTotal,
-           payment_type: paymentType,
-           prepaid_amount: prepaidAmount,
-           order_total_ratio: orderTotalRatio,
-           order_total_split: orderTotalSplit,
-           collectable_amount: collectableAmount,
-          // Preserve existing claim data or use defaults for new orders
-          status: existingClaim ? existingClaim.status : 'unclaimed',
-          claimed_by: existingClaim ? existingClaim.claimed_by : '',
-          claimed_at: existingClaim ? existingClaim.claimed_at : '',
-          last_claimed_by: existingClaim ? existingClaim.last_claimed_by : '',
-          last_claimed_at: existingClaim ? existingClaim.last_claimed_at : '',
-          clone_status: existingClaim ? existingClaim.clone_status : 'not_cloned',
-          cloned_order_id: existingClaim ? existingClaim.cloned_order_id : '',
-          is_cloned_row: existingClaim ? existingClaim.is_cloned_row : '',
-          label_downloaded: existingClaim ? existingClaim.label_downloaded : '',
-          handover_at: existingClaim ? existingClaim.handover_at : ''
+                                                         const orderRow = {
+          unique_id: existingClaim ? existingClaim.unique_id : uniqueIdCounter++,
+          order_id: order.order_id,
+          order_date: order.order_date,
+          product_name: product.product,
+          product_code: product.product_code,
+          // The 7 additional columns with correct logic
+          selling_price: sellingPrice,
+          order_total: orderTotal,
+          payment_type: paymentType,
+          prepaid_amount: prepaidAmount,
+          order_total_ratio: orderTotalRatio,
+          order_total_split: orderTotalSplit,
+          collectable_amount: collectableAmount,
+         // Preserve existing claim data or use defaults for new orders
+         status: existingClaim ? existingClaim.status : 'unclaimed',
+         claimed_by: existingClaim ? existingClaim.claimed_by : '',
+         claimed_at: existingClaim ? existingClaim.claimed_at : '',
+         last_claimed_by: existingClaim ? existingClaim.last_claimed_by : '',
+         last_claimed_at: existingClaim ? existingClaim.last_claimed_at : '',
+         clone_status: existingClaim ? existingClaim.clone_status : 'not_cloned',
+         cloned_order_id: existingClaim ? existingClaim.cloned_order_id : '',
+         is_cloned_row: existingClaim ? existingClaim.is_cloned_row : '',
+         label_downloaded: existingClaim ? existingClaim.label_downloaded : '',
+         handover_at: existingClaim ? existingClaim.handover_at : '',
+         // Preserve custom columns or use empty defaults for new orders
+         customer_name: existingClaim ? existingClaim.customer_name : '',
+         product_image: existingClaim ? existingClaim.product_image : ''
         };
         
         flatOrders.push(orderRow);
@@ -433,7 +439,7 @@ class ShipwayService {
       }
     }
     
-    // Always create/update Excel file if it doesn't exist or if there are changes
+        // Always create/update Excel file if it doesn't exist or if there are changes
     if (changed || !fs.existsSync(ordersExcelPath)) {
       // Write updated Excel file with preserved claim data and new columns
       const worksheet = XLSX.utils.json_to_sheet(flatOrders);
@@ -441,11 +447,45 @@ class ShipwayService {
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders');
       XLSX.writeFile(workbook, ordersExcelPath);
              this.logApiActivity({ 
-         type: 'excel-write-with-new-columns', 
-         rows: flatOrders.length, 
-         preservedClaims: existingClaimData.size,
-         newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount']
-       });
+        type: 'excel-write-with-new-columns', 
+        rows: flatOrders.length, 
+        preservedClaims: existingClaimData.size,
+        newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image']
+      });
+
+      // Automatically enhance orders with customer names and product images
+      try {
+        const enhancementResult = await orderEnhancementService.enhanceOrdersFile();
+        this.logApiActivity({ 
+          type: 'orders-enhancement', 
+          success: enhancementResult.success,
+          customerNamesAdded: enhancementResult.customerNamesAdded,
+          productImagesAdded: enhancementResult.productImagesAdded,
+          message: enhancementResult.message
+        });
+      } catch (enhancementError) {
+        this.logApiActivity({ 
+          type: 'orders-enhancement-error', 
+          error: enhancementError.message 
+        });
+      }
+
+      // Automatically sync carriers from Shipway API
+      try {
+        const shipwayCarrierService = require('./shipwayCarrierService');
+        const carrierResult = await shipwayCarrierService.syncCarriersToExcel();
+        this.logApiActivity({ 
+          type: 'carrier-sync', 
+          success: carrierResult.success,
+          carrierCount: carrierResult.carrierCount,
+          message: carrierResult.message
+        });
+      } catch (carrierError) {
+        this.logApiActivity({ 
+          type: 'carrier-sync-error', 
+          error: carrierError.message 
+        });
+      }
     } else {
       this.logApiActivity({ type: 'excel-no-change', rows: flatOrders.length });
     }

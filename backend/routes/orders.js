@@ -3,6 +3,7 @@ const router = express.Router();
 const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
+const { authenticateBasicAuth, requireAdminOrSuperadmin } = require('../middleware/auth');
 
 /**
  * @route   GET /api/orders
@@ -415,6 +416,327 @@ router.get('/grouped', (req, res) => {
   } catch (error) {
     console.log('💥 GROUPED ORDERS ERROR:', error.message);
     return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
+  }
+});
+
+/**
+ * @route   GET /api/orders/admin/all
+ * @desc    Get all orders with vendor information for admin panel
+ * @access  Admin/Superadmin only
+ */
+router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+  console.log('🔵 ADMIN ORDERS REQUEST START');
+  
+  try {
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    console.log('📂 Loading orders from:', ordersPath);
+    
+    if (!fs.existsSync(ordersPath)) {
+      return res.status(200).json({ success: true, data: { orders: [] } });
+    }
+    
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+    
+    console.log('📦 Orders loaded:', orders.length);
+    
+    // Load users.xlsx to get vendor information
+    const usersPath = path.join(__dirname, '../data/users.xlsx');
+    console.log('📂 Loading users from:', usersPath);
+    
+    let vendors = [];
+    if (fs.existsSync(usersPath)) {
+      const usersWb = XLSX.readFile(usersPath);
+      const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
+      const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
+      vendors = users.filter(user => user.role === 'vendor');
+      console.log('👥 Vendors loaded:', vendors.length);
+    }
+    
+    // Create vendor lookup map
+    const vendorMap = {};
+    vendors.forEach(vendor => {
+      vendorMap[vendor.warehouseId] = {
+        name: vendor.name,
+        email: vendor.email,
+        phone: vendor.phone
+      };
+    });
+    
+    // Process orders and add vendor information
+    const processedOrders = orders.map(order => {
+      const vendorInfo = order.claimed_by ? vendorMap[order.claimed_by] : null;
+      
+      return {
+        unique_id: order.unique_id,
+        order_id: order.order_id,
+        customer_name: order.customer_name || order.customer || 'N/A',
+        vendor_name: vendorInfo ? vendorInfo.name : (order.claimed_by ? order.claimed_by : 'Unclaimed'),
+        product_name: order.product_name || order.product || 'N/A',
+        status: order.status || 'unclaimed',
+        value: order.value || order.price || order.selling_price || '0',
+        priority: order.priority || 'medium',
+        created_at: order.created_at || order.order_date || 'N/A',
+        claimed_at: order.claimed_at || null,
+        claimed_by: order.claimed_by || null,
+        image: order.product_image || order.image || '/placeholder.svg'
+      };
+    });
+    
+    console.log('🟢 ADMIN ORDERS SUCCESS');
+    console.log('  - Processed orders:', processedOrders.length);
+    
+    return res.status(200).json({ 
+      success: true, 
+      data: { 
+        orders: processedOrders,
+        totalOrders: processedOrders.length,
+        claimedOrders: processedOrders.filter(o => o.status === 'claimed').length,
+        unclaimedOrders: processedOrders.filter(o => o.status === 'unclaimed').length
+      } 
+    });
+    
+  } catch (error) {
+    console.log('💥 ADMIN ORDERS ERROR:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch orders for admin panel', 
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/admin/assign
+ * @desc    Admin assigns an order to a vendor
+ * @access  Admin/Superadmin only
+ */
+router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+  const { unique_id, vendor_warehouse_id } = req.body;
+  
+  console.log('🔵 ADMIN ASSIGN ORDER REQUEST START');
+  console.log('  - unique_id:', unique_id);
+  console.log('  - vendor_warehouse_id:', vendor_warehouse_id);
+  
+  if (!unique_id || !vendor_warehouse_id) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'unique_id and vendor_warehouse_id are required' 
+    });
+  }
+
+  try {
+    // Load users.xlsx to verify vendor exists
+    const usersPath = path.join(__dirname, '../data/users.xlsx');
+    const usersWb = XLSX.readFile(usersPath);
+    const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
+    const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
+    
+    const vendor = users.find(u => u.warehouseId === vendor_warehouse_id && u.role === 'vendor');
+    if (!vendor) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Vendor not found or invalid warehouse ID' 
+      });
+    }
+    
+    console.log('✅ VENDOR FOUND:', vendor.name);
+
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+    
+    const orderIdx = orders.findIndex(o => String(o.unique_id) === String(unique_id));
+    
+    if (orderIdx === -1) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Order not found' 
+      });
+    }
+    
+    const order = orders[orderIdx];
+    console.log('✅ ORDER FOUND:', order.order_id);
+    
+    // Update order assignment
+    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    order.status = 'claimed';
+    order.claimed_by = vendor_warehouse_id;
+    order.claimed_at = now;
+    order.last_claimed_by = vendor_warehouse_id;
+    order.last_claimed_at = now;
+    
+    // Write back to Excel
+    const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+    const rowNum = orderIdx + 2;
+    
+    header.forEach((col, i) => {
+      ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = { 
+        t: 's', 
+        v: order[col] || '' 
+      };
+    });
+    
+    XLSX.writeFile(ordersWb, ordersPath);
+    
+    console.log('✅ ORDER ASSIGNED SUCCESSFULLY');
+    console.log(`  - Order ${order.order_id} assigned to ${vendor.name} (${vendor_warehouse_id})`);
+    
+    return res.json({ 
+      success: true, 
+      message: `Order ${order.order_id} assigned to ${vendor.name}`,
+      data: {
+        order_id: order.order_id,
+        vendor_name: vendor.name,
+        vendor_warehouse_id: vendor_warehouse_id,
+        assigned_at: now
+      }
+    });
+    
+  } catch (error) {
+    console.error('💥 ADMIN ASSIGN ERROR:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error: ' + error.message 
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/admin/unassign
+ * @desc    Admin unassigns an order from a vendor
+ * @access  Admin/Superadmin only
+ */
+router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+  const { unique_id } = req.body;
+  
+  console.log('🔵 ADMIN UNASSIGN ORDER REQUEST START');
+  console.log('  - unique_id:', unique_id);
+  
+  if (!unique_id) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'unique_id is required' 
+    });
+  }
+
+  try {
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+    
+    const orderIdx = orders.findIndex(o => String(o.unique_id) === String(unique_id));
+    
+    if (orderIdx === -1) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Order not found' 
+      });
+    }
+    
+    const order = orders[orderIdx];
+    console.log('✅ ORDER FOUND:', order.order_id);
+    
+    if (order.status === 'unclaimed') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Order is already unclaimed' 
+      });
+    }
+    
+    const previousVendor = order.claimed_by;
+    
+    // Update order to unclaimed
+    order.status = 'unclaimed';
+    order.claimed_by = '';
+    order.claimed_at = '';
+    // Keep last_claimed_by and last_claimed_at for history
+    
+    // Write back to Excel
+    const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+    const rowNum = orderIdx + 2;
+    
+    header.forEach((col, i) => {
+      ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = { 
+        t: 's', 
+        v: order[col] || '' 
+      };
+    });
+    
+    XLSX.writeFile(ordersWb, ordersPath);
+    
+    console.log('✅ ORDER UNASSIGNED SUCCESSFULLY');
+    console.log(`  - Order ${order.order_id} unassigned from ${previousVendor}`);
+    
+    return res.json({ 
+      success: true, 
+      message: `Order ${order.order_id} unassigned successfully`,
+      data: {
+        order_id: order.order_id,
+        previous_vendor: previousVendor,
+        unassigned_at: new Date().toISOString().replace('T', ' ').substring(0, 19)
+      }
+    });
+    
+  } catch (error) {
+    console.error('💥 ADMIN UNASSIGN ERROR:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error: ' + error.message 
+    });
+  }
+});
+
+/**
+ * @route   GET /api/orders/admin/vendors
+ * @desc    Get all active vendors for admin assignment dropdown
+ * @access  Admin/Superadmin only
+ */
+router.get('/admin/vendors', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+  console.log('🔵 ADMIN GET VENDORS REQUEST START');
+  
+  try {
+    // Load users.xlsx to get all vendors
+    const usersPath = path.join(__dirname, '../data/users.xlsx');
+    
+    if (!fs.existsSync(usersPath)) {
+      return res.status(200).json({ success: true, data: { vendors: [] } });
+    }
+    
+    const usersWb = XLSX.readFile(usersPath);
+    const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
+    const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
+    
+    // Filter active vendors
+    const vendors = users
+      .filter(user => user.role === 'vendor' && user.status === 'active')
+      .map(vendor => ({
+        warehouse_id: vendor.warehouseId,
+        name: vendor.name,
+        email: vendor.email,
+        phone: vendor.phone
+      }));
+    
+    console.log('✅ VENDORS LOADED:', vendors.length);
+    
+    return res.status(200).json({ 
+      success: true, 
+      data: { vendors }
+    });
+    
+  } catch (error) {
+    console.log('💥 ADMIN GET VENDORS ERROR:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch vendors', 
+      error: error.message 
+    });
   }
 });
 

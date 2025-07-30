@@ -202,6 +202,29 @@ class ApiClient {
     return this.makeRequest('/orders/last-updated')
   }
 
+  // Admin orders API
+  async getAdminOrders(): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/all');
+  }
+
+  async getAdminVendors(): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/vendors');
+  }
+
+  async assignOrderToVendor(unique_id: string, vendor_warehouse_id: string): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/assign', {
+      method: 'POST',
+      body: JSON.stringify({ unique_id, vendor_warehouse_id })
+    });
+  }
+
+  async unassignOrder(unique_id: string): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/unassign', {
+      method: 'POST',
+      body: JSON.stringify({ unique_id })
+    });
+  }
+
   async claimOrder(unique_id: string): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: claimOrder called');
     console.log('  - unique_id:', unique_id);
@@ -418,6 +441,110 @@ class ApiClient {
       console.error('Payment proof fetch failed:', error);
       throw error;
     }
+  }
+
+  // Carrier management methods
+  async getCarriers(): Promise<ApiResponse> {
+    return this.makeRequest('/shipway/carriers/local')
+  }
+
+  async syncCarriers(): Promise<ApiResponse> {
+    return this.makeRequest('/shipway/carriers/sync', {
+      method: 'POST'
+    })
+  }
+
+  async getCarrierStatus(): Promise<ApiResponse> {
+    return this.makeRequest('/shipway/carriers/status')
+  }
+
+  async downloadCarriersCSV(): Promise<void> {
+    try {
+      const authHeader = this.getAuthHeader();
+      
+      const response = await fetch(`${API_BASE_URL}/shipway/carriers/download`, {
+        method: 'GET',
+        headers: {
+          ...(authHeader && { 'Authorization': authHeader }),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Get the filename from the response headers
+      const contentDisposition = response.headers.get('content-disposition');
+      const filename = contentDisposition 
+        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '') || 'carriers.csv'
+        : 'carriers.csv';
+
+      // Convert response to blob and download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Error downloading carriers CSV:', error);
+      throw error;
+    }
+  }
+
+  async uploadCarrierPriorities(file: File): Promise<ApiResponse> {
+    try {
+      const authHeader = this.getAuthHeader();
+      
+      const formData = new FormData();
+      formData.append('csvFile', file, file.name); // Add filename explicitly
+
+      console.log('🔍 Uploading file:', {
+        name: file.name,
+        size: file.size,
+        type: file.type
+      });
+
+      const response = await fetch(`${API_BASE_URL}/shipway/carriers/upload-priority`, {
+        method: 'POST',
+        headers: {
+          ...(authHeader && { 'Authorization': authHeader }),
+          // Don't set Content-Type for FormData, let browser set it with boundary
+        },
+        body: formData,
+      });
+
+      console.log('🔍 Response status:', response.status);
+      console.log('🔍 Response headers:', response.headers);
+
+      let data;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        console.log('🔍 Response text:', text);
+        throw new Error(`Unexpected response format: ${text}`);
+      }
+      
+      console.log('🔍 Response data:', data);
+      
+      if (!response.ok) {
+        throw new Error(data.message || `HTTP error! status: ${response.status}`);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error uploading carrier priorities:', error);
+      throw error;
+    }
+  }
+
+  async getCarrierFormat(): Promise<ApiResponse> {
+    return this.makeRequest('/shipway/carriers/format')
   }
 }
 

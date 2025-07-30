@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Upload,
   BinaryIcon,
@@ -199,6 +200,7 @@ export function VendorDashboard() {
   const [showProofDialog, setShowProofDialog] = useState(false)
   const [selectedSettlementForView, setSelectedSettlementForView] = useState<any>(null)
   const [showViewRequestDialog, setShowViewRequestDialog] = useState(false)
+  const [selectedImageProduct, setSelectedImageProduct] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchAddress() {
@@ -1137,11 +1139,24 @@ export function VendorDashboard() {
                               />
                             </TableCell>
                             <TableCell>
-                              <img
-                                src={order.image || "/placeholder.svg"}
-                                alt={order.product_name}
-                                className="w-12 h-12 rounded-lg object-cover"
-                              />
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <img
+                                      src={order.product_image || "/placeholder.svg"}
+                                      alt={order.product_name}
+                                      className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                      onClick={() => order.product_image && setSelectedImageProduct(order.product_image)}
+                                      onError={(e) => {
+                                        e.currentTarget.src = "/placeholder.svg";
+                                      }}
+                                    />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Click to view full image</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
                             </TableCell>
                             <TableCell className="font-medium">{order.order_id}</TableCell>
                             <TableCell>{order.order_date}</TableCell>
@@ -1227,11 +1242,24 @@ export function VendorDashboard() {
                                 <div className="flex flex-col gap-2 max-w-md">
                                   {order.products.map((product: any, index: number) => (
                                     <div key={product.unique_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
-                                      <img
-                                        src={product.image || "/placeholder.svg"}
-                                        alt={product.product_name}
-                                        className="w-10 h-10 rounded-md object-cover flex-shrink-0"
-                                      />
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <img
+                                              src={product.image || "/placeholder.svg"}
+                                              alt={product.product_name}
+                                              className="w-10 h-10 rounded-md object-cover flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                              onClick={() => product.image && setSelectedImageProduct(product.image)}
+                                              onError={(e) => {
+                                                e.currentTarget.src = "/placeholder.svg";
+                                              }}
+                                            />
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p>Click to view full image</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
                                       <div className="flex-1 min-w-0">
                                         <p className="text-sm font-medium text-gray-900 break-words">
                                           {product.product_name}
@@ -1317,11 +1345,24 @@ export function VendorDashboard() {
                         {getFilteredOrdersForTab("handover").map((order) => (
                           <TableRow key={order.id}>
                             <TableCell>
-                              <img
-                                src={order.image || "/placeholder.svg"}
-                                alt={order.product}
-                                className="w-12 h-12 rounded-lg object-cover"
-                              />
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <img
+                                      src={order.product_image || "/placeholder.svg"}
+                                      alt={order.product_name || order.product}
+                                      className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                      onClick={() => order.product_image && setSelectedImageProduct(order.product_image)}
+                                      onError={(e) => {
+                                        e.currentTarget.src = "/placeholder.svg";
+                                      }}
+                                    />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Click to view full image</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
                             </TableCell>
                             <TableCell className="font-medium">{order.id}</TableCell>
                             <TableCell>{order.customer}</TableCell>
@@ -1667,6 +1708,27 @@ export function VendorDashboard() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Image Preview Modal */}
+      <Dialog open={!!selectedImageProduct} onOpenChange={() => setSelectedImageProduct(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedImageProduct ? `${selectedImageProduct}` : "Image Preview"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center">
+            <img
+              src={selectedImageProduct || ""}
+              alt={selectedImageProduct || "Image"}
+              className="max-w-full max-h-[70vh] object-contain rounded-lg"
+              onError={(e) => {
+                e.currentTarget.src = "/placeholder.svg";
+              }}
+            />
+          </div>
         </DialogContent>
       </Dialog>
     </div>

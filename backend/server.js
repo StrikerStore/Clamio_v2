@@ -76,6 +76,8 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+
+
 /**
  * Logging Middleware
  */
@@ -275,6 +277,26 @@ app.listen(PORT, () => {
       console.log('[Shipway Sync] Orders synced to Excel (startup).');
     } catch (err) {
       console.error('[Shipway Sync] Startup sync failed:', err.message);
+    }
+  })();
+
+  // Start Carrier sync cron job (every 6 hours)
+  const carrierSyncService = require('./services/carrierSyncService');
+  cron.schedule('0 */6 * * *', async () => {
+    try {
+      await carrierSyncService.startCarrierSync();
+      console.log('[Carrier Sync] Carriers synced to Excel.');
+    } catch (err) {
+      console.error('[Carrier Sync] Failed:', err.message);
+    }
+  });
+  // Run once immediately on startup
+  (async () => {
+    try {
+      await carrierSyncService.startCarrierSync();
+      console.log('[Carrier Sync] Carriers synced to Excel (startup).');
+    } catch (err) {
+      console.error('[Carrier Sync] Startup sync failed:', err.message);
     }
   })();
 });
