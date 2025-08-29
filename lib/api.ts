@@ -23,6 +23,10 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const authHeader = this.getAuthHeader()
     
+    console.log('🔍 API CLIENT DEBUG:');
+    console.log('  - Endpoint:', endpoint);
+    console.log('  - Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
+    
     const config: RequestInit = {
       headers: {
         'Content-Type': 'application/json',
@@ -35,6 +39,11 @@ class ApiClient {
     try {
       const response = await fetch(`${API_BASE_URL}${endpoint}`, config)
       const data = await response.json()
+
+      console.log('🔍 API RESPONSE DEBUG:');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Data:', data);
 
       if (!response.ok) {
         throw new Error(data.message || `HTTP error! status: ${response.status}`)
@@ -544,7 +553,86 @@ class ApiClient {
   }
 
   async getCarrierFormat(): Promise<ApiResponse> {
-    return this.makeRequest('/shipway/carriers/format')
+    return this.makeRequest('/shipway/carrier-format')
+  }
+
+  // Download label methods
+  async downloadLabel(orderId: string): Promise<ApiResponse> {
+    // For vendor endpoints, use vendorToken instead of authHeader
+    const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
+    
+    console.log('🔍 DOWNLOAD LABEL API CLIENT DEBUG:');
+    console.log('  - Order ID being sent:', orderId);
+    console.log('  - Order ID type:', typeof orderId);
+    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    
+    const config: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(vendorToken && { 'Authorization': vendorToken }),
+      },
+      body: JSON.stringify({ order_id: orderId })
+    }
+
+    console.log('  - Request body:', JSON.stringify({ order_id: orderId }));
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders/download-label`, config)
+      const data = await response.json()
+
+      console.log('🔍 DOWNLOAD LABEL API RESPONSE DEBUG:');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Data:', data);
+
+      if (!response.ok) {
+        throw new Error(data.message || `HTTP error! status: ${response.status}`)
+      }
+
+      return data
+    } catch (error) {
+      console.error('Download label API request failed:', error)
+      throw error
+    }
+  }
+
+  async downloadLabelFile(shippingUrl: string): Promise<Blob> {
+    console.log('🔍 DOWNLOAD LABEL FILE DEBUG:');
+    console.log('  - Shipping URL:', shippingUrl);
+    
+    // For Shipway URLs, we don't need our backend's auth header
+    // Shipway URLs are public and don't require authentication
+    const config: RequestInit = {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/pdf,image/*,*/*',
+      },
+    }
+
+    try {
+      console.log('🔄 Fetching label file from Shipway...');
+      const response = await fetch(shippingUrl, config)
+      
+      console.log('🔍 Label file response:');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Content-Type:', response.headers.get('content-type'));
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const blob = await response.blob()
+      console.log('✅ Label file downloaded successfully');
+      console.log('  - Blob size:', blob.size, 'bytes');
+      console.log('  - Blob type:', blob.type);
+      
+      return blob
+    } catch (error) {
+      console.error('❌ Download label file failed:', error)
+      throw error
+    }
   }
 }
 

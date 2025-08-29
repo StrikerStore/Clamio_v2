@@ -774,11 +774,86 @@ export function VendorDashboard() {
     })
   }
 
-  const handleDownloadLabel = (orderId: string, format: string) => {
-    toast({
-      title: "Label Downloaded",
-      description: `${format} label for order ${orderId} downloaded successfully`,
-    })
+  const handleDownloadLabel = async (orderId: string, format: string) => {
+    try {
+      console.log('🔵 FRONTEND: Starting download label process');
+      console.log('  - order_id:', orderId);
+      console.log('  - order_id type:', typeof orderId);
+      console.log('  - format:', format);
+
+      // Debug: Check auth header and vendor token
+      const authHeader = localStorage.getItem('authHeader');
+      const vendorToken = localStorage.getItem('vendorToken');
+      console.log('🔍 FRONTEND: Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
+      console.log('🔍 FRONTEND: Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+
+      // Call the download label API
+      const response = await apiClient.downloadLabel(orderId);
+      
+      console.log('📥 FRONTEND: Download label response received');
+      console.log('  - success:', response.success);
+      console.log('  - data:', response.data);
+      
+      if (response.success && response.data) {
+        const { shipping_url, awb, original_order_id, clone_order_id } = response.data;
+        
+        console.log('✅ FRONTEND: Label generated successfully');
+        console.log('  - Shipping URL:', shipping_url);
+        console.log('  - AWB:', awb);
+        
+        // Download the label file
+        try {
+          const blob = await apiClient.downloadLabelFile(shipping_url);
+          
+          // Create download link
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `label_${orderId}_${awb}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          
+          console.log('✅ FRONTEND: Label file downloaded successfully');
+          
+          // Show success message
+          const orderDisplayId = clone_order_id || original_order_id || orderId;
+          toast({
+            title: "Label Downloaded",
+            description: `${format} label for order ${orderDisplayId} downloaded successfully`,
+          });
+          
+        } catch (downloadError) {
+          console.error('❌ FRONTEND: Label file download failed:', downloadError);
+          
+          // Fallback: open in new tab
+          window.open(shipping_url, '_blank');
+          
+          toast({
+            title: "Label Generated",
+            description: `Label generated successfully. Opening in new tab.`,
+          });
+        }
+        
+      } else {
+        console.log('❌ FRONTEND: Download label failed');
+        console.log('  - Error message:', response.message);
+        toast({
+          title: 'Download Label Failed',
+          description: response.message || 'Could not generate label',
+          variant: 'destructive',
+        });
+      }
+      
+    } catch (error) {
+      console.error('❌ FRONTEND: Download label error:', error);
+      toast({
+        title: 'Download Label Failed',
+        description: 'An error occurred while generating the label',
+        variant: 'destructive',
+      });
+    }
   }
 
   const handleBulkDownloadLabels = (tab: string) => {
@@ -1234,7 +1309,9 @@ export function VendorDashboard() {
                                   }}
                                 />
                               </TableCell>
-                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell className="font-medium">
+                                {order.original_order_id || order.order_id}
+                              </TableCell>
                               <TableCell>
                                 {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
                               </TableCell>
@@ -1720,14 +1797,20 @@ export function VendorDashboard() {
             </DialogTitle>
           </DialogHeader>
           <div className="flex justify-center">
-            <img
-              src={selectedImageProduct || ""}
-              alt={selectedImageProduct || "Image"}
-              className="max-w-full max-h-[70vh] object-contain rounded-lg"
-              onError={(e) => {
-                e.currentTarget.src = "/placeholder.svg";
-              }}
-            />
+            {selectedImageProduct ? (
+              <img
+                src={selectedImageProduct}
+                alt="Product Image"
+                className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                onError={(e) => {
+                  e.currentTarget.src = "/placeholder.svg";
+                }}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-[70vh] text-gray-500">
+                No image available
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
