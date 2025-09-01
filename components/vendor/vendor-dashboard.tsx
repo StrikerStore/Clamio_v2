@@ -30,6 +30,7 @@ import {
   FileText,
   Calendar,
   Settings,
+  RefreshCw,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -183,6 +184,7 @@ export function VendorDashboard() {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [ordersRefreshing, setOrdersRefreshing] = useState(false);
 
   // Grouped orders for My Orders tab
   const [groupedOrders, setGroupedOrders] = useState<any[]>([]);
@@ -348,7 +350,7 @@ export function VendorDashboard() {
           const ordersResponse = await apiClient.getOrders();
           if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
             setOrders(ordersResponse.data.orders);
-            console.log('✅ Orders refreshed due to external update');
+            console.log('✅ FRONTEND: Orders refreshed due to external update');
           }
           
           setLastUpdated(response.data.lastUpdated);
@@ -856,7 +858,7 @@ export function VendorDashboard() {
     }
   }
 
-  const handleBulkDownloadLabels = (tab: string) => {
+  const handleBulkDownloadLabels = async (tab: string) => {
     let selectedOrders
     if (tab === "my-orders") {
       selectedOrders = selectedMyOrders
@@ -873,15 +875,54 @@ export function VendorDashboard() {
       return
     }
 
-    toast({
-      title: "Bulk Download Started",
-      description: `Downloading ${labelFormat} labels for ${selectedOrders.length} orders`,
-    })
+    try {
+      toast({
+        title: "Bulk Download Started",
+        description: `Generating ${labelFormat} labels for ${selectedOrders.length} orders...`,
+      })
 
-    if (tab === "my-orders") {
-      setSelectedMyOrders([])
-    } else {
-      setSelectedOrdersForDownload([])
+      console.log('🔵 FRONTEND: Starting bulk download labels process');
+      console.log('  - selected orders:', selectedOrders);
+      console.log('  - tab:', tab);
+
+      // Call the bulk download labels API
+      const blob = await apiClient.bulkDownloadLabels(selectedOrders);
+      
+      console.log('📥 FRONTEND: Bulk download labels response received');
+      console.log('  - blob size:', blob.size);
+      console.log('  - blob type:', blob.type);
+      
+      // Create download link for the combined PDF
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `bulk-labels-${Date.now()}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      console.log('✅ FRONTEND: Bulk labels PDF downloaded successfully');
+      
+      toast({
+        title: "Bulk Download Complete",
+        description: `Successfully downloaded labels for ${selectedOrders.length} orders`,
+      })
+
+      // Clear selected orders
+      if (tab === "my-orders") {
+        setSelectedMyOrders([])
+      } else {
+        setSelectedOrdersForDownload([])
+      }
+      
+    } catch (error) {
+      console.error('❌ FRONTEND: Bulk download labels error:', error);
+      toast({
+        title: 'Bulk Download Failed',
+        description: error instanceof Error ? error.message : 'An error occurred while downloading labels',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -962,6 +1003,61 @@ export function VendorDashboard() {
       });
     }
   }
+
+  const handleRefreshOrders = async () => {
+    setOrdersRefreshing(true);
+    try {
+      const response = await apiClient.refreshOrders();
+      if (response.success) {
+        toast({
+          title: "Orders Refreshed",
+          description: "Your orders have been refreshed from Shipway.",
+        });
+        
+        // Clear filters and refresh all orders
+        setActiveTab("all-orders");
+        setTabFilters({
+          "all-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+          "my-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+          "handover": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+        });
+        
+        // Re-fetch all orders and grouped orders
+        try {
+          const ordersResponse = await apiClient.getOrders();
+          if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
+            setOrders(ordersResponse.data.orders);
+            console.log('✅ FRONTEND: Orders refreshed successfully');
+          }
+          
+          const groupedResponse = await apiClient.getGroupedOrders();
+          if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+            setGroupedOrders(groupedResponse.data.groupedOrders);
+            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
+          }
+        } catch (refreshError) {
+          console.log('⚠️ FRONTEND: Failed to refresh orders data, but Shipway sync was successful');
+        }
+        
+        console.log('✅ FRONTEND: Orders refreshed successfully via API');
+      } else {
+        toast({
+          title: "Refresh Failed",
+          description: response.message || "Failed to refresh orders.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('❌ FRONTEND: Error refreshing orders:', error);
+      toast({
+        title: "Refresh Failed",
+        description: error instanceof Error ? error.message : "An error occurred while refreshing orders.",
+        variant: "destructive",
+      });
+    } finally {
+      setOrdersRefreshing(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1077,8 +1173,30 @@ export function VendorDashboard() {
         {/* Main Content */}
         <Card>
           <CardHeader>
-            <CardTitle>Order Management</CardTitle>
-            <CardDescription>Manage your orders across different stages</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Order Management</CardTitle>
+                <CardDescription>Manage your orders across different stages</CardDescription>
+              </div>
+              <Button
+                onClick={handleRefreshOrders}
+                disabled={ordersRefreshing}
+                variant="outline"
+                className="h-10"
+              >
+                {ordersRefreshing ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                    Refreshing...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Refresh Orders
+                  </>
+                )}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">

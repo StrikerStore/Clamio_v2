@@ -124,7 +124,7 @@ export function LoginForm() {
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required
+                required={true}
                 disabled={loading}
               />
             </div>
@@ -137,7 +137,7 @@ export function LoginForm() {
                   placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required
+                  required={true}
                   disabled={loading}
                 />
                 <Button
@@ -202,7 +202,7 @@ export function LoginForm() {
                         placeholder="Enter your email"
                         value={resetEmail}
                         onChange={(e) => setResetEmail(e.target.value)}
-                        required
+                        required={true}
                         disabled={resetLoading}
                       />
                     </div>
@@ -215,7 +215,7 @@ export function LoginForm() {
                           placeholder="Enter current password"
                           value={oldPassword}
                           onChange={(e) => setOldPassword(e.target.value)}
-                          required
+                          required={true}
                           disabled={resetLoading}
                         />
                         <Button
@@ -239,7 +239,7 @@ export function LoginForm() {
                           placeholder="Enter new password"
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
-                          required
+                          required={true}
                           disabled={resetLoading}
                         />
                         <Button
@@ -263,7 +263,7 @@ export function LoginForm() {
                           placeholder="Confirm new password"
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
-                          required
+                          required={true}
                           disabled={resetLoading}
                         />
                         <Button

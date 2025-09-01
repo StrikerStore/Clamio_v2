@@ -211,6 +211,41 @@ class ApiClient {
     return this.makeRequest('/orders/last-updated')
   }
 
+  async refreshOrders(): Promise<ApiResponse> {
+    // For vendor endpoints, use vendorToken instead of authHeader
+    const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
+    
+    console.log('🔍 REFRESH ORDERS API CLIENT DEBUG:');
+    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    
+    const config: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(vendorToken && { 'Authorization': vendorToken }),
+      }
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders/refresh`, config)
+      const data = await response.json()
+
+      console.log('🔍 REFRESH ORDERS API RESPONSE DEBUG:');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Data:', data);
+
+      if (!response.ok) {
+        throw new Error(data.message || `HTTP error! status: ${response.status}`)
+      }
+
+      return data
+    } catch (error) {
+      console.error('Refresh orders API request failed:', error)
+      throw error
+    }
+  }
+
   // Admin orders API
   async getAdminOrders(): Promise<ApiResponse> {
     return this.makeRequest('/orders/admin/all');
@@ -593,6 +628,52 @@ class ApiClient {
       return data
     } catch (error) {
       console.error('Download label API request failed:', error)
+      throw error
+    }
+  }
+
+  async bulkDownloadLabels(orderIds: string[]): Promise<Blob> {
+    // For vendor endpoints, use vendorToken instead of authHeader
+    const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
+    
+    console.log('🔍 BULK DOWNLOAD LABELS API CLIENT DEBUG:');
+    console.log('  - Order IDs being sent:', orderIds);
+    console.log('  - Order IDs count:', orderIds.length);
+    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    
+    const config: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(vendorToken && { 'Authorization': vendorToken }),
+      },
+      body: JSON.stringify({ order_ids: orderIds })
+    }
+
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds }));
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)
+      
+      console.log('🔍 BULK DOWNLOAD LABELS API RESPONSE DEBUG:');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Content-Type:', response.headers.get('content-type'));
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+      }
+
+      // Get the blob from the response
+      const blob = await response.blob()
+      console.log('✅ Bulk labels PDF downloaded successfully');
+      console.log('  - Blob size:', blob.size, 'bytes');
+      console.log('  - Blob type:', blob.type);
+      
+      return blob
+    } catch (error) {
+      console.error('Bulk download labels API request failed:', error)
       throw error
     }
   }

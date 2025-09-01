@@ -1324,4 +1324,279 @@ async function syncOrdersFromShipway() {
   }
 }
 
+/**
+ * @route   POST /api/orders/bulk-download-labels
+ * @desc    Download labels for multiple orders and merge into single PDF
+ * @access  Vendor (token required)
+ */
+router.post('/bulk-download-labels', async (req, res) => {
+  const { order_ids } = req.body;
+  const token = req.headers['authorization'];
+  
+  console.log('🔵 BULK DOWNLOAD LABELS REQUEST START');
+  console.log('  - order_ids:', order_ids);
+  console.log('  - token received:', token ? 'YES' : 'NO');
+  
+  if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
+    console.log('❌ BULK DOWNLOAD LABELS FAILED: Missing required fields');
+    return res.status(400).json({ 
+      success: false, 
+      message: 'order_ids array and Authorization token required' 
+    });
+  }
+
+  try {
+    // Load users.xlsx to get vendor info
+    const usersPath = path.join(__dirname, '../data/users.xlsx');
+    const usersWb = XLSX.readFile(usersPath);
+    const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
+    const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
+    
+    const vendor = users.find(u => u.token === token && u.active_session === 'TRUE');
+    
+    if (!vendor) {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE');
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+
+    console.log('✅ VENDOR FOUND:');
+    console.log('  - Email:', vendor.email);
+    console.log('  - Warehouse ID:', vendor.warehouseId);
+
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+
+    const results = [];
+    const errors = [];
+
+    // Process each order ID
+    for (const orderId of order_ids) {
+      try {
+        console.log(`🔄 Processing order: ${orderId}`);
+        
+        // Check if this is already a clone order
+        const isCloneOrder = orderId.includes('_');
+        
+        // Get all products for this order_id
+        const orderProducts = orders.filter(order => order.order_id === orderId);
+        const claimedProducts = orderProducts.filter(order => 
+          order.claimed_by === vendor.warehouseId && order.status === 'claimed'
+        );
+
+        if (claimedProducts.length === 0) {
+          errors.push({
+            order_id: orderId,
+            error: 'No products claimed by this vendor for this order'
+          });
+          continue;
+        }
+
+        let labelResponse;
+        if (isCloneOrder) {
+          // Already a clone order - direct download
+          labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor);
+        } else if (orderProducts.length === claimedProducts.length) {
+          // Direct download - all products claimed by vendor
+          labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor);
+        } else if (claimedProducts.length > 0) {
+          // Clone required - some products claimed by vendor
+          labelResponse = await handleOrderCloning(orderId, claimedProducts, orderProducts, vendor);
+        } else {
+          errors.push({
+            order_id: orderId,
+            error: 'No products claimed by this vendor for this order'
+          });
+          continue;
+        }
+
+        if (labelResponse.success) {
+          results.push({
+            order_id: orderId,
+            shipping_url: labelResponse.data.shipping_url,
+            awb: labelResponse.data.awb
+          });
+        } else {
+          errors.push({
+            order_id: orderId,
+            error: labelResponse.message || 'Label generation failed'
+          });
+        }
+
+      } catch (error) {
+        console.error(`❌ Error processing order ${orderId}:`, error);
+        errors.push({
+          order_id: orderId,
+          error: error.message
+        });
+      }
+    }
+
+    console.log('📊 BULK DOWNLOAD LABELS COMPLETE:');
+    console.log('  - Successful:', results.length);
+    console.log('  - Failed:', errors.length);
+
+    if (results.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No labels could be generated for any of the selected orders',
+        data: { errors }
+      });
+    }
+
+    // Generate combined PDF
+    try {
+      const combinedPdfBuffer = await generateCombinedLabelsPDF(results);
+      
+      // Set response headers for PDF download
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="bulk-labels-${Date.now()}.pdf"`);
+      res.setHeader('Content-Length', combinedPdfBuffer.length);
+      
+      // Send the PDF buffer
+      res.send(combinedPdfBuffer);
+      
+    } catch (pdfError) {
+      console.error('❌ PDF generation failed:', pdfError);
+      
+      // Fallback: return individual label URLs
+      return res.json({
+        success: true,
+        message: 'Labels generated but PDF combination failed. Returning individual URLs.',
+        data: {
+          labels: results,
+          errors,
+          total_successful: results.length,
+          total_failed: errors.length
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ BULK DOWNLOAD LABELS ERROR:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to process bulk label download', 
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * Generate combined PDF from multiple label URLs
+ */
+async function generateCombinedLabelsPDF(labels) {
+  try {
+    console.log('🔄 Generating combined PDF for', labels.length, 'labels');
+    
+    // Import PDF-lib for PDF manipulation
+    const { PDFDocument } = require('pdf-lib');
+    
+    // Create a new PDF document
+    const mergedPdf = await PDFDocument.create();
+    
+    // Process each label
+    for (const label of labels) {
+      try {
+        console.log(`  - Processing label for order ${label.order_id}`);
+        
+        // Fetch the PDF from the shipping URL
+        const response = await fetch(label.shipping_url);
+        if (!response.ok) {
+          console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
+          continue;
+        }
+        
+        const pdfBuffer = await response.arrayBuffer();
+        
+        // Load the PDF
+        const pdf = await PDFDocument.load(pdfBuffer);
+        
+        // Copy all pages from this PDF to the merged PDF
+        const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+        pages.forEach(page => mergedPdf.addPage(page));
+        
+        console.log(`    ✅ Added label for order ${label.order_id}`);
+        
+      } catch (labelError) {
+        console.log(`    ❌ Error processing label for order ${label.order_id}:`, labelError.message);
+      }
+    }
+    
+    // Save the merged PDF
+    const mergedPdfBytes = await mergedPdf.save();
+    console.log('✅ Combined PDF generated successfully');
+    
+    return Buffer.from(mergedPdfBytes);
+    
+  } catch (error) {
+    console.error('❌ Combined PDF generation failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * @route   POST /api/orders/refresh
+ * @desc    Refresh orders by syncing from Shipway API
+ * @access  Vendor (token required)
+ */
+router.post('/refresh', async (req, res) => {
+  const token = req.headers['authorization'];
+  
+  console.log('🔵 REFRESH ORDERS REQUEST START');
+  console.log('  - token received:', token ? 'YES' : 'NO');
+  
+  if (!token) {
+    console.log('❌ REFRESH ORDERS FAILED: Missing token');
+    return res.status(400).json({ success: false, message: 'Authorization token required' });
+  }
+
+  try {
+    // Load users.xlsx to get vendor info
+    const usersPath = path.join(__dirname, '../data/users.xlsx');
+    const usersWb = XLSX.readFile(usersPath);
+    const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
+    const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
+    
+    const vendor = users.find(u => u.token === token && u.active_session === 'TRUE');
+    
+    if (!vendor) {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE');
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+
+    console.log('✅ VENDOR FOUND:');
+    console.log('  - Email:', vendor.email);
+    console.log('  - Warehouse ID:', vendor.warehouseId);
+
+    // Import shipwayService
+    const shipwayService = require('../services/shipwayService');
+    
+    console.log('🔄 Starting orders sync from Shipway...');
+    const result = await shipwayService.syncOrdersToExcel();
+    
+    console.log('✅ Orders synced successfully');
+    console.log('  - Result:', result);
+    
+    return res.json({
+      success: true,
+      message: 'Orders refreshed successfully from Shipway',
+      data: {
+        sync_result: result,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ REFRESH ORDERS ERROR:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to refresh orders', 
+      error: error.message 
+    });
+  }
+});
+
 module.exports = router; 
