@@ -64,7 +64,7 @@ const comparePassword = async (password, hash) => {
  * Basic Authentication middleware
  * Verifies Basic Auth credentials and adds user to request object
  */
-const authenticateBasicAuth = (req, res, next) => {
+const authenticateBasicAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
     if (!authHeader) {
@@ -85,7 +85,7 @@ const authenticateBasicAuth = (req, res, next) => {
     const { email, password } = credentials;
 
     // Find user by email
-    const user = database.getUserByEmail(email);
+    const user = await database.getUserByEmail(email);
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -186,7 +186,7 @@ const requireAnyUser = authorizeRoles(['admin', 'vendor', 'superadmin']);
  * Optional authentication middleware
  * Adds user to request if Basic Auth is valid, but doesn't require it
  */
-const optionalAuth = (req, res, next) => {
+const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
     
@@ -194,7 +194,7 @@ const optionalAuth = (req, res, next) => {
       const credentials = decodeBasicAuth(authHeader);
       if (credentials) {
         const { email, password } = credentials;
-        const user = database.getUserByEmail(email);
+        const user = await database.getUserByEmail(email);
         
         if (user && user.status === 'active' && bcrypt.compareSync(password, user.password)) {
           req.user = user;

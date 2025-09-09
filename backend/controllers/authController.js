@@ -17,7 +17,7 @@ class AuthController {
       const { email, password } = req.body;
 
       // Find user by email
-      const user = database.getUserByEmail(email);
+      const user = await await database.getUserByEmail(email);
       if (!user) {
         return res.status(401).json({
           success: false,
@@ -43,7 +43,7 @@ class AuthController {
       }
 
       // Update last login
-      database.updateLastLogin(user.id);
+      await await database.updateUser(user.id, { lastLogin: new Date() });
 
       // Generate Basic Auth header for client
       const basicAuthHeader = encodeBasicAuth(email, password);
@@ -53,9 +53,9 @@ class AuthController {
       if (user.warehouseId) {
         try {
           // Ensure tokens and sessions are initialized
-          userSessionService.ensureTokensAndSessions();
+          await userSessionService.ensureTokensAndSessions();
           // Login vendor and get token
-          vendorToken = userSessionService.loginVendor(user.warehouseId);
+          vendorToken = await userSessionService.loginVendor(user.warehouseId);
         } catch (error) {
           console.error('Error setting vendor session:', error);
         }
@@ -94,7 +94,7 @@ class AuthController {
       const { phone, password } = req.body;
 
       // Find user by phone
-      const user = database.getUserByPhone(phone);
+      const user = await database.getUserByPhone(phone);
       if (!user) {
         return res.status(401).json({
           success: false,
@@ -120,7 +120,7 @@ class AuthController {
       }
 
       // Update last login
-      database.updateLastLogin(user.id);
+      await await database.updateUser(user.id, { lastLogin: new Date() });
 
       // Generate Basic Auth header for client
       const basicAuthHeader = encodeBasicAuth(user.email, password);
@@ -184,7 +184,7 @@ class AuthController {
       const userId = req.user.id;
 
       // Get user with password
-      const user = database.getUserById(userId);
+      const user = await await database.getUserById(userId);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -205,7 +205,7 @@ class AuthController {
       const hashedNewPassword = await hashPassword(newPassword);
 
       // Update password
-      const updatedUser = database.updateUser(userId, {
+      const updatedUser = await database.updateUser(userId, {
         password: hashedNewPassword
       });
 
@@ -262,7 +262,7 @@ class AuthController {
       }
 
       // Find user by email
-      const user = database.getUserByEmail(email);
+      const user = await database.getUserByEmail(email);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -291,7 +291,7 @@ class AuthController {
       const hashedNewPassword = await hashPassword(newPassword);
 
       // Update password
-      const updatedUser = database.updateUser(user.id, {
+      const updatedUser = await database.updateUser(user.id, {
         password: hashedNewPassword
       });
 
@@ -335,7 +335,7 @@ class AuthController {
       }
 
       // Get target user
-      const targetUser = database.getUserById(userId);
+      const targetUser = await database.getUserById(userId);
       if (!targetUser) {
         return res.status(404).json({
           success: false,
@@ -347,7 +347,7 @@ class AuthController {
       const hashedNewPassword = await hashPassword(newPassword);
 
       // Update password
-      const updatedUser = database.updateUser(userId, {
+      const updatedUser = await database.updateUser(userId, {
         password: hashedNewPassword
       });
 
@@ -446,7 +446,7 @@ class AuthController {
       }
 
       // Verify credentials
-      const user = database.getUserByEmail(email);
+      const user = await await database.getUserByEmail(email);
       if (!user) {
         return res.status(401).json({
           success: false,
@@ -471,7 +471,7 @@ class AuthController {
       }
 
       // Update last login
-      database.updateLastLogin(user.id);
+      await await database.updateUser(user.id, { lastLogin: new Date() });
 
       // Generate Basic Auth header
       const basicAuthHeader = encodeBasicAuth(email, password);
@@ -481,9 +481,9 @@ class AuthController {
       if (user.warehouseId) {
         try {
           // Ensure tokens and sessions are initialized
-          userSessionService.ensureTokensAndSessions();
+          await userSessionService.ensureTokensAndSessions();
           // Login vendor and get token
-          vendorToken = userSessionService.loginVendor(user.warehouseId);
+          vendorToken = await userSessionService.loginVendor(user.warehouseId);
         } catch (error) {
           console.error('Error setting vendor session:', error);
         }

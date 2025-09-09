@@ -165,11 +165,11 @@ router.get('/carriers/local', authenticateBasicAuth, requireAdminOrSuperadmin, a
     console.log('🔵 SHIPWAY CARRIERS LOCAL: API request received');
     
     const shipwayCarrierService = require('../services/shipwayCarrierService');
-    const carriers = shipwayCarrierService.readCarriersFromExcel();
+    const carriers = await shipwayCarrierService.readCarriersFromDatabase();
     
     res.json({
       success: true,
-      message: `Successfully loaded ${carriers.length} carriers from local file`,
+      message: `Successfully loaded ${carriers.length} carriers from database`,
       data: {
         carriers: carriers,
         carrierCount: carriers.length
@@ -257,7 +257,7 @@ router.get('/carriers/download', authenticateBasicAuth, requireAdminOrSuperadmin
     console.log('🔵 SHIPWAY CARRIERS DOWNLOAD: API request received');
     
     const shipwayCarrierService = require('../services/shipwayCarrierService');
-    const csvContent = shipwayCarrierService.exportCarriersToCSV();
+    const csvContent = await shipwayCarrierService.exportCarriersToCSV();
     
     // Set headers for file download
     res.setHeader('Content-Type', 'text/csv');
@@ -327,7 +327,7 @@ router.post('/carriers/upload-priority',
       console.log('🔍 CSV Content to process:', csvContent.substring(0, 200) + '...');
       console.log('🔍 CSV Content full length:', csvContent.length);
       
-      const result = shipwayCarrierService.updateCarrierPrioritiesFromCSV(csvContent);
+      const result = await shipwayCarrierService.updateCarrierPrioritiesFromCSV(csvContent);
       
       res.json({
         success: true,
@@ -451,6 +451,33 @@ router.post('/carriers/test-simple',
 );
 
 /**
+ * @route   GET /api/shipway/carrier-format
+ * @desc    Get expected CSV format and validation rules (frontend compatibility)
+ * @access  Admin/Superadmin only
+ */
+router.get('/carrier-format', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    console.log('🔵 SHIPWAY CARRIER FORMAT: API request received');
+    
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const formatInfo = await shipwayCarrierService.getExpectedCSVFormat();
+    
+    res.json({
+      success: true,
+      message: 'CSV format requirements retrieved successfully',
+      data: formatInfo
+    });
+  } catch (error) {
+    console.error('💥 SHIPWAY CARRIER FORMAT: API error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get CSV format requirements',
+      error: error.message
+    });
+  }
+});
+
+/**
  * @route   GET /api/shipway/carriers/format
  * @desc    Get expected CSV format and validation rules
  * @access  Admin/Superadmin only
@@ -460,7 +487,7 @@ router.get('/carriers/format', authenticateBasicAuth, requireAdminOrSuperadmin, 
     console.log('🔵 SHIPWAY CARRIERS FORMAT: API request received');
     
     const shipwayCarrierService = require('../services/shipwayCarrierService');
-    const formatInfo = shipwayCarrierService.getExpectedCSVFormat();
+    const formatInfo = await shipwayCarrierService.getExpectedCSVFormat();
     
     res.json({
       success: true,

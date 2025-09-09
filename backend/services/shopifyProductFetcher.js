@@ -2,6 +2,7 @@ const axios = require('axios');
 const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
+const database = require('../config/database');
 
 /**
  * Check if there are any running bulk operations
@@ -77,18 +78,17 @@ async function cancelBulkOperation(shopifyGraphqlUrl, headers, bulkOperationId) 
 }
 
 /**
- * Fetch products from Shopify using Bulk Operations API and save to Excel
+ * Fetch products from Shopify using Bulk Operations API and save to MySQL
  * @param {string} shopifyGraphqlUrl - The Shopify GraphQL endpoint
  * @param {object} headers - The headers for Shopify API (including Authorization)
- * @param {string} excelFilePath - The path to save the Excel file
  * @param {boolean} forceNew - Whether to force a new operation (will cancel existing ones)
  */
-async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, excelFilePath, forceNew = false) {
+async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, forceNew = false) {
   try {
     console.log('[Shopify] Starting bulk product fetch...');
     console.log('[Shopify] Endpoint:', shopifyGraphqlUrl);
     console.log('[Shopify] Headers:', Object.keys(headers));
-    console.log('[Shopify] Excel output:', excelFilePath);
+    console.log('[Shopify] Output: MySQL database');
 
     // Check for existing running operations
     const runningOperation = await checkForRunningBulkOperations(shopifyGraphqlUrl, headers);
@@ -111,16 +111,15 @@ async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, excelFile
           // Download and parse the data
           const jsonlData = await downloadBulkOperationData(completedOperation.url);
           const products = parseShopifyBulkData(jsonlData);
-          const excelRows = convertProductsToExcelRows(products);
           
-          // Save to Excel
-          await saveToExcel(excelRows, excelFilePath);
+          // Save to MySQL database
+          const dbResult = await saveToDatabase(products);
           
           return {
             success: true,
             productsCount: products.length,
-            excelFilePath: excelFilePath,
-            message: `Successfully processed ${products.length} products from existing operation and saved to Excel`
+            databaseResult: dbResult,
+            message: `Successfully processed ${products.length} products from existing operation and saved to database`
           };
         } else {
           throw new Error(`Existing bulk operation failed with status: ${completedOperation.status}`);
@@ -167,16 +166,15 @@ async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, excelFile
       // Download and parse the data
       const jsonlData = await downloadBulkOperationData(completedOperation.url);
       const products = parseShopifyBulkData(jsonlData);
-      const excelRows = convertProductsToExcelRows(products);
       
-      // Save to Excel
-      await saveToExcel(excelRows, excelFilePath);
+      // Save to MySQL database
+      const dbResult = await saveToDatabase(products);
       
       return {
         success: true,
         productsCount: products.length,
-        excelFilePath: excelFilePath,
-        message: `Successfully processed ${products.length} products and saved to Excel`
+        databaseResult: dbResult,
+        message: `Successfully processed ${products.length} products and saved to database`
       };
     } else {
       throw new Error(`Bulk operation failed with status: ${completedOperation.status}`);
@@ -269,31 +267,37 @@ async function downloadBulkOperationData(url) {
 }
 
 /**
- * Save products data to Excel file
- * @param {Array} excelRows - Array of product rows for Excel
- * @param {string} excelFilePath - Path to save the Excel file
+ * Save products data to MySQL database
+ * @param {Array} products - Array of product data
+ * @returns {Promise<Object>} Result with counts
  */
-async function saveToExcel(excelRows, excelFilePath) {
-  console.log('[Shopify] Saving products to Excel file...');
+async function saveToDatabase(products) {
+  console.log('[Shopify] Saving products to MySQL database...');
   
   try {
-    // Prepare worksheet and workbook
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Products');
-
-    // Ensure data directory exists
-    const dir = path.dirname(excelFilePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-      console.log(`[Shopify] Created directory: ${dir}`);
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      throw new Error('MySQL connection not available');
     }
 
-    // Write to Excel file
-    XLSX.writeFile(workbook, excelFilePath);
-    console.log(`[Shopify] Products saved to Excel: ${excelFilePath}`);
+    // Convert products to database format
+    const dbProducts = products.map(product => ({
+      id: product.id,
+      name: product.name,
+      image: product.images.length > 0 ? product.images[0].src : null,
+      altText: product.images.length > 0 ? product.images[0].altText : null,
+      totalImages: product.images.length
+    }));
+
+    // Bulk upsert products
+    const result = await database.bulkUpsertProducts(dbProducts);
+    
+    console.log(`[Shopify] Products saved to database: ${result.inserted} inserted, ${result.updated} updated`);
+    return result;
   } catch (error) {
-    console.error('[Shopify] Error saving to Excel:', error);
+    console.error('[Shopify] Error saving to database:', error);
     throw error;
   }
 }
@@ -340,31 +344,13 @@ function parseShopifyBulkData(jsonlData) {
   return Array.from(products.values());
 }
 
-/**
- * Convert parsed products to Excel format
- * @param {Array} products - Array of products with images
- * @returns {Array} Array of rows for Excel
- */
-function convertProductsToExcelRows(products) {
-  return products.map(product => {
-    const firstImage = product.images.length > 0 ? product.images[0] : {};
-    return {
-      id: product.id,
-      name: product.name,
-      image: firstImage.src || '',
-      altText: firstImage.altText || '',
-      totalImages: product.images.length
-    };
-  });
-}
 
 module.exports = { 
   fetchAndSaveShopifyProducts,
   parseShopifyBulkData,
-  convertProductsToExcelRows,
   waitForBulkOperationCompletion,
   downloadBulkOperationData,
-  saveToExcel,
+  saveToDatabase,
   checkForRunningBulkOperations,
   cancelBulkOperation
 }; 

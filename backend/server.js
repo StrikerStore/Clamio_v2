@@ -257,15 +257,14 @@ app.listen(PORT, () => {
     {
       'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
       'Content-Type': 'application/json',
-    },
-    path.join(__dirname, 'data', 'products.xlsx')
+    }
   );
 
   // Start Shipway order sync cron job (every hour)
   cron.schedule('0 * * * *', async () => {
     try {
-      await shipwayService.syncOrdersToExcel();
-      console.log('[Shipway Sync] Orders synced to Excel.');
+      await shipwayService.syncOrdersToMySQL();
+      console.log('[Shipway Sync] Orders synced to MySQL.');
     } catch (err) {
       console.error('[Shipway Sync] Failed:', err.message);
     }
@@ -273,8 +272,8 @@ app.listen(PORT, () => {
   // Run once immediately on startup
   (async () => {
     try {
-      await shipwayService.syncOrdersToExcel();
-      console.log('[Shipway Sync] Orders synced to Excel (startup).');
+      await shipwayService.syncOrdersToMySQL();
+      console.log('[Shipway Sync] Orders synced to MySQL (startup).');
     } catch (err) {
       console.error('[Shipway Sync] Startup sync failed:', err.message);
     }

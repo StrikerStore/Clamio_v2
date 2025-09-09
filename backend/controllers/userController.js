@@ -77,7 +77,7 @@ class UserController {
             contactNumber
           };
 
-          const newUser = database.createUser(userData);
+          const newUser = await database.createUser(userData);
 
           res.status(201).json({
             success: true,
@@ -105,7 +105,7 @@ class UserController {
           warehouseId,
           contactNumber
         };
-        const newUser = database.createUser(userData);
+        const newUser = await database.createUser(userData);
         res.status(201).json({
           success: true,
           message: `${role} created successfully`,
@@ -136,7 +136,7 @@ class UserController {
     try {
       const { page = 1, limit = 10, role, status, q: searchQuery } = req.query;
       
-      let users = database.getAllUsers();
+      let users = await database.getAllUsers();
 
       // Filter by role
       if (role) {
@@ -209,7 +209,7 @@ class UserController {
     try {
       const { id } = req.params;
 
-      const user = database.getUserById(id);
+      const user = await database.getUserById(id);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -243,7 +243,7 @@ class UserController {
     try {
       const { id } = req.params;
       const updateData = req.body;
-      const existingUser = database.getUserById(id);
+      const existingUser = await database.getUserById(id);
       if (!existingUser) {
         return res.status(404).json({
           success: false,
@@ -277,7 +277,7 @@ class UserController {
           });
         }
       }
-      const updatedUser = database.updateUser(id, updateData);
+      const updatedUser = await database.updateUser(id, updateData);
       if (!updatedUser) {
         return res.status(500).json({
           success: false,
@@ -314,7 +314,7 @@ class UserController {
       const { id } = req.params;
 
       // Check if user exists
-      const user = database.getUserById(id);
+      const user = await database.getUserById(id);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -331,7 +331,7 @@ class UserController {
       }
 
       // Delete user
-      const deleted = database.deleteUser(id);
+      const deleted = await database.deleteUser(id);
 
       if (!deleted) {
         return res.status(500).json({
@@ -439,7 +439,7 @@ class UserController {
     try {
       const { id } = req.params;
 
-      const user = database.getUserById(id);
+      const user = await database.getUserById(id);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -448,7 +448,7 @@ class UserController {
       }
 
       const newStatus = user.status === 'active' ? 'inactive' : 'active';
-      const updatedUser = database.updateUser(id, { status: newStatus });
+      const updatedUser = await database.updateUser(id, { status: newStatus });
 
       if (!updatedUser) {
         return res.status(500).json({

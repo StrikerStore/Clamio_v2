@@ -3,12 +3,11 @@ const axios = require('axios');
 const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
+const database = require('../config/database');
 
 class CarrierServiceabilityService {
   constructor() {
     this.serviceabilityApiUrl = 'https://app.shipway.com/api/pincodeserviceable';
-    this.ordersExcelPath = path.join(__dirname, '../data/orders.xlsx');
-    this.carrierExcelPath = path.join(__dirname, '../data/carrier.xlsx');
     this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
   }
 
@@ -96,34 +95,34 @@ class CarrierServiceabilityService {
   }
 
   /**
-   * Read carriers from Excel file
-   * @returns {Array} Array of carrier data
+   * Read carriers from MySQL database
+   * @returns {Promise<Array>} Array of carrier data
    */
-  readCarriersFromExcel() {
+  async readCarriersFromDatabase() {
     try {
-      if (!fs.existsSync(this.carrierExcelPath)) {
-        console.log('📝 CARRIER SERVICEABILITY: Carrier Excel file does not exist');
-        return [];
+      // Wait for MySQL initialization to complete
+      const isAvailable = await database.waitForMySQLInitialization();
+      if (!isAvailable) {
+        throw new Error('MySQL connection not available. Please ensure MySQL is running and configured.');
       }
 
-      const workbook = XLSX.readFile(this.carrierExcelPath);
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const carriers = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-
-      console.log('✅ CARRIER SERVICEABILITY: Carriers loaded from Excel');
+      const carriers = await database.getAllCarriers();
+      
+      console.log('✅ CARRIER SERVICEABILITY: Carriers loaded from MySQL');
       console.log('  - Total carriers:', carriers.length);
 
       return carriers;
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error reading carriers from Excel:', error.message);
-      throw new Error(`Failed to read carriers from Excel: ${error.message}`);
+      console.error('💥 CARRIER SERVICEABILITY: Error reading carriers from MySQL:', error.message);
+      throw new Error(`Failed to read carriers from database: ${error.message}`);
     }
   }
+
 
   /**
    * Find the highest priority carrier for a given payment type
    * @param {Array} serviceableCarriers - Array of serviceable carriers from API
-   * @param {Array} carrierData - Array of carrier data from Excel
+   * @param {Array} carrierData - Array of carrier data from database
    * @param {string} paymentType - Payment type to match
    * @returns {Object|null} Carrier with highest priority or null if not found
    */
@@ -245,16 +244,16 @@ class CarrierServiceabilityService {
     try {
       console.log('🔵 CARRIER SERVICEABILITY: Starting priority carrier assignment...');
       
-      // Read orders and carriers from Excel
+      // Read orders from Excel and carriers from database
       const orders = this.readOrdersFromExcel();
-      const carriers = this.readCarriersFromExcel();
+      const carriers = await this.readCarriersFromDatabase();
       
       if (orders.length === 0) {
         throw new Error('No orders found in Excel file');
       }
       
       if (carriers.length === 0) {
-        throw new Error('No carriers found in Excel file');
+        throw new Error('No carriers found in database');
       }
       
       console.log(`📊 Processing ${orders.length} orders with ${carriers.length} carriers`);
@@ -431,16 +430,16 @@ class CarrierServiceabilityService {
     try {
       console.log(`🔵 CARRIER SERVICEABILITY: Assigning priority carrier to order ${orderId}...`);
       
-      // Read orders and carriers from Excel
+      // Read orders from Excel and carriers from database
       const orders = this.readOrdersFromExcel();
-      const carriers = this.readCarriersFromExcel();
+      const carriers = await this.readCarriersFromDatabase();
       
       if (orders.length === 0) {
         throw new Error('No orders found in Excel file');
       }
       
       if (carriers.length === 0) {
-        throw new Error('No carriers found in Excel file');
+        throw new Error('No carriers found in database');
       }
       
       // Find the specific order
@@ -523,11 +522,11 @@ class CarrierServiceabilityService {
     try {
       console.log(`🔵 CARRIER SERVICEABILITY: Assigning priority carrier to order ${order.order_id} (in-memory)...`);
       
-      // Read carriers from Excel
-      const carriers = this.readCarriersFromExcel();
+      // Read carriers from database
+      const carriers = await this.readCarriersFromDatabase();
       
       if (carriers.length === 0) {
-        throw new Error('No carriers found in Excel file');
+        throw new Error('No carriers found in database');
       }
       
       // Check if order is claimed
@@ -589,12 +588,12 @@ class CarrierServiceabilityService {
 
   /**
    * Get statistics about the assignment process
-   * @returns {Object} Statistics about orders and carriers
+   * @returns {Promise<Object>} Statistics about orders and carriers
    */
-  getAssignmentStatistics() {
+  async getAssignmentStatistics() {
     try {
       const orders = this.readOrdersFromExcel();
-      const carriers = this.readCarriersFromExcel();
+      const carriers = await this.readCarriersFromDatabase();
       
       const claimedOrders = orders.filter(order => 
         order.status === 'claimed' && order.claimed_by && order.claimed_by.trim() !== ''

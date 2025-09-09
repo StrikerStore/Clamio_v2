@@ -1,76 +1,77 @@
 const fs = require('fs');
 const path = require('path');
-const XLSX = require('xlsx');
+const database = require('../config/database');
 
 class OrderEnhancementService {
   constructor() {
-    this.ordersPath = path.join(__dirname, '../data/orders.xlsx');
     this.rawShipwayPath = path.join(__dirname, '../data/raw_shipway_orders.json');
-    this.productsPath = path.join(__dirname, '../data/products.xlsx');
   }
 
   /**
-   * Automatically enhance orders.xlsx with customer_name and product_image columns
-   * This is called after orders.xlsx is created/updated by shipwayService
+   * Automatically enhance orders in MySQL with customer_name and product_image columns
+   * This is called after orders are synced to MySQL by shipwayService
    */
-  async enhanceOrdersFile() {
-    console.log('🔧 OrderEnhancementService: Starting automatic enhancement...');
+  async enhanceOrdersMySQL() {
+    console.log('🔧 OrderEnhancementService: Starting automatic MySQL enhancement...');
     
     try {
-      // Check if orders.xlsx exists
-      if (!fs.existsSync(this.ordersPath)) {
-        console.log('ℹ️  OrderEnhancementService: orders.xlsx not found, skipping enhancement');
-        return { success: false, message: 'Orders file not found' };
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      if (!database.isMySQLAvailable()) {
+        console.log('❌ OrderEnhancementService: MySQL connection not available');
+        return { success: false, message: 'MySQL connection not available' };
       }
 
-      // Read current orders
-      const ordersWb = XLSX.readFile(this.ordersPath);
-      const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
-      const orders = XLSX.utils.sheet_to_json(ordersWs);
+      // Get all orders from MySQL
+      const orders = await database.getAllOrders();
+      console.log(`📊 OrderEnhancementService: Processing ${orders.length} orders from MySQL`);
 
-      console.log(`📊 OrderEnhancementService: Processing ${orders.length} orders`);
+      if (orders.length === 0) {
+        console.log('ℹ️  OrderEnhancementService: No orders found in MySQL, skipping enhancement');
+        return { success: true, message: 'No orders to enhance' };
+      }
 
-      // Check if enhancement is needed
-      const needsCustomerNames = !orders[0]?.customer_name;
-      const needsProductImages = !orders[0]?.product_image;
+      // Check if enhancement is needed by checking ALL orders, not just the first one
+      const needsCustomerNames = orders.some(order => !order.customer_name);
+      const needsProductImages = orders.some(order => !order.product_image);
 
       if (!needsCustomerNames && !needsProductImages) {
-        console.log('✅ OrderEnhancementService: Orders already enhanced, skipping');
-        return { success: true, message: 'Orders already enhanced' };
+        console.log('✅ OrderEnhancementService: All orders already enhanced, skipping');
+        return { success: true, message: 'All orders already enhanced' };
       }
 
-      let enhancedOrders = [...orders];
+      console.log(`🔍 OrderEnhancementService: Enhancement needed - Customer names: ${needsCustomerNames}, Product images: ${needsProductImages}`);
+
+      let customerNamesAdded = 0;
+      let productImagesAdded = 0;
 
       // Add customer names if needed
       if (needsCustomerNames) {
-        console.log('👥 OrderEnhancementService: Adding customer names...');
-        enhancedOrders = await this.addCustomerNames(enhancedOrders);
+        console.log('👥 OrderEnhancementService: Adding customer names to MySQL...');
+        customerNamesAdded = await this.addCustomerNamesToMySQL(orders);
       }
 
       // Add product images if needed
       if (needsProductImages) {
-        console.log('🖼️  OrderEnhancementService: Adding product images...');
-        enhancedOrders = await this.addProductImages(enhancedOrders);
+        console.log('🖼️  OrderEnhancementService: Adding product images to MySQL...');
+        productImagesAdded = await this.addProductImagesToMySQL(orders);
       }
 
-      // Save enhanced orders
-      const newWorksheet = XLSX.utils.json_to_sheet(enhancedOrders);
-      ordersWb.Sheets[ordersWb.SheetNames[0]] = newWorksheet;
-      XLSX.writeFile(ordersWb, this.ordersPath);
-
-      console.log('✅ OrderEnhancementService: Orders enhanced successfully');
-      return { 
-        success: true, 
+      console.log(`✅ OrderEnhancementService: MySQL enhancement completed - Customer names: ${customerNamesAdded}, Product images: ${productImagesAdded}`);
+      
+      return {
+        success: true,
         message: 'Orders enhanced successfully',
-        customerNamesAdded: needsCustomerNames,
-        productImagesAdded: needsProductImages
+        customerNamesAdded,
+        productImagesAdded
       };
 
     } catch (error) {
-      console.error('❌ OrderEnhancementService: Error enhancing orders:', error.message);
-      return { success: false, message: error.message };
+      console.error('❌ OrderEnhancementService: MySQL enhancement failed:', error);
+      return { success: false, message: 'Enhancement failed: ' + error.message };
     }
   }
+
 
   /**
    * Add customer names from raw shipway data
@@ -119,18 +120,20 @@ class OrderEnhancementService {
   }
 
   /**
-   * Add product images from products.xlsx
+   * Add product images from MySQL database
    */
   async addProductImages(orders) {
-    if (!fs.existsSync(this.productsPath)) {
-      console.log('⚠️  OrderEnhancementService: products.xlsx not found');
-      return orders.map(order => ({ ...order, product_image: '/placeholder.svg' }));
-    }
-
     try {
-      const productsWb = XLSX.readFile(this.productsPath);
-      const productsWs = productsWb.Sheets[productsWb.SheetNames[0]];
-      const products = XLSX.utils.sheet_to_json(productsWs);
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.log('⚠️  OrderEnhancementService: MySQL connection not available');
+        return orders.map(order => ({ ...order, product_image: '/placeholder.svg' }));
+      }
+
+      // Get all products from database
+      const products = await database.getAllProducts();
 
       // Create product image lookup map
       const productImageMap = {};
@@ -154,7 +157,7 @@ class OrderEnhancementService {
         }
       });
 
-      console.log(`🗺️  OrderEnhancementService: Created product image map with ${Object.keys(productImageMap).length} entries`);
+      console.log(`🗺️  OrderEnhancementService: Created product image map with ${Object.keys(productImageMap).length} entries from database`);
 
       // Add product images to orders
       return orders.map(order => {
@@ -335,6 +338,105 @@ class OrderEnhancementService {
     }
     
     return matrix[str2.length][str1.length];
+  }
+
+  /**
+   * Add customer names to MySQL orders
+   */
+  async addCustomerNamesToMySQL(orders) {
+    let customerNamesAdded = 0;
+    
+    try {
+      // Read raw Shipway data for customer names
+      const rawData = JSON.parse(fs.readFileSync(this.rawShipwayPath, 'utf8'));
+      const shipwayOrders = Array.isArray(rawData) ? rawData : (rawData.message || []);
+      
+      // Create a map of order_id to customer name
+      const customerMap = new Map();
+      shipwayOrders.forEach(order => {
+        if (order.order_id && order.s_name) {
+          customerMap.set(order.order_id, order.s_name);
+        }
+      });
+
+      // Update orders in MySQL
+      for (const order of orders) {
+        if (!order.customer_name && customerMap.has(order.order_id)) {
+          await database.updateOrder(order.unique_id, {
+            customer_name: customerMap.get(order.order_id)
+          });
+          customerNamesAdded++;
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error adding customer names to MySQL:', error);
+    }
+    
+    return customerNamesAdded;
+  }
+
+  /**
+   * Add product images to MySQL orders
+   */
+  async addProductImagesToMySQL(orders) {
+    let productImagesAdded = 0;
+    
+    try {
+      // Get all products from MySQL for image matching
+      const products = await database.getAllProducts();
+      console.log(`🔍 OrderEnhancementService: Found ${products.length} products for image matching`);
+      
+      // Create a map of product names to images
+      const productImageMap = new Map();
+      products.forEach(product => {
+        if (product.name && product.image) {
+          productImageMap.set(product.name.toLowerCase(), product.image);
+        }
+      });
+
+      // Update orders in MySQL
+      for (const order of orders) {
+        if (!order.product_image && order.product_name) {
+          const matchedImage = this.findBestProductImageMatch(order.product_name, productImageMap);
+          if (matchedImage) {
+            await database.updateOrder(order.unique_id, {
+              product_image: matchedImage
+            });
+            productImagesAdded++;
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error adding product images to MySQL:', error);
+    }
+    
+    return productImagesAdded;
+  }
+
+  /**
+   * Find best product image match for MySQL
+   */
+  findBestProductImageMatch(productName, productImageMap) {
+    if (!productName) return null;
+    
+    const cleanProductName = this.removeSize(productName).toLowerCase();
+    
+    // Try exact match first
+    if (productImageMap.has(cleanProductName)) {
+      return productImageMap.get(cleanProductName);
+    }
+    
+    // Try partial matches
+    for (const [productNameKey, image] of productImageMap) {
+      const cleanName = this.removeSize(productNameKey).toLowerCase();
+      if (cleanName.includes(cleanProductName) || cleanProductName.includes(cleanName)) {
+        return image;
+      }
+    }
+    
+    return null;
   }
 }
 

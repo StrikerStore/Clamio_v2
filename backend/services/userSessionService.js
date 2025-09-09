@@ -1,6 +1,5 @@
-const XLSX = require('xlsx');
-const path = require('path');
 const crypto = require('crypto');
+const database = require('../config/database');
 
 // Simple UUID generation function
 function generateUUID() {
@@ -15,173 +14,173 @@ function generateUUID() {
   });
 }
 
-const USERS_XLSX_PATH = path.join(__dirname, '../data/users.xlsx');
-
 class UserSessionService {
   constructor() {
-    this.workbook = null;
-    this.worksheet = null;
-    this.headers = [];
-    this.loadWorkbook();
+    // No need for Excel-specific initialization
   }
 
-  loadWorkbook() {
+  async ensureTokensAndSessions() {
     try {
-      this.workbook = XLSX.readFile(USERS_XLSX_PATH);
-      this.worksheet = this.workbook.Sheets[this.workbook.SheetNames[0]];
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
       
-      // Get headers from first row
-      const range = XLSX.utils.decode_range(this.worksheet['!ref']);
-      this.headers = [];
-      for (let col = range.s.c; col <= range.e.c; col++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
-        const cell = this.worksheet[cellAddress];
-        this.headers.push(cell ? cell.v : '');
+      if (!database.isMySQLAvailable()) {
+        console.error('MySQL connection not available for user session service');
+        return;
       }
 
-      // Ensure token and active_session columns exist
-      this.ensureColumns();
+      const users = await database.getAllUsers();
+      
+      for (const user of users) {
+        const updates = {};
+
+        // Ensure token exists
+        if (!user.token) {
+          updates.token = generateUUID();
+        }
+
+        // Ensure active_session is set to FALSE
+        if (user.active_session !== 'TRUE' && user.active_session !== 'FALSE') {
+          updates.active_session = 'FALSE';
+        }
+
+        if (Object.keys(updates).length > 0) {
+          await database.updateUser(user.id, updates);
+        }
+      }
     } catch (error) {
-      console.error('Error loading users.xlsx:', error);
+      console.error('Error ensuring tokens and sessions:', error);
       throw error;
     }
   }
 
-  ensureColumns() {
-    if (!this.headers.includes('token')) {
-      this.headers.push('token');
-    }
-    if (!this.headers.includes('active_session')) {
-      this.headers.push('active_session');
-    }
-
-    // Update headers in worksheet
-    this.headers.forEach((header, index) => {
-      const cellAddress = XLSX.utils.encode_cell({ r: 0, c: index });
-      this.worksheet[cellAddress] = { v: header, t: 's' };
-    });
-
-    this.saveWorkbook();
-  }
-
-  saveWorkbook() {
+  async loginVendor(warehouseId) {
     try {
-      XLSX.writeFile(this.workbook, USERS_XLSX_PATH);
-    } catch (error) {
-      console.error('Error saving users.xlsx:', error);
-      throw error;
-    }
-  }
-
-  getColumnIndex(columnName) {
-    return this.headers.indexOf(columnName);
-  }
-
-  getAllUsers() {
-    const range = XLSX.utils.decode_range(this.worksheet['!ref']);
-    const users = [];
-
-    for (let row = 1; row <= range.e.r; row++) {
-      const user = {};
-      for (let col = 0; col < this.headers.length; col++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
-        const cell = this.worksheet[cellAddress];
-        user[this.headers[col]] = cell ? cell.v : '';
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.error('MySQL connection not available for user session service');
+        return null;
       }
-      users.push(user);
-    }
 
-    return users;
-  }
-
-  updateUserRow(rowIndex, updates) {
-    Object.keys(updates).forEach(columnName => {
-      const colIndex = this.getColumnIndex(columnName);
-      if (colIndex !== -1) {
-        const cellAddress = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
-        this.worksheet[cellAddress] = { v: updates[columnName], t: 's' };
+      const user = await database.getUserByWarehouseId(warehouseId);
+      if (!user) {
+        return null;
       }
-    });
-    this.saveWorkbook();
-  }
 
-  ensureTokensAndSessions() {
-    const users = this.getAllUsers();
-    
-    users.forEach((user, index) => {
-      const rowIndex = index + 1; // +1 because first row is headers
-      const updates = {};
-
+      // Set this vendor's session to TRUE
+      const updates = { active_session: 'TRUE' };
+      
       // Ensure token exists
       if (!user.token) {
         updates.token = generateUUID();
       }
 
-      // Ensure active_session is set to FALSE
-      if (user.active_session !== 'TRUE' && user.active_session !== 'FALSE') {
-        updates.active_session = 'FALSE';
-      }
-
-      if (Object.keys(updates).length > 0) {
-        this.updateUserRow(rowIndex, updates);
-      }
-    });
+      await database.updateUser(user.id, updates);
+      
+      return updates.token || user.token;
+    } catch (error) {
+      console.error('Error in loginVendor:', error);
+      return null;
+    }
   }
 
-  loginVendor(warehouseId) {
-    const users = this.getAllUsers();
-    let foundToken = null;
-
-    users.forEach((user, index) => {
-      const rowIndex = index + 1;
-      if (user.warehouseId === warehouseId) {
-        // Set this vendor's session to TRUE
-        this.updateUserRow(rowIndex, { active_session: 'TRUE' });
-        foundToken = user.token || generateUUID();
-        if (!user.token) {
-          this.updateUserRow(rowIndex, { token: foundToken });
-        }
+  async getActiveVendor() {
+    try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.error('MySQL connection not available for user session service');
+        return null;
       }
-      // Removed: Don't set other vendors' sessions to FALSE
-      // This allows multiple vendors to be logged in simultaneously
-    });
 
-    return foundToken;
+      const users = await database.getAllUsers();
+      const activeUser = users.find(user => user.active_session === 'TRUE');
+      return activeUser ? activeUser.warehouseId : null;
+    } catch (error) {
+      console.error('Error in getActiveVendor:', error);
+      return null;
+    }
   }
 
-  getActiveVendor() {
-    const users = this.getAllUsers();
-    const activeUser = users.find(user => user.active_session === 'TRUE');
-    return activeUser ? activeUser.warehouseId : null;
-  }
-
-  getVendorByToken(token) {
-    const users = this.getAllUsers();
-    return users.find(user => user.token === token && user.active_session === 'TRUE');
-  }
-
-  logoutVendor(warehouseId) {
-    const users = this.getAllUsers();
-    
-    users.forEach((user, index) => {
-      const rowIndex = index + 1;
-      if (user.warehouseId === warehouseId) {
-        this.updateUserRow(rowIndex, { active_session: 'FALSE' });
+  async getVendorByToken(token) {
+    try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.error('MySQL connection not available for user session service');
+        return null;
       }
-    });
+
+      const user = await database.getUserByToken(token);
+      if (user && user.active_session === 'TRUE') {
+        return user;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error in getVendorByToken:', error);
+      return null;
+    }
+  }
+
+  async logoutVendor(warehouseId) {
+    try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.error('MySQL connection not available for user session service');
+        return;
+      }
+
+      const user = await database.getUserByWarehouseId(warehouseId);
+      if (user) {
+        await database.updateUser(user.id, { active_session: 'FALSE' });
+      }
+    } catch (error) {
+      console.error('Error in logoutVendor:', error);
+    }
   }
 
   // Get vendor by email for login
-  getVendorByEmail(email) {
-    const users = this.getAllUsers();
-    return users.find(user => user.email === email);
+  async getVendorByEmail(email) {
+    try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.error('MySQL connection not available for user session service');
+        return null;
+      }
+
+      return await database.getUserByEmail(email);
+    } catch (error) {
+      console.error('Error in getVendorByEmail:', error);
+      return null;
+    }
   }
 
   // Get vendor by phone for login
-  getVendorByPhone(phone) {
-    const users = this.getAllUsers();
-    return users.find(user => user.phone === phone || user.contactNumber === phone);
+  async getVendorByPhone(phone) {
+    try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.error('MySQL connection not available for user session service');
+        return null;
+      }
+
+      return await database.getUserByPhone(phone);
+    } catch (error) {
+      console.error('Error in getVendorByPhone:', error);
+      return null;
+    }
   }
 }
 
+module.exports = new UserSessionService(); 
 module.exports = new UserSessionService(); 

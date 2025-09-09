@@ -1352,7 +1352,18 @@ export function VendorDashboard() {
                               </TooltipProvider>
                             </TableCell>
                             <TableCell className="font-medium">{order.order_id}</TableCell>
-                            <TableCell>{order.order_date}</TableCell>
+                            <TableCell>
+                              {order.order_date ? (
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-medium">
+                                    {new Date(order.order_date).toLocaleDateString()}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {new Date(order.order_date).toLocaleTimeString()}
+                                  </span>
+                                </div>
+                              ) : "N/A"}
+                            </TableCell>
                             <TableCell>{order.product_name}</TableCell>
                             <TableCell>{order.product_code}</TableCell>
                             <TableCell>{order.value || "-"}</TableCell>
@@ -1431,7 +1442,16 @@ export function VendorDashboard() {
                                 {order.original_order_id || order.order_id}
                               </TableCell>
                               <TableCell>
-                                {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                {order.order_date ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">
+                                      {new Date(order.order_date).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(order.order_date).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+                                ) : "N/A"}
                               </TableCell>
                               <TableCell>
                                 <div className="flex flex-col gap-2 max-w-md">

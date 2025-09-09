@@ -203,12 +203,10 @@ class ShipwayService {
   }
 
   /**
-   * Fetch all orders with status 'O' from Shipway, update orders.xlsx, and remove missing orders/products.
-   * Each product in an order gets its own row. Creates the Excel file if it doesn't exist.
-   * Preserves existing claim data (status, claimed_by, etc.) when syncing new orders.
-   * Logs all API activity.
-   * Stores raw API response in JSON file for reference.
+   * @deprecated - Use syncOrdersToMySQL() instead
+   * Old Excel-based sync method - kept for reference but not used
    */
+  /*
   async syncOrdersToExcel() {
     const ordersExcelPath = path.join(__dirname, '../data/orders.xlsx');
     const rawDataJsonPath = path.join(__dirname, '../data/raw_shipway_orders.json');
@@ -498,6 +496,335 @@ class ShipwayService {
     
     return { success: true, count: flatOrders.length, preservedClaims: existingClaimData.size, rawDataStored: rawDataJsonPath };
   }
+  */
+
+  /**
+   * Sync orders from Shipway API to MySQL database
+   * Preserves existing claim data (status, claimed_by, etc.) when syncing new orders.
+   * Logs all API activity.
+   * Stores raw API response in JSON file for reference.
+   */
+  async syncOrdersToMySQL() {
+    const database = require('../config/database');
+    const rawDataJsonPath = path.join(__dirname, '../data/raw_shipway_orders.json');
+    const url = `${this.baseURL}/getorders`;
+    const params = { status: 'O' };
+    let shipwayOrders = [];
+    let rawApiResponse = null;
+    
+    try {
+      this.logApiActivity({ type: 'shipway-request', url, params, headers: { Authorization: '***' } });
+      const response = await axios.get(url, {
+        params,
+        headers: {
+          'Authorization': this.basicAuthHeader,
+          'Content-Type': 'application/json',
+        },
+        timeout: 20000,
+      });
+      
+      // Store raw API response in JSON file
+      rawApiResponse = response.data;
+      try {
+        fs.writeFileSync(rawDataJsonPath, JSON.stringify(rawApiResponse, null, 2));
+        this.logApiActivity({ type: 'raw-data-stored', path: rawDataJsonPath });
+      } catch (fileError) {
+        this.logApiActivity({ type: 'raw-data-store-error', error: fileError.message });
+      }
+      
+      this.logApiActivity({ type: 'shipway-response', status: response.status, dataType: typeof response.data, dataKeys: response.data && typeof response.data === 'object' ? Object.keys(response.data) : undefined });
+      
+      // Accept array, or object with 'orders' array, or single order object, or 'message' array
+      if (response.status !== 200 || !response.data) {
+        throw new Error('Invalid response from Shipway API');
+      }
+      if (Array.isArray(response.data)) {
+        shipwayOrders = response.data;
+      } else if (Array.isArray(response.data.orders)) {
+        shipwayOrders = response.data.orders;
+      } else if (typeof response.data === 'object' && Array.isArray(response.data.message) && response.data.success === 1) {
+        shipwayOrders = response.data.message;
+      } else if (typeof response.data === 'object' && response.data.order_id) {
+        shipwayOrders = [response.data];
+      } else {
+        this.logApiActivity({ type: 'shipway-unexpected-format', data: response.data });
+        throw new Error('Unexpected Shipway API response format');
+      }
+    } catch (error) {
+      this.logApiActivity({ type: 'shipway-error', error: error.message, stack: error.stack });
+      throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
+    }
+
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    if (!database.isMySQLAvailable()) {
+      throw new Error('MySQL connection not available');
+    }
+
+    // Get existing orders from MySQL to preserve claim data
+    let existingOrders = [];
+    let existingClaimData = new Map(); // Map to store claim data by order_id|product_code
+    let maxUniqueId = 0;
+    
+    try {
+      existingOrders = await database.getAllOrders();
+      
+      // Build map of existing claim data
+      existingOrders.forEach(row => {
+        const key = `${row.order_id}|${row.product_code}`;
+        existingClaimData.set(key, {
+          unique_id: row.unique_id,
+          status: row.status || 'unclaimed',
+          claimed_by: row.claimed_by || '',
+          claimed_at: row.claimed_at || '',
+          last_claimed_by: row.last_claimed_by || '',
+          last_claimed_at: row.last_claimed_at || '',
+          clone_status: row.clone_status || 'not_cloned',
+          cloned_order_id: row.cloned_order_id || '',
+          is_cloned_row: row.is_cloned_row || false,
+          label_downloaded: row.label_downloaded || false,
+          handover_at: row.handover_at || '',
+          customer_name: row.customer_name || '',
+          product_image: row.product_image || '',
+          priority_carrier: row.priority_carrier || '',
+          pincode: row.pincode || ''
+        });
+        
+        // Track max unique_id for new rows
+        if (row.unique_id && parseInt(row.unique_id) > maxUniqueId) {
+          maxUniqueId = parseInt(row.unique_id);
+        }
+      });
+    } catch (e) {
+      this.logApiActivity({ type: 'mysql-read-error', error: e.message });
+    }
+
+    // Flatten Shipway orders to one row per product, preserving existing claim data
+    const flatOrders = [];
+    let uniqueIdCounter = maxUniqueId + 1;
+    
+    for (const order of shipwayOrders) {
+      if (!Array.isArray(order.products)) continue;
+      
+      // Extract order-level financial information and convert to number
+      const orderTotal = parseFloat(order.order_total) || 0;
+      
+      // Determine payment type based on order_tags
+      const orderTags = Array.isArray(order.order_tags) ? order.order_tags : [];
+      const paymentType = orderTags.includes('PPCOD') ? 'C' : 'P';
+      
+      // Calculate total prepaid amount for the entire order based on payment type
+      const totalPrepaidAmount = paymentType === 'P' 
+        ? parseFloat(orderTotal.toFixed(2)) 
+        : parseFloat((orderTotal * 0.1).toFixed(2));
+      
+      // Calculate total selling price for all products in this order for ratio calculation
+      const totalSellingPriceInOrder = order.products.reduce((sum, prod) => {
+        return sum + (parseFloat(prod.price) || 0);
+      }, 0);
+      
+      // Calculate ratio parts for each product
+      let productRatios = [];
+      if (totalSellingPriceInOrder > 0) {
+        const prices = order.products.map(prod => parseFloat(prod.price) || 0);
+        
+        // Convert prices to integers to handle decimals (multiply by 100 for 2 decimal places)
+        const intPrices = prices.map(price => Math.round(price * 100));
+        
+        // Find GCD of all prices to get simplest integer ratio
+        const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+        const findGCD = (arr) => arr.reduce((acc, val) => gcd(acc, val));
+        
+        const pricesGCD = findGCD(intPrices.filter(p => p > 0));
+        
+        if (pricesGCD > 0) {
+          productRatios = intPrices.map(price => Math.round(price / pricesGCD));
+        } else {
+          productRatios = prices.map(() => 1);
+        }
+      } else {
+        productRatios = order.products.map(() => 1); // Equal ratio if no selling prices
+      }
+      
+      // Calculate total of all ratios for this order
+      const totalRatios = productRatios.reduce((sum, ratio) => sum + ratio, 0);
+      
+      for (let i = 0; i < order.products.length; i++) {
+        const product = order.products[i];
+        const key = `${order.order_id}|${product.product_code}`;
+        const existingClaim = existingClaimData.get(key);
+        
+        // Get selling price from product data and convert to number
+        const sellingPrice = parseFloat(product.price) || 0;
+        
+        // Get the ratio for this product
+        const orderTotalRatio = productRatios[i] || 1;
+        
+        // Calculate the actual split amount for this product
+        const orderTotalSplit = totalRatios > 0 
+          ? parseFloat(((orderTotalRatio / totalRatios) * orderTotal).toFixed(2))
+          : parseFloat((orderTotal / order.products.length).toFixed(2)); // Equal split if no ratios
+        
+        // Calculate the prepaid amount split for this product based on ratio
+        const prepaidAmount = totalRatios > 0 
+          ? parseFloat(((orderTotalRatio / totalRatios) * totalPrepaidAmount).toFixed(2))
+          : parseFloat((totalPrepaidAmount / order.products.length).toFixed(2)); // Equal split if no ratios
+        
+        // Calculate collectable amount: 0 for prepaid, order_total_split - prepaid_amount for COD
+        const collectableAmount = paymentType === 'P' 
+          ? 0 
+          : parseFloat((orderTotalSplit - prepaidAmount).toFixed(2));
+        
+        const orderRow = {
+          id: `${order.order_id}_${product.product_code}_${Date.now()}`,
+          unique_id: existingClaim ? existingClaim.unique_id : uniqueIdCounter++,
+          order_id: order.order_id,
+          order_date: order.order_date,
+          product_name: product.product,
+          product_code: product.product_code,
+          // The 7 additional columns with correct logic
+          selling_price: sellingPrice,
+          order_total: orderTotal,
+          payment_type: paymentType,
+          prepaid_amount: prepaidAmount,
+          order_total_ratio: orderTotalRatio,
+          order_total_split: orderTotalSplit,
+          collectable_amount: collectableAmount,
+          // Add pincode from s_zipcode, preserve existing if available
+          pincode: existingClaim ? existingClaim.pincode : (order.s_zipcode || ''),
+          // Preserve existing claim data or use defaults for new orders
+          status: existingClaim ? existingClaim.status : 'unclaimed',
+          claimed_by: existingClaim ? existingClaim.claimed_by : '',
+          claimed_at: existingClaim ? existingClaim.claimed_at : '',
+          last_claimed_by: existingClaim ? existingClaim.last_claimed_by : '',
+          last_claimed_at: existingClaim ? existingClaim.last_claimed_at : '',
+          clone_status: existingClaim ? existingClaim.clone_status : 'not_cloned',
+          cloned_order_id: existingClaim ? existingClaim.cloned_order_id : '',
+          is_cloned_row: existingClaim ? existingClaim.is_cloned_row : false,
+          label_downloaded: existingClaim ? existingClaim.label_downloaded : false,
+          handover_at: existingClaim ? existingClaim.handover_at : '',
+          // Preserve custom columns or use empty defaults for new orders
+          customer_name: existingClaim ? existingClaim.customer_name : '',
+          product_image: existingClaim ? existingClaim.product_image : '',
+          // Add priority_carrier column (empty for new orders, preserve existing)
+          priority_carrier: existingClaim ? existingClaim.priority_carrier : ''
+        };
+        
+        flatOrders.push(orderRow);
+      }
+    }
+
+    // Compare and update MySQL only if changed
+    const existingKeySet = new Set(existingOrders.map(r => `${r.order_id}|${r.product_code}`));
+    const newKeySet = new Set(flatOrders.map(r => `${r.order_id}|${r.product_code}`));
+    let changed = false;
+    
+    // Check for new rows
+    for (const row of flatOrders) {
+      if (!existingKeySet.has(`${row.order_id}|${row.product_code}`)) {
+        changed = true;
+        break;
+      }
+    }
+    
+    // Check for removed rows
+    if (!changed) {
+      for (const row of existingOrders) {
+        if (!newKeySet.has(`${row.order_id}|${row.product_code}`)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    
+    // Always update MySQL if there are changes
+    if (changed || existingOrders.length === 0) {
+      try {
+        // Delete existing orders that are no longer in Shipway
+        for (const existingOrder of existingOrders) {
+          const key = `${existingOrder.order_id}|${existingOrder.product_code}`;
+          if (!newKeySet.has(key)) {
+            await database.deleteOrder(existingOrder.unique_id);
+          }
+        }
+        
+        // Insert or update orders
+        for (const orderRow of flatOrders) {
+          const key = `${orderRow.order_id}|${orderRow.product_code}`;
+          if (existingKeySet.has(key)) {
+            // Update existing order (preserve claim data)
+            const existingOrder = existingOrders.find(o => `${o.order_id}|${o.product_code}` === key);
+            if (existingOrder) {
+              await database.updateOrder(existingOrder.unique_id, {
+                order_date: orderRow.order_date,
+                product_name: orderRow.product_name,
+                selling_price: orderRow.selling_price,
+                order_total: orderRow.order_total,
+                payment_type: orderRow.payment_type,
+                prepaid_amount: orderRow.prepaid_amount,
+                order_total_ratio: orderRow.order_total_ratio,
+                order_total_split: orderRow.order_total_split,
+                collectable_amount: orderRow.collectable_amount,
+                pincode: orderRow.pincode
+              });
+            }
+          } else {
+            // Insert new order
+            await database.createOrder(orderRow);
+          }
+        }
+        
+        this.logApiActivity({ 
+          type: 'mysql-write-with-new-columns', 
+          rows: flatOrders.length, 
+          preservedClaims: existingClaimData.size,
+          newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image', 'priority_carrier', 'pincode']
+        });
+
+        // Automatically enhance orders with customer names and product images
+        try {
+          const orderEnhancementService = require('./orderEnhancementService');
+          const enhancementResult = await orderEnhancementService.enhanceOrdersMySQL();
+          this.logApiActivity({ 
+            type: 'orders-enhancement', 
+            success: enhancementResult.success,
+            customerNamesAdded: enhancementResult.customerNamesAdded,
+            productImagesAdded: enhancementResult.productImagesAdded,
+            message: enhancementResult.message
+          });
+        } catch (enhancementError) {
+          this.logApiActivity({ 
+            type: 'orders-enhancement-error', 
+            error: enhancementError.message 
+          });
+        }
+
+        // Automatically sync carriers from Shipway API
+        try {
+          const shipwayCarrierService = require('./shipwayCarrierService');
+          const carrierResult = await shipwayCarrierService.syncCarriersToDatabase();
+          this.logApiActivity({ 
+            type: 'carrier-sync', 
+            success: carrierResult.success,
+            carrierCount: carrierResult.carrierCount,
+            message: carrierResult.message
+          });
+        } catch (carrierError) {
+          this.logApiActivity({ 
+            type: 'carrier-sync-error', 
+            error: carrierError.message 
+          });
+        }
+      } catch (mysqlError) {
+        this.logApiActivity({ type: 'mysql-write-error', error: mysqlError.message });
+        throw new Error('Failed to update MySQL database: ' + mysqlError.message);
+      }
+    } else {
+      this.logApiActivity({ type: 'mysql-no-change', rows: flatOrders.length });
+    }
+    
+    return { success: true, count: flatOrders.length, preservedClaims: existingClaimData.size, rawDataStored: rawDataJsonPath };
+  }
 
   logApiActivity(activity) {
     const logPath = path.join(__dirname, '../logs/api.log');
@@ -506,6 +833,47 @@ class ShipwayService {
     fs.appendFile(logPath, logEntry, err => {
       if (err) console.error('Failed to write API log:', err);
     });
+  }
+
+  /**
+   * Fetch orders from Shipway API (for clone ID verification)
+   * @returns {Promise<Array>} Array of orders from Shipway
+   */
+  async fetchOrdersFromShipway() {
+    const url = `${this.baseURL}/getorders`;
+    const params = { status: 'O' };
+    
+    try {
+      this.logApiActivity({ type: 'shipway-fetch-orders', url, params });
+      const response = await axios.get(url, {
+        params,
+        headers: {
+          'Authorization': this.basicAuthHeader,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000, // Shorter timeout for clone verification
+      });
+      
+      if (response.status !== 200 || !response.data) {
+        throw new Error('Invalid response from Shipway API');
+      }
+      
+      // Return orders in the same format as syncOrdersToMySQL expects
+      if (Array.isArray(response.data)) {
+        return response.data;
+      } else if (Array.isArray(response.data.orders)) {
+        return response.data.orders;
+      } else if (typeof response.data === 'object' && Array.isArray(response.data.message) && response.data.success === 1) {
+        return response.data.message;
+      } else if (typeof response.data === 'object' && response.data.order_id) {
+        return [response.data];
+      } else {
+        throw new Error('Unexpected Shipway API response format');
+      }
+    } catch (error) {
+      this.logApiActivity({ type: 'shipway-fetch-orders-error', error: error.message });
+      throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
+    }
   }
 }
 

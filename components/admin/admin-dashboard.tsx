@@ -1195,7 +1195,18 @@ export function AdminDashboard() {
                                <TableCell>{order.product_name}</TableCell>
                                <TableCell>₹{order.value}</TableCell>
                             <TableCell>{getStatusBadge(order.status)}</TableCell>
-                               <TableCell>{order.created_at}</TableCell>
+                               <TableCell>
+                                 {order.created_at ? (
+                                   <div className="flex flex-col">
+                                     <span className="text-sm font-medium">
+                                       {new Date(order.created_at).toLocaleDateString()}
+                                     </span>
+                                     <span className="text-xs text-gray-500">
+                                       {new Date(order.created_at).toLocaleTimeString()}
+                                     </span>
+                                   </div>
+                                 ) : "N/A"}
+                               </TableCell>
                             <TableCell>
                               <div className="flex gap-1">
                                 <Button size="sm" variant="outline">
@@ -1245,7 +1256,7 @@ export function AdminDashboard() {
                               onChange={(e) => {
                                 const vendors = getFilteredVendors()
                                 if (e.target.checked) {
-                                  setSelectedVendors(vendors.map((v) => v.id))
+                                  setSelectedVendors(vendors.map((v) => v.warehouse_id))
                                 } else {
                                   setSelectedVendors([])
                                 }
@@ -1269,21 +1280,21 @@ export function AdminDashboard() {
                       </TableHeader>
                       <TableBody>
                         {getFilteredVendors().map((vendor) => (
-                          <TableRow key={vendor.id}>
+                          <TableRow key={vendor.warehouse_id}>
                             <TableCell>
                               <input
                                 type="checkbox"
-                                checked={selectedVendors.includes(vendor.id)}
+                                checked={selectedVendors.includes(vendor.warehouse_id)}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedVendors([...selectedVendors, vendor.id])
+                                    setSelectedVendors([...selectedVendors, vendor.warehouse_id])
                                   } else {
-                                    setSelectedVendors(selectedVendors.filter((id) => id !== vendor.id))
+                                    setSelectedVendors(selectedVendors.filter((id) => id !== vendor.warehouse_id))
                                   }
                                 }}
                               />
                             </TableCell>
-                            <TableCell className="font-medium">{vendor.id}</TableCell>
+                            <TableCell className="font-medium">{vendor.warehouse_id}</TableCell>
                             <TableCell>{vendor.name}</TableCell>
                             <TableCell>{vendor.email}</TableCell>
                             <TableCell>{vendor.phone}</TableCell>
@@ -1297,21 +1308,21 @@ export function AdminDashboard() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleVendorAction(vendor.id, "View")}
+                                  onClick={() => handleVendorAction(vendor.warehouse_id, "View")}
                                 >
                                   <Eye className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleVendorAction(vendor.id, "Edit")}
+                                  onClick={() => handleVendorAction(vendor.warehouse_id, "Edit")}
                                 >
                                   <Edit className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  onClick={() => handleVendorAction(vendor.id, "Delete")}
+                                  onClick={() => handleVendorAction(vendor.warehouse_id, "Delete")}
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </Button>
