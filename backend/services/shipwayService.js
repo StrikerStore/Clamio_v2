@@ -218,43 +218,127 @@ class ShipwayService {
     let rawApiResponse = null;
     
     try {
-      this.logApiActivity({ type: 'shipway-request', url, params, headers: { Authorization: '***' } });
-      const response = await axios.get(url, {
-        params,
-        headers: {
-          'Authorization': this.basicAuthHeader,
-          'Content-Type': 'application/json',
-        },
-        timeout: 20000,
+      // Fetch all orders using Shipway's page-based pagination
+      let allOrders = [];
+      let page = 1;
+      let hasMorePages = true;
+      
+      console.log('🔄 Starting paginated fetch from Shipway API...');
+      
+      while (hasMorePages) {
+        const currentParams = { 
+          status: 'O',
+          page: page
+        };
+        
+        this.logApiActivity({ 
+          type: 'shipway-request', 
+          url, 
+          params: currentParams, 
+          headers: { Authorization: '***' },
+          page: page
+        });
+        
+        console.log(`📄 Fetching page ${page}...`);
+        
+        const response = await axios.get(url, {
+          params: currentParams,
+          headers: {
+            'Authorization': this.basicAuthHeader,
+            'Content-Type': 'application/json',
+          },
+          timeout: 20000,
+        });
+        
+        if (response.status !== 200 || !response.data) {
+          throw new Error('Invalid response from Shipway API');
+        }
+        
+        let currentPageOrders = [];
+        if (Array.isArray(response.data)) {
+          currentPageOrders = response.data;
+        } else if (Array.isArray(response.data.orders)) {
+          currentPageOrders = response.data.orders;
+        } else if (typeof response.data === 'object' && Array.isArray(response.data.message) && response.data.success === 1) {
+          currentPageOrders = response.data.message;
+        } else if (typeof response.data === 'object' && response.data.order_id) {
+          currentPageOrders = [response.data];
+        } else {
+          this.logApiActivity({ type: 'shipway-unexpected-format', data: response.data });
+          throw new Error('Unexpected Shipway API response format');
+        }
+        
+        console.log(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
+        
+        // Add orders from this page to our collection
+        allOrders = allOrders.concat(currentPageOrders);
+        
+        // If we got fewer than 100 orders, we've reached the last page
+        if (currentPageOrders.length < 100) {
+          hasMorePages = false;
+          console.log(`  🏁 Last page reached (${currentPageOrders.length} < 100 orders)`);
+        } else {
+          console.log(`  ➡️ More pages available (${currentPageOrders.length} = 100 orders)`);
+        }
+        
+        this.logApiActivity({ 
+          type: 'shipway-page-fetched', 
+          page: page, 
+          ordersInPage: currentPageOrders.length, 
+          totalOrdersSoFar: allOrders.length 
+        });
+        
+        page++;
+        
+        // Safety check to prevent infinite loops
+        if (page > 20) {
+          console.log('⚠️ Safety limit reached (20 pages), stopping pagination');
+          this.logApiActivity({ type: 'shipway-pagination-limit-reached', totalOrders: allOrders.length });
+          break;
+        }
+      }
+      
+      console.log(`🎉 Pagination complete! Total orders fetched: ${allOrders.length}`);
+      
+      // Filter orders to only include last 40 days
+      const fortyDaysAgo = new Date();
+      fortyDaysAgo.setDate(fortyDaysAgo.getDate() - 40);
+      
+      const filteredOrders = allOrders.filter(order => {
+        if (!order.order_date) return false;
+        
+        const orderDate = new Date(order.order_date);
+        const isWithin40Days = orderDate >= fortyDaysAgo;
+        
+        if (!isWithin40Days) {
+          console.log(`  ⏰ Filtering out old order: ${order.order_id} (${order.order_date})`);
+        }
+        
+        return isWithin40Days;
       });
       
-      // Store raw API response in JSON file
-      rawApiResponse = response.data;
+      console.log(`📅 Date filter applied: ${filteredOrders.length} orders within last 40 days (filtered out ${allOrders.length - filteredOrders.length} old orders)`);
+      
+      shipwayOrders = filteredOrders;
+      rawApiResponse = { success: 1, message: allOrders }; // Keep all orders in raw JSON
+      
+      // Store raw API response in JSON file (all orders)
       try {
         fs.writeFileSync(rawDataJsonPath, JSON.stringify(rawApiResponse, null, 2));
-        this.logApiActivity({ type: 'raw-data-stored', path: rawDataJsonPath });
+        this.logApiActivity({ type: 'raw-data-stored', path: rawDataJsonPath, totalOrders: allOrders.length, filteredOrders: filteredOrders.length });
       } catch (fileError) {
         this.logApiActivity({ type: 'raw-data-store-error', error: fileError.message });
       }
       
-      this.logApiActivity({ type: 'shipway-response', status: response.status, dataType: typeof response.data, dataKeys: response.data && typeof response.data === 'object' ? Object.keys(response.data) : undefined });
+      this.logApiActivity({ 
+        type: 'shipway-response', 
+        status: 200, 
+        dataType: typeof rawApiResponse, 
+        dataKeys: Object.keys(rawApiResponse),
+        totalOrders: allOrders.length,
+        filteredOrders: filteredOrders.length
+      });
       
-      // Accept array, or object with 'orders' array, or single order object, or 'message' array
-      if (response.status !== 200 || !response.data) {
-        throw new Error('Invalid response from Shipway API');
-      }
-      if (Array.isArray(response.data)) {
-        shipwayOrders = response.data;
-      } else if (Array.isArray(response.data.orders)) {
-        shipwayOrders = response.data.orders;
-      } else if (typeof response.data === 'object' && Array.isArray(response.data.message) && response.data.success === 1) {
-        shipwayOrders = response.data.message;
-      } else if (typeof response.data === 'object' && response.data.order_id) {
-        shipwayOrders = [response.data];
-      } else {
-        this.logApiActivity({ type: 'shipway-unexpected-format', data: response.data });
-        throw new Error('Unexpected Shipway API response format');
-      }
     } catch (error) {
       this.logApiActivity({ type: 'shipway-error', error: error.message, stack: error.stack });
       throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
