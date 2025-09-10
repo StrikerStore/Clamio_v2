@@ -78,6 +78,8 @@ class UserSessionService {
   }
 
   getAllUsers() {
+    // Always load a fresh copy to avoid overwriting newer changes (e.g., updated passwords)
+    this.loadWorkbook();
     const range = XLSX.utils.decode_range(this.worksheet['!ref']);
     const users = [];
 
@@ -106,6 +108,8 @@ class UserSessionService {
   }
 
   ensureTokensAndSessions() {
+    // Reload latest workbook before making any updates
+    this.loadWorkbook();
     const users = this.getAllUsers();
     
     users.forEach((user, index) => {
@@ -129,6 +133,8 @@ class UserSessionService {
   }
 
   loginVendor(warehouseId) {
+    // Reload latest workbook before making any updates
+    this.loadWorkbook();
     const users = this.getAllUsers();
     let foundToken = null;
 
@@ -150,17 +156,23 @@ class UserSessionService {
   }
 
   getActiveVendor() {
+    // Reload latest workbook before reads
+    this.loadWorkbook();
     const users = this.getAllUsers();
     const activeUser = users.find(user => user.active_session === 'TRUE');
     return activeUser ? activeUser.warehouseId : null;
   }
 
   getVendorByToken(token) {
+    // Reload latest workbook before reads
+    this.loadWorkbook();
     const users = this.getAllUsers();
     return users.find(user => user.token === token && user.active_session === 'TRUE');
   }
 
   logoutVendor(warehouseId) {
+    // Reload latest workbook before making any updates
+    this.loadWorkbook();
     const users = this.getAllUsers();
     
     users.forEach((user, index) => {
@@ -173,12 +185,16 @@ class UserSessionService {
 
   // Get vendor by email for login
   getVendorByEmail(email) {
+    // Reload latest workbook before reads
+    this.loadWorkbook();
     const users = this.getAllUsers();
     return users.find(user => user.email === email);
   }
 
   // Get vendor by phone for login
   getVendorByPhone(phone) {
+    // Reload latest workbook before reads
+    this.loadWorkbook();
     const users = this.getAllUsers();
     return users.find(user => user.phone === phone || user.contactNumber === phone);
   }

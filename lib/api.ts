@@ -126,7 +126,9 @@ class ApiClient {
     warehouseId?: string
     contactNumber?: string
   }): Promise<ApiResponse> {
-    return this.makeRequest('/users', {
+    const isAdminCreatingVendor = userData.role === 'vendor'
+    const endpoint = isAdminCreatingVendor ? '/users/vendor' : '/users'
+    return this.makeRequest(endpoint, {
       method: 'POST',
       body: JSON.stringify(userData)
     })
@@ -140,14 +142,17 @@ class ApiClient {
     warehouseId: string
     contactNumber: string
   }>): Promise<ApiResponse> {
-    return this.makeRequest(`/users/${userId}`, {
+    const isVendor = userData?.warehouseId !== undefined
+    const endpoint = isVendor ? `/users/vendor/${userId}` : `/users/${userId}`
+    return this.makeRequest(endpoint, {
       method: 'PUT',
       body: JSON.stringify(userData)
     })
   }
 
   async deleteUser(userId: string): Promise<ApiResponse> {
-    return this.makeRequest(`/users/${userId}`, {
+    // prefer vendor-specific delete for admin permissions
+    return this.makeRequest(`/users/vendor/${userId}`, {
       method: 'DELETE'
     })
   }
@@ -252,13 +257,28 @@ class ApiClient {
   }
 
   async getAdminVendors(): Promise<ApiResponse> {
-    return this.makeRequest('/orders/admin/vendors');
+    // Prefer enriched vendors report for admin auditing table
+    return this.makeRequest('/users/vendors-report');
   }
 
   async assignOrderToVendor(unique_id: string, vendor_warehouse_id: string): Promise<ApiResponse> {
     return this.makeRequest('/orders/admin/assign', {
       method: 'POST',
       body: JSON.stringify({ unique_id, vendor_warehouse_id })
+    });
+  }
+
+  async bulkAssignOrdersToVendor(unique_ids: string[], vendor_warehouse_id: string): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/bulk-assign', {
+      method: 'POST',
+      body: JSON.stringify({ unique_ids, vendor_warehouse_id })
+    });
+  }
+
+  async bulkUnassignOrders(unique_ids: string[]): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/bulk-unassign', {
+      method: 'POST',
+      body: JSON.stringify({ unique_ids })
     });
   }
 
@@ -500,6 +520,26 @@ class ApiClient {
 
   async getCarrierStatus(): Promise<ApiResponse> {
     return this.makeRequest('/shipway/carriers/status')
+  }
+
+  async updateCarrier(carrierId: string, updates: { carrier_id?: string; status?: string }): Promise<ApiResponse> {
+    return this.makeRequest(`/shipway/carriers/${encodeURIComponent(carrierId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    })
+  }
+
+  async deleteCarrier(carrierId: string): Promise<ApiResponse> {
+    return this.makeRequest(`/shipway/carriers/${encodeURIComponent(carrierId)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async moveCarrier(carrierId: string, direction: 'up' | 'down'): Promise<ApiResponse> {
+    return this.makeRequest(`/shipway/carriers/${encodeURIComponent(carrierId)}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ direction }),
+    })
   }
 
   async downloadCarriersCSV(): Promise<void> {

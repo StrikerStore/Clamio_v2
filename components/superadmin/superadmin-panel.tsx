@@ -10,9 +10,10 @@ import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Settings, Users, Upload, LogOut, Plus, Edit, Trash2 } from "lucide-react"
+import { Settings, Users, Upload, LogOut, Plus, Edit, Trash2, Menu, X } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
+import { useDeviceType } from "@/hooks/use-mobile"
 import {
   Dialog,
   DialogContent,
@@ -48,6 +49,8 @@ const mockUsers = [
 export function SuperAdminPanel() {
   const { user, logout } = useAuth()
   const { toast } = useToast()
+  const { isMobile, isTablet, isDesktop, deviceType } = useDeviceType()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [newUser, setNewUser] = useState({
     name: "",
     email: "",
@@ -285,29 +288,73 @@ export function SuperAdminPanel() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b">
+      <div className="bg-white shadow-sm border-b sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
                 <Settings className="w-5 h-5 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-semibold text-gray-900">Super Admin Panel</h1>
-                <p className="text-sm text-gray-500">Welcome back, {user?.name}</p>
+              <div className="min-w-0">
+                <h1 className={`font-semibold text-gray-900 ${isMobile ? 'text-lg' : 'text-xl'}`}>
+                  {isMobile ? 'Admin' : 'Super Admin Panel'}
+                </h1>
+                {!isMobile && (
+                  <p className="text-sm text-gray-500 truncate">Welcome back, {user?.name}</p>
+                )}
               </div>
             </div>
-            <Button variant="outline" onClick={logout}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
+            
+            {/* Desktop/Tablet Logout */}
+            {!isMobile && (
+              <Button variant="outline" onClick={logout} className="flex items-center gap-2">
+                <LogOut className="w-4 h-4" />
+                {isDesktop && 'Logout'}
+              </Button>
+            )}
+            
+            {/* Mobile Menu Button */}
+            {isMobile && (
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="p-2"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </Button>
+            )}
           </div>
+          
+          {/* Mobile Menu */}
+          {isMobile && isMobileMenuOpen && (
+            <div className="border-t bg-white py-4">
+              <div className="space-y-3">
+                <div className="px-2">
+                  <p className="text-sm text-gray-600 truncate">Welcome, {user?.name}</p>
+                  <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+                </div>
+                <Button 
+                  variant="outline" 
+                  onClick={logout} 
+                  className="w-full flex items-center justify-center gap-2"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Logout
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className={`grid gap-4 md:gap-6 mb-6 md:mb-8 ${
+          isMobile ? 'grid-cols-1' : 
+          isTablet ? 'grid-cols-2' : 
+          'grid-cols-3'
+        }`}>
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center">
@@ -361,45 +408,51 @@ export function SuperAdminPanel() {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="users" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="users">User Management</TabsTrigger>
-                <TabsTrigger value="bulk-import">Bulk Import</TabsTrigger>
+              <TabsList className={`grid w-full grid-cols-2 ${isMobile ? 'h-auto' : ''}`}>
+                <TabsTrigger value="users" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
+                  {isMobile ? 'Users' : 'User Management'}
+                </TabsTrigger>
+                <TabsTrigger value="bulk-import" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
+                  {isMobile ? 'Import' : 'Bulk Import'}
+                </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="users" className="space-y-6">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-medium">User Management</h3>
+              <TabsContent value="users" className="space-y-4 md:space-y-6">
+                <div className={`flex ${isMobile ? 'flex-col space-y-3' : 'justify-between items-center'}`}>
+                  <h3 className={`font-medium ${isMobile ? 'text-base' : 'text-lg'}`}>User Management</h3>
                   <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
                     <DialogTrigger asChild>
-                      <Button>
+                      <Button className={`${isMobile ? 'w-full' : ''}`} size={isMobile ? 'default' : 'default'}>
                         <Plus className="w-4 h-4 mr-2" />
-                        Add User
+                        {isMobile ? 'Add User' : 'Add User'}
                       </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh] overflow-y-auto' : 'max-w-md'}`}>
                       <DialogHeader>
-                        <DialogTitle>Add New User</DialogTitle>
-                        <DialogDescription>Create a new user account for the vendor portal</DialogDescription>
+                        <DialogTitle className={`${isMobile ? 'text-lg' : 'text-xl'}`}>Add New User</DialogTitle>
+                        <DialogDescription className={`${isMobile ? 'text-sm' : ''}`}>
+                          Create a new user account for the vendor portal
+                        </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4">
                         {!newUser.userType ? (
                           <div>
                             <Label>Select User Type</Label>
-                            <div className="grid grid-cols-2 gap-4 mt-2">
+                            <div className={`grid grid-cols-2 gap-3 mt-2`}>
                               <Button
                                 variant="outline"
-                                className="h-20 flex flex-col items-center justify-center bg-transparent"
+                                className={`${isMobile ? 'h-16 text-sm' : 'h-20'} flex flex-col items-center justify-center bg-transparent`}
                                 onClick={() => setNewUser({ ...newUser, userType: "vendor", role: "vendor" })}
                               >
-                                <Users className="w-6 h-6 mb-2" />
+                                <Users className={`${isMobile ? 'w-5 h-5 mb-1' : 'w-6 h-6 mb-2'}`} />
                                 Vendor
                               </Button>
                               <Button
                                 variant="outline"
-                                className="h-20 flex flex-col items-center justify-center bg-transparent"
+                                className={`${isMobile ? 'h-16 text-sm' : 'h-20'} flex flex-col items-center justify-center bg-transparent`}
                                 onClick={() => setNewUser({ ...newUser, userType: "admin", role: "admin" })}
                               >
-                                <Settings className="w-6 h-6 mb-2" />
+                                <Settings className={`${isMobile ? 'w-5 h-5 mb-1' : 'w-6 h-6 mb-2'}`} />
                                 Admin
                               </Button>
                             </div>
@@ -515,28 +568,18 @@ export function SuperAdminPanel() {
                   </Dialog>
                 </div>
 
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Last Login</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {users.map((user) => (
-                        <TableRow key={user.id}>
-                          <TableCell className="font-medium">{user.name}</TableCell>
-                          <TableCell>{user.email}</TableCell>
-                          <TableCell>{getRoleBadge(user.role)}</TableCell>
-                          <TableCell>{getStatusBadge(user.status)}</TableCell>
-                          <TableCell>{user.lastLogin}</TableCell>
-                          <TableCell>
-                            <div className="flex space-x-2">
+                {/* Mobile Card Layout */}
+                {isMobile ? (
+                  <div className="space-y-4">
+                    {users.map((user) => (
+                      <Card key={user.id} className="p-4">
+                        <div className="space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div className="min-w-0 flex-1">
+                              <h4 className="font-medium text-gray-900 truncate">{user.name}</h4>
+                              <p className="text-sm text-gray-600 truncate">{user.email}</p>
+                            </div>
+                            <div className="flex space-x-1 ml-2">
                               <Button size="sm" variant="outline" onClick={() => handleEditUser(user)}>
                                 <Edit className="w-4 h-4" />
                               </Button>
@@ -544,17 +587,67 @@ export function SuperAdminPanel() {
                                 <Trash2 className="w-4 h-4" />
                               </Button>
                             </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {getRoleBadge(user.role)}
+                            {getStatusBadge(user.status)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Last login: {user.lastLogin}
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  /* Desktop/Tablet Table Layout */
+                  <div className="rounded-md border overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Last Login</TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {users.map((user) => (
+                            <TableRow key={user.id}>
+                              <TableCell className="font-medium">{user.name}</TableCell>
+                              <TableCell className={`${isTablet ? 'max-w-[150px] truncate' : ''}`}>
+                                {user.email}
+                              </TableCell>
+                              <TableCell>{getRoleBadge(user.role)}</TableCell>
+                              <TableCell>{getStatusBadge(user.status)}</TableCell>
+                              <TableCell className={`${isTablet ? 'text-sm' : ''}`}>
+                                {user.lastLogin}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex space-x-2">
+                                  <Button size="sm" variant="outline" onClick={() => handleEditUser(user)}>
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => handleDeleteClick(user)}>
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
               </TabsContent>
 
-              <TabsContent value="bulk-import" className="space-y-6">
+              <TabsContent value="bulk-import" className="space-y-4 md:space-y-6">
                 <div>
-                  <h3 className="text-lg font-medium mb-4">Bulk Import Users</h3>
+                  <h3 className={`font-medium mb-4 ${isMobile ? 'text-base' : 'text-lg'}`}>Bulk Import Users</h3>
                   <Card>
                     <CardHeader>
                       <CardTitle>CSV Import</CardTitle>

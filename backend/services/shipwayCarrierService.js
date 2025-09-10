@@ -312,6 +312,100 @@ class ShipwayCarrierService {
   }
 
   /**
+   * Update a carrier's fields in Excel
+   * @param {string} carrierId - Existing carrier_id to update
+   * @param {{ carrier_id?: string, status?: string }} updates - Fields to update
+   * @returns {{ success: boolean, message: string, carrier: object }}
+   */
+  updateCarrier(carrierId, updates) {
+    try {
+      const carriers = this.readCarriersFromExcel();
+      const index = carriers.findIndex(c => String(c.carrier_id) === String(carrierId));
+      if (index === -1) {
+        throw new Error('Carrier not found');
+      }
+
+      // If carrier_id is changing, ensure uniqueness
+      if (updates.carrier_id && String(updates.carrier_id) !== String(carrierId)) {
+        const exists = carriers.some(c => String(c.carrier_id) === String(updates.carrier_id));
+        if (exists) {
+          throw new Error('carrier_id already exists');
+        }
+      }
+
+      // Apply allowed updates only
+      const allowed = {};
+      if (updates.carrier_id !== undefined) allowed.carrier_id = updates.carrier_id;
+      if (updates.status !== undefined) allowed.status = updates.status;
+
+      const previousStatus = String(carriers[index].status || '').trim().toLowerCase();
+      carriers[index] = { ...carriers[index], ...allowed };
+
+      const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
+      const newStatus = normalizeStatus(carriers[index].status);
+
+      const renumberActivePriorities = () => {
+        // Renumber only active carriers; blank out inactive priorities
+        const active = carriers
+          .filter(c => normalizeStatus(c.status) === 'active')
+          .sort((a, b) => (parseInt(a.priority) || 0) - (parseInt(b.priority) || 0));
+        active.forEach((c, i) => { c.priority = i + 1; });
+        carriers
+          .filter(c => normalizeStatus(c.status) !== 'active')
+          .forEach(c => { c.priority = ''; });
+      };
+
+      if (previousStatus !== 'inactive' && newStatus === 'inactive') {
+        // Becoming inactive: drop from priority and reindex others
+        carriers[index].priority = '';
+        renumberActivePriorities();
+      } else if (previousStatus === 'inactive' && newStatus === 'active') {
+        // Re-activating: append at end
+        const maxPriority = carriers
+          .filter(c => normalizeStatus(c.status) === 'active')
+          .reduce((max, c) => Math.max(max, parseInt(c.priority) || 0), 0);
+        carriers[index].priority = maxPriority + 1;
+        renumberActivePriorities();
+      } else {
+        // Other changes: keep sequence clean
+        renumberActivePriorities();
+      }
+
+      this.saveCarriersToExcel(carriers);
+
+      return { success: true, message: 'Carrier updated successfully', carrier: carriers[index] };
+    } catch (error) {
+      console.error('Error updating carrier:', error.message);
+      throw new Error(error.message || 'Failed to update carrier');
+    }
+  }
+
+  /**
+   * Delete a carrier from Excel
+   * @param {string} carrierId - carrier_id to delete
+   * @returns {{ success: boolean, message: string, deleted: boolean }}
+   */
+  deleteCarrier(carrierId) {
+    try {
+      const carriers = this.readCarriersFromExcel();
+      const filtered = carriers.filter(c => String(c.carrier_id) !== String(carrierId));
+      if (filtered.length === carriers.length) {
+        throw new Error('Carrier not found');
+      }
+
+      // Renumber priorities to remain sequential after deletion
+      filtered.sort((a, b) => (parseInt(a.priority) || 0) - (parseInt(b.priority) || 0));
+      filtered.forEach((c, i) => { c.priority = i + 1; });
+
+      this.saveCarriersToExcel(filtered);
+      return { success: true, message: 'Carrier deleted successfully', deleted: true };
+    } catch (error) {
+      console.error('Error deleting carrier:', error.message);
+      throw new Error(error.message || 'Failed to delete carrier');
+    }
+  }
+
+  /**
    * Export carriers data to CSV format
    * @returns {string} CSV formatted string
    */
@@ -323,8 +417,13 @@ class ShipwayCarrierService {
         throw new Error('No carrier data found');
       }
 
-      // Sort carriers by priority for CSV export (1, 2, 3...)
+      // Sort carriers for CSV export: actives first by priority 1..N, then inactives
+      const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
       const sortedCarriers = [...carriers].sort((a, b) => {
+        const aActive = normalizeStatus(a.status) === 'active';
+        const bActive = normalizeStatus(b.status) === 'active';
+        if (aActive && !bActive) return -1;
+        if (!aActive && bActive) return 1;
         const priorityA = parseInt(a.priority) || 0;
         const priorityB = parseInt(b.priority) || 0;
         return priorityA - priorityB;
@@ -401,6 +500,7 @@ class ShipwayCarrierService {
 
       const carrierIdIndex = header.indexOf('carrier_id');
       const priorityIndex = header.indexOf('priority');
+      const statusIndex = header.indexOf('status');
 
       console.log('🔍 carrier_id index:', carrierIdIndex);
       console.log('🔍 priority index:', priorityIndex);
@@ -423,6 +523,9 @@ class ShipwayCarrierService {
         const values = this.parseCSVLine(line);
         const carrierId = values[carrierIdIndex];
         const priority = parseInt(values[priorityIndex]);
+        const statusRaw = values[statusIndex] || '';
+        const statusNormalized = String(statusRaw).trim().toLowerCase();
+        const status = statusNormalized === 'inactive' ? 'inactive' : (statusNormalized === 'active' ? 'active' : statusRaw);
 
         console.log(`🔍 Row ${i}: carrier_id="${carrierId}", priority="${values[priorityIndex]}" -> ${priority}`);
 
@@ -441,7 +544,7 @@ class ShipwayCarrierService {
         }
 
         uploadedCarrierIds.add(carrierId);
-        updates.push({ carrier_id: carrierId, priority });
+        updates.push({ carrier_id: carrierId, priority, status });
       }
 
       console.log('🔍 Valid updates found:', updates.length);
@@ -468,9 +571,14 @@ class ShipwayCarrierService {
       let updatedCount = 0;
       updates.forEach(update => {
         const carrier = carrierMap.get(update.carrier_id);
-        if (carrier && carrier.priority !== update.priority) {
-          carrier.priority = update.priority;
-          updatedCount++;
+        if (carrier) {
+          if (carrier.priority !== update.priority) {
+            carrier.priority = update.priority;
+            updatedCount++;
+          }
+          if (update.status) {
+            carrier.status = update.status;
+          }
         }
       });
 
@@ -493,6 +601,47 @@ class ShipwayCarrierService {
     } catch (error) {
       console.error('Error updating carrier priorities from CSV:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Move a carrier up or down in priority ordering
+   * @param {string} carrierId
+   * @param {'up'|'down'} direction
+   */
+  moveCarrier(carrierId, direction) {
+    try {
+      const carriers = this.readCarriersFromExcel();
+      const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
+
+      const active = carriers
+        .filter(c => normalizeStatus(c.status) === 'active')
+        .sort((a, b) => (parseInt(a.priority) || 0) - (parseInt(b.priority) || 0));
+      const inactive = carriers.filter(c => normalizeStatus(c.status) !== 'active');
+
+      const index = active.findIndex(c => String(c.carrier_id) === String(carrierId));
+      if (index === -1) {
+        throw new Error('Carrier not found or not active');
+      }
+      if (direction === 'up' && index === 0) {
+        return { success: true, message: 'Already at top' };
+      }
+      if (direction === 'down' && index === active.length - 1) {
+        return { success: true, message: 'Already at bottom' };
+      }
+      const swapWith = direction === 'up' ? index - 1 : index + 1;
+      const tmp = active[index];
+      active[index] = active[swapWith];
+      active[swapWith] = tmp;
+      active.forEach((c, i) => { c.priority = i + 1; });
+      inactive.forEach(c => { c.priority = ''; });
+
+      const merged = [...active, ...inactive];
+      this.saveCarriersToExcel(merged);
+      return { success: true, message: 'Carrier moved successfully' };
+    } catch (error) {
+      console.error('Error moving carrier:', error.message);
+      throw new Error(error.message || 'Failed to move carrier');
     }
   }
 

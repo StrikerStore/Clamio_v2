@@ -115,7 +115,8 @@ class ExcelDatabase {
    */
   getUserByEmail(email) {
     const users = this.getAllUsers();
-    return users.find(user => user.email === email) || null;
+    const normalized = (email || '').trim().toLowerCase();
+    return users.find(user => (user.email || '').trim().toLowerCase() === normalized) || null;
   }
 
   /**

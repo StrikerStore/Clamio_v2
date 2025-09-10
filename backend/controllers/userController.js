@@ -3,6 +3,7 @@ const { hashPassword } = require('../middleware/auth');
 const shipwayService = require('../services/shipwayService');
 const fs = require('fs');
 const path = require('path');
+const XLSX = require('xlsx');
 
 /**
  * User Management Controller
@@ -277,12 +278,54 @@ class UserController {
           });
         }
       }
+      const prevUser = database.getUserById(id);
       const updatedUser = database.updateUser(id, updateData);
       if (!updatedUser) {
         return res.status(500).json({
           success: false,
           message: 'Failed to update user'
         });
+      }
+
+      // If vendor warehouseId changed or status became inactive, update their orders' claim state
+      try {
+        if (updatedUser.role === 'vendor') {
+          const prevWid = String((prevUser && (prevUser.warehouseId || prevUser.warehouse_id)) || '');
+          const newWid = String((updatedUser.warehouseId || updatedUser.warehouse_id) || '');
+          const deactivated = updateData.status && String(updateData.status).toLowerCase() === 'inactive';
+          const warehouseChanged = prevWid && newWid && prevWid !== newWid;
+
+          if (deactivated || warehouseChanged) {
+            const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+            if (fs.existsSync(ordersPath)) {
+              const ordersWb = XLSX.readFile(ordersPath);
+              const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+              const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+              const targetWid = warehouseChanged ? prevWid : newWid || prevWid;
+
+              orders.forEach((order, idx) => {
+                if (String(order.claimed_by) === String(targetWid)) {
+                  order.status = 'unclaimed';
+                  order.claimed_by = '';
+                  order.claimed_at = '';
+                  const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+                  const rowNum = idx + 2;
+                  header.forEach((col, i) => {
+                    ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
+                      t: 's',
+                      v: order[col] || ''
+                    };
+                  });
+                }
+              });
+
+              XLSX.writeFile(ordersWb, ordersPath);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error updating vendor orders on user update:', e);
+        // Continue even if this fails
       }
       res.json({
         success: true,
@@ -328,6 +371,45 @@ class UserController {
           success: false,
           message: 'Cannot delete superadmin user'
         });
+      }
+
+      // If vendor, unclaim all orders assigned to this vendor before deleting
+      if (user.role === 'vendor') {
+        try {
+          const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+          if (fs.existsSync(ordersPath)) {
+            const ordersWb = XLSX.readFile(ordersPath);
+            const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+            const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+
+            const beforeCount = orders.length;
+            const vendorWid = String(user.warehouseId || user.warehouse_id || '');
+            if (vendorWid) {
+              orders.forEach((order, idx) => {
+                if (String(order.claimed_by) === vendorWid) {
+                  order.status = 'unclaimed';
+                  order.claimed_by = '';
+                  order.claimed_at = '';
+                  // Keep history in last_claimed_by/at as-is
+
+                  const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+                  const rowNum = idx + 2; // 1-based with header
+                  header.forEach((col, i) => {
+                    ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
+                      t: 's',
+                      v: order[col] || ''
+                    };
+                  });
+                }
+              });
+
+              XLSX.writeFile(ordersWb, ordersPath);
+            }
+          }
+        } catch (e) {
+          console.error('Error unclaiming orders for deleted vendor:', e);
+          // Continue with deletion even if this fails
+        }
       }
 
       // Delete user

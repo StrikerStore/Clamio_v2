@@ -158,12 +158,16 @@ class CarrierServiceabilityService {
         return null;
       }
       
-      // Find the carrier with the highest priority (lowest priority number)
+      // Find the carrier with the highest priority (lowest priority number) and active status
       let highestPriorityCarrier = null;
       let highestPriority = -1;
       
       validCarriers.forEach(carrier => {
         const carrierInfo = carrierMap.get(carrier.carrier_id);
+        const statusLower = String(carrierInfo.status || '').trim().toLowerCase();
+        if (statusLower !== 'active') {
+          return; // skip inactive carriers
+        }
         const priority = parseInt(carrierInfo.priority) || 0;
         
         if (highestPriority === -1 || priority < highestPriority) {

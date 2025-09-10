@@ -476,4 +476,81 @@ router.get('/carriers/format', authenticateBasicAuth, requireAdminOrSuperadmin, 
   }
 });
 
+/**
+ * @route   GET /api/shipway/carrier-format
+ * @desc    Backward-compatible alias for CSV format endpoint
+ * @access  Admin/Superadmin only
+ */
+router.get('/carrier-format', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    console.log('🔵 SHIPWAY CARRIERS FORMAT (alias): API request received');
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const formatInfo = shipwayCarrierService.getExpectedCSVFormat();
+    res.json({
+      success: true,
+      message: 'CSV format requirements retrieved successfully',
+      data: formatInfo
+    });
+  } catch (error) {
+    console.error('💥 SHIPWAY CARRIERS FORMAT (alias): API error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   PUT /api/shipway/carriers/:carrierId
+ * @desc    Update carrier fields (carrier_id, status)
+ * @access  Admin/Superadmin only
+ */
+router.put('/carriers/:carrierId', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    const { carrierId } = req.params;
+    const { carrier_id, status } = req.body || {};
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const result = shipwayCarrierService.updateCarrier(carrierId, { carrier_id, status });
+    res.json({ success: true, message: result.message, data: result.carrier });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * @route   DELETE /api/shipway/carriers/:carrierId
+ * @desc    Delete carrier
+ * @access  Admin/Superadmin only
+ */
+router.delete('/carriers/:carrierId', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    const { carrierId } = req.params;
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const result = shipwayCarrierService.deleteCarrier(carrierId);
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/shipway/carriers/:carrierId/move
+ * @desc    Move carrier up or down in priority
+ * @access  Admin/Superadmin only
+ */
+router.post('/carriers/:carrierId/move', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    const { carrierId } = req.params;
+    const { direction } = req.body || {};
+    if (!['up', 'down'].includes(direction)) {
+      return res.status(400).json({ success: false, message: 'direction must be "up" or "down"' });
+    }
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const result = shipwayCarrierService.moveCarrier(carrierId, direction);
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router; 
