@@ -411,13 +411,6 @@ export function AdminDashboard() {
     setSelectedOrders([])
   }
 
-  const handleVendorAction = (vendorId: string, action: string) => {
-    toast({
-      title: "Vendor Action",
-      description: `${action} applied to vendor ${vendorId}`,
-    })
-  }
-
   const handleCarrierAction = (carrierId: string, action: string) => {
     toast({
       title: "Carrier Action",
@@ -1553,7 +1546,7 @@ export function AdminDashboard() {
                       </TableHeader>
                       <TableBody>
                         {getFilteredVendors().map((vendor) => (
-                          <TableRow key={vendor.warehouse_id}>
+                          <TableRow key={vendor.id}>
                             <TableCell>
                               <input
                                 type="checkbox"
@@ -1567,15 +1560,10 @@ export function AdminDashboard() {
                                 }}
                               />
                             </TableCell>
-<<<<<<< HEAD
-                            <TableCell className="font-medium">{vendor.warehouse_id}</TableCell>
-                            <TableCell>{vendor.name}</TableCell>
-=======
                             <TableCell className="font-medium">{vendor.name}</TableCell>
->>>>>>> feature/mobile-view
                             <TableCell>{vendor.email}</TableCell>
                             <TableCell>{vendor.warehouseId || '—'}</TableCell>
-                            <TableCell>{vendor.city || '—'}</TableC.ell>
+                            <TableCell>{vendor.city || '—'}</TableCell>
                             <TableCell>{vendor.phone || '—'}</TableCell>
                             <TableCell>{getStatusBadge(vendor.status === 'active' || vendor.status === 'inactive' ? vendor.status : (vendor.status ? vendor.status : 'unclaimed'))}</TableCell>
                             <TableCell>{vendor.totalOrders ?? 0}</TableCell>
@@ -1586,30 +1574,13 @@ export function AdminDashboard() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-<<<<<<< HEAD
-                                  onClick={() => handleVendorAction(vendor.warehouse_id, "View")}
-=======
                                   onClick={() => { setVendorDialogVendor(vendor); setShowVendorViewDialog(true) }}
->>>>>>> feature/mobile-view
                                 >
                                   <Eye className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-<<<<<<< HEAD
-                                  onClick={() => handleVendorAction(vendor.warehouse_id, "Edit")}
-                                >
-                                  <Edit className="w-3 h-3" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => handleVendorAction(vendor.warehouse_id, "Delete")}
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </Button>
-=======
                                   onClick={() => { setVendorDialogVendor(vendor); setEditVendorForm({ name: vendor.name, email: vendor.email, phone: vendor.phone, status: vendor.status, warehouseId: vendor.warehouseId || '', contactNumber: vendor.contactNumber || '' }); setShowVendorEditDialog(true) }}
                                 >
                                   <Edit className="w-3 h-3" />
@@ -1650,7 +1621,6 @@ export function AdminDashboard() {
                                     </div>
                                   </DialogContent>
                                 </Dialog>
->>>>>>> feature/mobile-view
                               </div>
                             </TableCell>
                           </TableRow>
