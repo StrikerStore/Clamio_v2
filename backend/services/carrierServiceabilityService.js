@@ -70,27 +70,28 @@ class CarrierServiceabilityService {
   }
 
   /**
-   * Read orders from Excel file
-   * @returns {Array} Array of order data
+   * Read orders from MySQL database
+   * @returns {Promise<Array>} Array of order data
    */
-  readOrdersFromExcel() {
+  async readOrdersFromDatabase() {
     try {
-      if (!fs.existsSync(this.ordersExcelPath)) {
-        console.log('📝 CARRIER SERVICEABILITY: Orders Excel file does not exist');
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.log('📝 CARRIER SERVICEABILITY: MySQL connection not available');
         return [];
       }
 
-      const workbook = XLSX.readFile(this.ordersExcelPath);
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const orders = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+      const orders = await database.getAllOrders();
 
-      console.log('✅ CARRIER SERVICEABILITY: Orders loaded from Excel');
+      console.log('✅ CARRIER SERVICEABILITY: Orders loaded from MySQL');
       console.log('  - Total orders:', orders.length);
 
       return orders;
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error reading orders from Excel:', error.message);
-      throw new Error(`Failed to read orders from Excel: ${error.message}`);
+      console.error('💥 CARRIER SERVICEABILITY: Error reading orders from MySQL:', error.message);
+      throw new Error(`Failed to read orders from MySQL: ${error.message}`);
     }
   }
 
@@ -157,12 +158,16 @@ class CarrierServiceabilityService {
         return null;
       }
       
-      // Find the carrier with the highest priority (lowest priority number)
+      // Find the carrier with the highest priority (lowest priority number) and active status
       let highestPriorityCarrier = null;
       let highestPriority = -1;
       
       validCarriers.forEach(carrier => {
         const carrierInfo = carrierMap.get(carrier.carrier_id);
+        const statusLower = String(carrierInfo.status || '').trim().toLowerCase();
+        if (statusLower !== 'active') {
+          return; // skip inactive carriers
+        }
         const priority = parseInt(carrierInfo.priority) || 0;
         
         if (highestPriority === -1 || priority < highestPriority) {
@@ -186,53 +191,44 @@ class CarrierServiceabilityService {
   }
 
   /**
-   * Save orders back to Excel file with priority_carrier column
+   * Save orders back to MySQL database with priority_carrier column
    * @param {Array} orders - Array of order data with priority_carrier column
+   * @returns {Promise<Object>} Result object
    */
-  saveOrdersToExcel(orders) {
+  async saveOrdersToDatabase(orders) {
     try {
-      console.log('🔵 CARRIER SERVICEABILITY: Saving orders to Excel...');
+      console.log('🔵 CARRIER SERVICEABILITY: Saving orders to MySQL...');
       
-      // Create backup if file exists
-      if (fs.existsSync(this.ordersExcelPath)) {
-        const backupPath = this.ordersExcelPath.replace('.xlsx', '_backup.xlsx');
-        fs.copyFileSync(this.ordersExcelPath, backupPath);
-        console.log('  - Backup created:', backupPath);
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        throw new Error('MySQL connection not available');
       }
 
-      // Create workbook and worksheet
-      const workbook = XLSX.utils.book_new();
-      const worksheet = XLSX.utils.json_to_sheet(orders);
-
-      // Set column widths (adjust as needed)
-      const columnWidths = [
-        { wch: 15 }, // order_id
-        { wch: 20 }, // pincode
-        { wch: 15 }, // payment_type
-        { wch: 20 }, // priority_carrier
-        // Add more column widths as needed
-      ];
-      worksheet['!cols'] = columnWidths;
-
-      // Add worksheet to workbook
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders');
-
-      // Write to file
-      XLSX.writeFile(workbook, this.ordersExcelPath);
+      let updatedCount = 0;
       
-      console.log('✅ CARRIER SERVICEABILITY: Orders saved to Excel');
-      console.log('  - File path:', this.ordersExcelPath);
-      console.log('  - Total orders saved:', orders.length);
+      // Update each order in the database
+      for (const order of orders) {
+        if (order.unique_id && order.priority_carrier) {
+          await database.updateOrder(order.unique_id, {
+            priority_carrier: order.priority_carrier
+          });
+          updatedCount++;
+        }
+      }
+      
+      console.log('✅ CARRIER SERVICEABILITY: Orders saved to MySQL');
+      console.log('  - Total orders updated:', updatedCount);
 
       return {
         success: true,
-        message: `Successfully saved ${orders.length} orders to Excel with priority_carrier column`,
-        filePath: this.ordersExcelPath,
-        orderCount: orders.length
+        message: `Successfully saved ${updatedCount} orders to MySQL with priority_carrier column`,
+        orderCount: updatedCount
       };
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error saving to Excel:', error.message);
-      throw new Error(`Failed to save orders to Excel: ${error.message}`);
+      console.error('💥 CARRIER SERVICEABILITY: Error saving to MySQL:', error.message);
+      throw new Error(`Failed to save orders to MySQL: ${error.message}`);
     }
   }
 
@@ -244,12 +240,12 @@ class CarrierServiceabilityService {
     try {
       console.log('🔵 CARRIER SERVICEABILITY: Starting priority carrier assignment...');
       
-      // Read orders from Excel and carriers from database
-      const orders = this.readOrdersFromExcel();
+      // Read orders from MySQL and carriers from database
+      const orders = await this.readOrdersFromDatabase();
       const carriers = await this.readCarriersFromDatabase();
       
       if (orders.length === 0) {
-        throw new Error('No orders found in Excel file');
+        throw new Error('No orders found in MySQL database');
       }
       
       if (carriers.length === 0) {
@@ -392,8 +388,8 @@ class CarrierServiceabilityService {
         }
       });
       
-      // Save updated orders to Excel
-      const result = this.saveOrdersToExcel(updatedOrders);
+      // Save updated orders to MySQL
+      const result = await this.saveOrdersToDatabase(updatedOrders);
       
       console.log('\n🎉 CARRIER SERVICEABILITY: Priority carrier assignment completed!');
       console.log(`📊 Summary:`);
@@ -430,12 +426,12 @@ class CarrierServiceabilityService {
     try {
       console.log(`🔵 CARRIER SERVICEABILITY: Assigning priority carrier to order ${orderId}...`);
       
-      // Read orders from Excel and carriers from database
-      const orders = this.readOrdersFromExcel();
+      // Read orders from MySQL and carriers from database
+      const orders = await this.readOrdersFromDatabase();
       const carriers = await this.readCarriersFromDatabase();
       
       if (orders.length === 0) {
-        throw new Error('No orders found in Excel file');
+        throw new Error('No orders found in MySQL database');
       }
       
       if (carriers.length === 0) {
@@ -489,8 +485,8 @@ class CarrierServiceabilityService {
       // Update the order with the selected carrier
       orders[orderIndex].priority_carrier = selectedCarrier.carrier_id;
       
-      // Save updated orders to Excel
-      const result = this.saveOrdersToExcel(orders);
+      // Save updated orders to MySQL
+      const result = await this.saveOrdersToDatabase(orders);
       
       console.log(`✅ Order ${orderId}: Assigned carrier ${selectedCarrier.carrier_id} (priority ${selectedCarrier.priority})`);
       
@@ -592,7 +588,7 @@ class CarrierServiceabilityService {
    */
   async getAssignmentStatistics() {
     try {
-      const orders = this.readOrdersFromExcel();
+      const orders = await this.readOrdersFromDatabase();
       const carriers = await this.readCarriersFromDatabase();
       
       const claimedOrders = orders.filter(order => 

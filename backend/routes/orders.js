@@ -574,21 +574,33 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
       vendorMap[vendor.warehouseId] = {
         name: vendor.name,
         email: vendor.email,
-        phone: vendor.phone
+        phone: vendor.phone,
+        status: vendor.status || 'inactive',
       };
     });
     
     // Process orders and add vendor information
-    const processedOrders = orders.map(order => {
+    const rowsNeedingFix = [];
+    const processedOrders = orders.map((order, idx) => {
       const vendorInfo = order.claimed_by ? vendorMap[order.claimed_by] : null;
-      
+      const vendorIsActive = vendorInfo && String(vendorInfo.status).toLowerCase() === 'active';
+      let status = order.status || 'unclaimed';
+      let vendorName = vendorInfo ? vendorInfo.name : (order.claimed_by ? order.claimed_by : 'Unclaimed');
+
+      // If order is claimed but vendor is missing or inactive, treat as unclaimed and queue a fix
+      if ((order.claimed_by && !vendorIsActive) && status !== 'unclaimed') {
+        status = 'unclaimed';
+        vendorName = 'Unclaimed';
+        rowsNeedingFix.push(idx);
+      }
+
       return {
         unique_id: order.unique_id,
         order_id: order.order_id,
         customer_name: order.customer_name || order.customer || 'N/A',
-        vendor_name: vendorInfo ? vendorInfo.name : (order.claimed_by ? order.claimed_by : 'Unclaimed'),
+        vendor_name: vendorName,
         product_name: order.product_name || order.product || 'N/A',
-        status: order.status || 'unclaimed',
+        status,
         value: order.value || order.price || order.selling_price || '0',
         priority: order.priority || 'medium',
         created_at: order.created_at || order.order_date || 'N/A',
@@ -597,6 +609,26 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
         image: order.product_image || order.image || '/placeholder.svg'
       };
     });
+
+    // Persist fixes back to Excel if necessary
+    if (rowsNeedingFix.length > 0) {
+      const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+      rowsNeedingFix.forEach((idx) => {
+        const o = orders[idx];
+        o.status = 'unclaimed';
+        o.claimed_by = '';
+        o.claimed_at = '';
+        const rowNum = idx + 2; // account for header
+        header.forEach((col, i) => {
+          ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
+            t: 's',
+            v: o[col] || ''
+          };
+        });
+      });
+      XLSX.writeFile(ordersWb, ordersPath);
+      console.log(`🧹 Cleaned ${rowsNeedingFix.length} orders claimed by missing/inactive vendors`);
+    }
     
     console.log('🟢 ADMIN ORDERS SUCCESS');
     console.log('  - Processed orders:', processedOrders.length);
@@ -711,6 +743,128 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
       success: false, 
       message: 'Internal server error: ' + error.message 
     });
+  }
+});
+
+/**
+ * @route   POST /api/orders/admin/bulk-assign
+ * @desc    Admin assigns multiple orders to a vendor
+ * @access  Admin/Superadmin only
+ */
+router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+  const { unique_ids, vendor_warehouse_id } = req.body || {};
+
+  console.log('🔵 ADMIN BULK ASSIGN REQUEST START');
+  console.log('  - unique_ids count:', Array.isArray(unique_ids) ? unique_ids.length : 0);
+  console.log('  - vendor_warehouse_id:', vendor_warehouse_id);
+
+  if (!Array.isArray(unique_ids) || unique_ids.length === 0 || !vendor_warehouse_id) {
+    return res.status(400).json({ success: false, message: 'unique_ids (array) and vendor_warehouse_id are required' });
+  }
+
+  try {
+    // Load users.xlsx to verify vendor exists
+    const usersPath = path.join(__dirname, '../data/users.xlsx');
+    const usersWb = XLSX.readFile(usersPath);
+    const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
+    const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
+    const vendor = users.find(u => u.warehouseId === vendor_warehouse_id && u.role === 'vendor');
+    if (!vendor) {
+      return res.status(400).json({ success: false, message: 'Vendor not found or invalid warehouse ID' });
+    }
+
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+
+    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    let updatedCount = 0;
+    unique_ids.forEach((uid) => {
+      const idx = orders.findIndex(o => String(o.unique_id) === String(uid));
+      if (idx !== -1) {
+        const order = orders[idx];
+        order.status = 'claimed';
+        order.claimed_by = vendor_warehouse_id;
+        order.claimed_at = now;
+        order.last_claimed_by = vendor_warehouse_id;
+        order.last_claimed_at = now;
+
+        const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+        const rowNum = idx + 2;
+        header.forEach((col, i) => {
+          ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
+            t: 's',
+            v: order[col] || ''
+          };
+        });
+        updatedCount += 1;
+      }
+    });
+
+    XLSX.writeFile(ordersWb, ordersPath);
+
+    return res.json({
+      success: true,
+      message: `Assigned ${updatedCount} orders to ${vendor.name}`,
+      data: { updated: updatedCount, vendor_warehouse_id }
+    });
+  } catch (error) {
+    console.error('💥 ADMIN BULK ASSIGN ERROR:', error.message);
+    return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
+  }
+});
+
+/**
+ * @route   POST /api/orders/admin/bulk-unassign
+ * @desc    Admin unassigns multiple orders
+ * @access  Admin/Superadmin only
+ */
+router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+  const { unique_ids } = req.body || {};
+
+  console.log('🔵 ADMIN BULK UNASSIGN REQUEST START');
+  console.log('  - unique_ids count:', Array.isArray(unique_ids) ? unique_ids.length : 0);
+
+  if (!Array.isArray(unique_ids) || unique_ids.length === 0) {
+    return res.status(400).json({ success: false, message: 'unique_ids (array) is required' });
+  }
+
+  try {
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+
+    let updatedCount = 0;
+    unique_ids.forEach((uid) => {
+      const idx = orders.findIndex(o => String(o.unique_id) === String(uid));
+      if (idx !== -1) {
+        const order = orders[idx];
+        if (order.status !== 'unclaimed') {
+          order.status = 'unclaimed';
+          order.claimed_by = '';
+          order.claimed_at = '';
+          const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+          const rowNum = idx + 2;
+          header.forEach((col, i) => {
+            ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
+              t: 's',
+              v: order[col] || ''
+            };
+          });
+          updatedCount += 1;
+        }
+      }
+    });
+
+    XLSX.writeFile(ordersWb, ordersPath);
+
+    return res.json({ success: true, message: `Unassigned ${updatedCount} orders`, data: { updated: updatedCount } });
+  } catch (error) {
+    console.error('💥 ADMIN BULK UNASSIGN ERROR:', error.message);
+    return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
   }
 });
 

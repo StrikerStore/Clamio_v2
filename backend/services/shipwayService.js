@@ -2,7 +2,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const orderEnhancementService = require('./orderEnhancementService');
-const XLSX = require('xlsx');
+// const XLSX = require('xlsx'); // Removed - no longer using Excel
 
 /**
  * Shipway API Service
@@ -67,8 +67,13 @@ class ShipwayService {
         throw new Error('Invalid response format from Shipway API');
       }
 
-      // Check if warehouse was found
-      if (data.error || data.message === 'Warehouse not found') {
+      // Shipway sometimes returns { success: 1, message: 'No warehouse found' }
+      // or other non-object message values when not found. Treat those as not found.
+      const messageField = data.message;
+      const messageIsObject = messageField && typeof messageField === 'object';
+      const messageIsNoWarehouse = typeof messageField === 'string' && messageField.toLowerCase().includes('no warehouse');
+
+      if (data.error || !messageIsObject || messageIsNoWarehouse) {
         throw new Error('Warehouse not found or invalid warehouse ID');
       }
 
@@ -146,7 +151,10 @@ class ShipwayService {
   formatWarehouseData(shipwayData) {
     try {
       // If the response is wrapped in a 'message' key, use that
-      const data = shipwayData.message ? shipwayData.message : shipwayData;
+      const data = shipwayData && typeof shipwayData === 'object' && shipwayData.message ? shipwayData.message : shipwayData;
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid warehouse data');
+      }
       const warehouse = {
         id: data.warehouse_id || data.warehouseid || data.id,
         name: data.title || data.warehousename || data.name,

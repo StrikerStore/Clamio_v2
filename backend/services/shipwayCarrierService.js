@@ -316,8 +316,13 @@ class ShipwayCarrierService {
         throw new Error('No carrier data found');
       }
 
-      // Sort carriers by priority for CSV export (1, 2, 3...)
+      // Sort carriers for CSV export: actives first by priority 1..N, then inactives
+      const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
       const sortedCarriers = [...carriers].sort((a, b) => {
+        const aActive = normalizeStatus(a.status) === 'active';
+        const bActive = normalizeStatus(b.status) === 'active';
+        if (aActive && !bActive) return -1;
+        if (!aActive && bActive) return 1;
         const priorityA = parseInt(a.priority) || 0;
         const priorityB = parseInt(b.priority) || 0;
         return priorityA - priorityB;
@@ -394,6 +399,7 @@ class ShipwayCarrierService {
 
       const carrierIdIndex = header.indexOf('carrier_id');
       const priorityIndex = header.indexOf('priority');
+      const statusIndex = header.indexOf('status');
 
       console.log('🔍 carrier_id index:', carrierIdIndex);
       console.log('🔍 priority index:', priorityIndex);
@@ -416,6 +422,9 @@ class ShipwayCarrierService {
         const values = this.parseCSVLine(line);
         const carrierId = values[carrierIdIndex];
         const priority = parseInt(values[priorityIndex]);
+        const statusRaw = values[statusIndex] || '';
+        const statusNormalized = String(statusRaw).trim().toLowerCase();
+        const status = statusNormalized === 'inactive' ? 'inactive' : (statusNormalized === 'active' ? 'active' : statusRaw);
 
         console.log(`🔍 Row ${i}: carrier_id="${carrierId}", priority="${values[priorityIndex]}" -> ${priority}`);
 
@@ -434,7 +443,7 @@ class ShipwayCarrierService {
         }
 
         uploadedCarrierIds.add(carrierId);
-        updates.push({ carrier_id: carrierId, priority });
+        updates.push({ carrier_id: carrierId, priority, status });
       }
 
       console.log('🔍 Valid updates found:', updates.length);
@@ -461,8 +470,12 @@ class ShipwayCarrierService {
       let updatedCount = 0;
       for (const update of updates) {
         const existing = await database.getCarrierById(update.carrier_id);
-        if (existing && existing.priority !== update.priority) {
-          await database.updateCarrier(update.carrier_id, { priority: update.priority });
+        if (existing) {
+          const updateData = { priority: update.priority };
+          if (update.status) {
+            updateData.status = update.status;
+          }
+          await database.updateCarrier(update.carrier_id, updateData);
           updatedCount++;
         }
       }
@@ -482,6 +495,48 @@ class ShipwayCarrierService {
     } catch (error) {
       console.error('Error updating carrier priorities from CSV:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Move a carrier up or down in priority ordering
+   * @param {string} carrierId
+   * @param {'up'|'down'} direction
+   * @returns {Promise<Object>} Result object
+   */
+  async moveCarrier(carrierId, direction) {
+    try {
+      const carriers = await this.readCarriersFromDatabase();
+      const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
+
+      const active = carriers
+        .filter(c => normalizeStatus(c.status) === 'active')
+        .sort((a, b) => (parseInt(a.priority) || 0) - (parseInt(b.priority) || 0));
+
+      const index = active.findIndex(c => String(c.carrier_id) === String(carrierId));
+      if (index === -1) {
+        throw new Error('Carrier not found or not active');
+      }
+      if (direction === 'up' && index === 0) {
+        return { success: true, message: 'Already at top' };
+      }
+      if (direction === 'down' && index === active.length - 1) {
+        return { success: true, message: 'Already at bottom' };
+      }
+
+      const swapWith = direction === 'up' ? index - 1 : index + 1;
+      const carrier1 = active[index];
+      const carrier2 = active[swapWith];
+
+      // Swap priorities
+      const tempPriority = carrier1.priority;
+      await database.updateCarrier(carrier1.carrier_id, { priority: carrier2.priority });
+      await database.updateCarrier(carrier2.carrier_id, { priority: tempPriority });
+
+      return { success: true, message: 'Carrier moved successfully' };
+    } catch (error) {
+      console.error('Error moving carrier:', error.message);
+      throw new Error(error.message || 'Failed to move carrier');
     }
   }
 

@@ -284,7 +284,7 @@ app.listen(PORT, () => {
   cron.schedule('0 */6 * * *', async () => {
     try {
       await carrierSyncService.startCarrierSync();
-      console.log('[Carrier Sync] Carriers synced to Excel.');
+      console.log('[Carrier Sync] Carriers synced to MySQL.');
     } catch (err) {
       console.error('[Carrier Sync] Failed:', err.message);
     }
@@ -293,7 +293,7 @@ app.listen(PORT, () => {
   (async () => {
     try {
       await carrierSyncService.startCarrierSync();
-      console.log('[Carrier Sync] Carriers synced to Excel (startup).');
+      console.log('[Carrier Sync] Carriers synced to MySQL (startup).');
     } catch (err) {
       console.error('[Carrier Sync] Startup sync failed:', err.message);
     }

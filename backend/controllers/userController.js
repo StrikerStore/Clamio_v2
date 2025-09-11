@@ -3,6 +3,7 @@ const { hashPassword } = require('../middleware/auth');
 const shipwayService = require('../services/shipwayService');
 const fs = require('fs');
 const path = require('path');
+const XLSX = require('xlsx');
 
 /**
  * User Management Controller
@@ -277,12 +278,43 @@ class UserController {
           });
         }
       }
+      const prevUser = await database.getUserById(id);
       const updatedUser = await database.updateUser(id, updateData);
       if (!updatedUser) {
         return res.status(500).json({
           success: false,
           message: 'Failed to update user'
         });
+      }
+
+      // If vendor warehouseId changed or status became inactive, update their orders' claim state
+      try {
+        if (updatedUser.role === 'vendor') {
+          const prevWid = String((prevUser && (prevUser.warehouseId || prevUser.warehouse_id)) || '');
+          const newWid = String((updatedUser.warehouseId || updatedUser.warehouse_id) || '');
+          const deactivated = updateData.status && String(updateData.status).toLowerCase() === 'inactive';
+          const warehouseChanged = prevWid && newWid && prevWid !== newWid;
+
+          if (deactivated || warehouseChanged) {
+            // Get all orders claimed by this vendor from MySQL
+            const vendorOrders = await database.getOrdersByVendor(prevWid);
+            const targetWid = warehouseChanged ? prevWid : newWid || prevWid;
+
+            // Update each order to unclaimed status
+            for (const order of vendorOrders) {
+              await database.updateOrder(order.unique_id, {
+                status: 'unclaimed',
+                claimed_by: null,
+                claimed_at: null
+              });
+            }
+
+            console.log(`Updated ${vendorOrders.length} orders for vendor ${targetWid}`);
+          }
+        }
+      } catch (e) {
+        console.error('Error updating vendor orders on user update:', e);
+        // Continue even if this fails
       }
       res.json({
         success: true,
@@ -330,6 +362,32 @@ class UserController {
         });
       }
 
+      // If vendor, unclaim all orders assigned to this vendor before deleting
+      if (user.role === 'vendor') {
+        try {
+          const vendorWid = String(user.warehouseId || user.warehouse_id || '');
+          if (vendorWid) {
+            // Get all orders claimed by this vendor from MySQL
+            const vendorOrders = await database.getOrdersByVendor(vendorWid);
+            
+            // Update each order to unclaimed status
+            for (const order of vendorOrders) {
+              await database.updateOrder(order.unique_id, {
+                status: 'unclaimed',
+                claimed_by: null,
+                claimed_at: null
+                // Keep history in last_claimed_by/at as-is
+              });
+            }
+
+            console.log(`Unclaimed ${vendorOrders.length} orders for deleted vendor ${vendorWid}`);
+          }
+        } catch (e) {
+          console.error('Error unclaiming orders for deleted vendor:', e);
+          // Continue with deletion even if this fails
+        }
+      }
+
       // Delete user
       const deleted = await database.deleteUser(id);
 
@@ -370,7 +428,7 @@ class UserController {
         });
       }
 
-      const users = database.getUsersByRole(role);
+      const users = await database.getUsersByRole(role);
 
       // Remove passwords from response
       const usersWithoutPasswords = users.map(user => {
@@ -408,7 +466,7 @@ class UserController {
         });
       }
 
-      const users = database.getUsersByStatus(status);
+      const users = await database.getUsersByStatus(status);
 
       // Remove passwords from response
       const usersWithoutPasswords = users.map(user => {

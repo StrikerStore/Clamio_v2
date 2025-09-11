@@ -209,6 +209,16 @@ class AuthController {
         password: hashedNewPassword
       });
 
+      // Invalidate any existing vendor session token for this user to avoid stale sessions
+      try {
+        if (user.warehouseId) {
+          userSessionService.ensureTokensAndSessions();
+          userSessionService.logoutVendor(user.warehouseId);
+        }
+      } catch (e) {
+        console.warn('Warning: failed to invalidate vendor session on password change:', e.message);
+      }
+
       if (!updatedUser) {
         return res.status(500).json({
           success: false,
@@ -295,6 +305,16 @@ class AuthController {
         password: hashedNewPassword
       });
 
+      // Invalidate any existing vendor session token for this user to avoid stale sessions
+      try {
+        if (user.warehouseId) {
+          userSessionService.ensureTokensAndSessions();
+          userSessionService.logoutVendor(user.warehouseId);
+        }
+      } catch (e) {
+        console.warn('Warning: failed to invalidate vendor session on password change:', e.message);
+      }
+
       if (!updatedUser) {
         return res.status(500).json({
           success: false,
@@ -350,6 +370,16 @@ class AuthController {
       const updatedUser = await database.updateUser(userId, {
         password: hashedNewPassword
       });
+
+      // Invalidate vendor session if target user is a vendor
+      try {
+        if (targetUser.warehouseId) {
+          userSessionService.ensureTokensAndSessions();
+          userSessionService.logoutVendor(targetUser.warehouseId);
+        }
+      } catch (e) {
+        console.warn('Warning: failed to invalidate vendor session on admin password change:', e.message);
+      }
 
       if (!updatedUser) {
         return res.status(500).json({

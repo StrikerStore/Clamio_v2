@@ -297,7 +297,9 @@ class ExcelDatabase {
 
   // Excel-based user methods removed - now using MySQL only
 
+
   // All Excel-based user CRUD methods removed - now using MySQL only
+
 
   /**
    * Get users by status
