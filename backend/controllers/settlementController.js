@@ -72,11 +72,21 @@ class SettlementController {
   // Get vendor payments (current and future)
   async getVendorPayments(req, res) {
     try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
       const vendorId = req.user.id;
       const { currentPayment, futurePayment } = calculateVendorPayments(vendorId);
 
       // Get all approved settlements for this vendor to calculate settled amounts
-      const settlements = database.getSettlementsByVendor(vendorId);
+      const settlements = await database.getSettlementsByVendor(vendorId);
       const totalSettledAmount = settlements
         .filter(settlement => settlement.status === 'approved')
         .reduce((sum, settlement) => sum + (parseFloat(settlement.amountPaid) || 0), 0);
@@ -104,6 +114,16 @@ class SettlementController {
   // Create settlement request
   async createSettlementRequest(req, res) {
     try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
@@ -129,7 +149,7 @@ class SettlementController {
       const { currentPayment, handoverOrderIds } = calculateVendorPayments(vendorId);
 
       // Get all approved settlements for this vendor to calculate settled amounts
-      const settlements = database.getSettlementsByVendor(vendorId);
+      const settlements = await database.getSettlementsByVendor(vendorId);
       const totalSettledAmount = settlements
         .filter(settlement => settlement.status === 'approved')
         .reduce((sum, settlement) => sum + (parseFloat(settlement.amountPaid) || 0), 0);
@@ -155,7 +175,7 @@ class SettlementController {
         currency: 'INR'
       };
 
-      const settlement = database.createSettlement(settlementData);
+      const settlement = await database.createSettlement(settlementData);
 
       res.json({
         success: true,
@@ -174,8 +194,18 @@ class SettlementController {
   // Get vendor's settlement history
   async getVendorSettlements(req, res) {
     try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
       const vendorId = req.user.id;
-      const settlements = database.getSettlementsByVendor(vendorId);
+      const settlements = await database.getSettlementsByVendor(vendorId);
 
       res.json({
         success: true,
@@ -193,8 +223,18 @@ class SettlementController {
   // Get vendor's transaction history
   async getVendorTransactions(req, res) {
     try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
       const vendorId = req.user.id;
-      const transactions = database.getTransactionsByVendor(vendorId);
+      const transactions = await database.getTransactionsByVendor(vendorId);
 
       res.json({
         success: true,
@@ -212,6 +252,16 @@ class SettlementController {
   // Admin: Get all settlements with pagination and filters
   async getAllSettlements(req, res) {
     try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
       const { 
         page = 1, 
         limit = 10, 
@@ -221,7 +271,8 @@ class SettlementController {
         endDate 
       } = req.query;
 
-      let settlements = database.getAllSettlements();
+      let settlements = await database.getAllSettlements();
+      
 
       // Apply filters
       if (status && status !== 'all') {
@@ -278,8 +329,18 @@ class SettlementController {
   // Admin: Get settlement by ID
   async getSettlementById(req, res) {
     try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
       const { id } = req.params;
-      const settlement = database.getSettlementById(id);
+      const settlement = await database.getSettlementById(id);
 
       if (!settlement) {
         return res.status(404).json({
@@ -304,6 +365,16 @@ class SettlementController {
   // Admin: Approve settlement request
   async approveSettlement(req, res) {
     try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
@@ -317,7 +388,7 @@ class SettlementController {
       const { amountPaid, transactionId } = req.body;
       const paymentProof = req.file;
 
-      const settlement = database.getSettlementById(id);
+      const settlement = await database.getSettlementById(id);
       if (!settlement) {
         return res.status(404).json({
           success: false,
@@ -353,23 +424,20 @@ class SettlementController {
         transactionId,
         paymentProofPath: paymentProof ? paymentProof.filename : null,
         approvedBy: req.user.id,
-        approvedAt: new Date().toISOString()
+        approvedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
       };
 
-      const updatedSettlement = database.updateSettlement(id, updateData);
+      const updatedSettlement = await database.updateSettlement(id, updateData);
 
       // Create transaction record
       const transactionData = {
-        settlementId: id,
-        vendorId: settlement.vendorId,
+        vendor_id: settlement.vendorId,
         amount: paidAmount,
-        transactionId,
-        paymentProofPath: paymentProof ? paymentProof.filename : null,
-        status: 'completed',
-        currency: 'INR'
+        type: 'settlement',
+        description: `Settlement payment for settlement ${id}. Transaction ID: ${transactionId}${paymentProof ? `. Payment proof: ${paymentProof.filename}` : ''}`
       };
 
-      const transaction = database.createTransaction(transactionData);
+      const transaction = await database.createTransaction(transactionData);
 
       res.json({
         success: true,
@@ -391,6 +459,16 @@ class SettlementController {
   // Admin: Reject settlement request
   async rejectSettlement(req, res) {
     try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
@@ -403,7 +481,7 @@ class SettlementController {
       const { id } = req.params;
       const { rejectionReason } = req.body;
 
-      const settlement = database.getSettlementById(id);
+      const settlement = await database.getSettlementById(id);
       if (!settlement) {
         return res.status(404).json({
           success: false,
@@ -423,10 +501,10 @@ class SettlementController {
         status: 'rejected',
         rejectionReason,
         rejectedBy: req.user.id,
-        rejectedAt: new Date().toISOString()
+        rejectedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
       };
 
-      const updatedSettlement = database.updateSettlement(id, updateData);
+      const updatedSettlement = await database.updateSettlement(id, updateData);
 
       res.json({
         success: true,
@@ -468,7 +546,17 @@ class SettlementController {
   // Export settlements as CSV
   async exportSettlementsCSV(req, res) {
     try {
-      const settlements = database.getAllSettlements();
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection not available'
+        });
+      }
+
+      const settlements = await database.getAllSettlements();
       
       // Create CSV content
       const csvHeaders = [

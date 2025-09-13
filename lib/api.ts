@@ -23,9 +23,6 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const authHeader = this.getAuthHeader()
     
-    console.log('🔍 API CLIENT DEBUG:');
-    console.log('  - Endpoint:', endpoint);
-    console.log('  - Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
       headers: {
@@ -40,10 +37,6 @@ class ApiClient {
       const response = await fetch(`${API_BASE_URL}${endpoint}`, config)
       const data = await response.json()
 
-      console.log('🔍 API RESPONSE DEBUG:');
-      console.log('  - Status:', response.status);
-      console.log('  - OK:', response.ok);
-      console.log('  - Data:', data);
 
       if (!response.ok) {
         throw new Error(data.message || `HTTP error! status: ${response.status}`)
@@ -126,7 +119,9 @@ class ApiClient {
     warehouseId?: string
     contactNumber?: string
   }): Promise<ApiResponse> {
-    return this.makeRequest('/users', {
+    const isAdminCreatingVendor = userData.role === 'vendor'
+    const endpoint = isAdminCreatingVendor ? '/users/vendor' : '/users'
+    return this.makeRequest(endpoint, {
       method: 'POST',
       body: JSON.stringify(userData)
     })
@@ -140,14 +135,17 @@ class ApiClient {
     warehouseId: string
     contactNumber: string
   }>): Promise<ApiResponse> {
-    return this.makeRequest(`/users/${userId}`, {
+    const isVendor = userData?.warehouseId !== undefined
+    const endpoint = isVendor ? `/users/vendor/${userId}` : `/users/${userId}`
+    return this.makeRequest(endpoint, {
       method: 'PUT',
       body: JSON.stringify(userData)
     })
   }
 
   async deleteUser(userId: string): Promise<ApiResponse> {
-    return this.makeRequest(`/users/${userId}`, {
+    // prefer vendor-specific delete for admin permissions
+    return this.makeRequest(`/users/vendor/${userId}`, {
       method: 'DELETE'
     })
   }
@@ -215,8 +213,6 @@ class ApiClient {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
-    console.log('🔍 REFRESH ORDERS API CLIENT DEBUG:');
-    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
       method: 'POST',
@@ -230,10 +226,6 @@ class ApiClient {
       const response = await fetch(`${API_BASE_URL}/orders/refresh`, config)
       const data = await response.json()
 
-      console.log('🔍 REFRESH ORDERS API RESPONSE DEBUG:');
-      console.log('  - Status:', response.status);
-      console.log('  - OK:', response.ok);
-      console.log('  - Data:', data);
 
       if (!response.ok) {
         throw new Error(data.message || `HTTP error! status: ${response.status}`)
@@ -252,13 +244,28 @@ class ApiClient {
   }
 
   async getAdminVendors(): Promise<ApiResponse> {
-    return this.makeRequest('/orders/admin/vendors');
+    // Prefer enriched vendors report for admin auditing table
+    return this.makeRequest('/users/vendors-report');
   }
 
   async assignOrderToVendor(unique_id: string, vendor_warehouse_id: string): Promise<ApiResponse> {
     return this.makeRequest('/orders/admin/assign', {
       method: 'POST',
       body: JSON.stringify({ unique_id, vendor_warehouse_id })
+    });
+  }
+
+  async bulkAssignOrdersToVendor(unique_ids: string[], vendor_warehouse_id: string): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/bulk-assign', {
+      method: 'POST',
+      body: JSON.stringify({ unique_ids, vendor_warehouse_id })
+    });
+  }
+
+  async bulkUnassignOrders(unique_ids: string[]): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/bulk-unassign', {
+      method: 'POST',
+      body: JSON.stringify({ unique_ids })
     });
   }
 
@@ -275,18 +282,14 @@ class ApiClient {
     
     // Use vendor token for claim endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-    console.log('🔑 API CLIENT: Token check');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    console.log('  - vendorToken value:', vendorToken ? vendorToken.substring(0, 8) + '...' : 'null');
-    
+   
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
     console.log('📤 API CLIENT: Making request to /orders/claim');
-    console.log('  - Method: POST');
-    console.log('  - Headers: Content-Type, Authorization');
     console.log('  - Body:', JSON.stringify({ unique_id }));
 
     return this.makeRequest('/orders/claim', {
@@ -335,6 +338,7 @@ class ApiClient {
     const vendorToken = localStorage.getItem('vendorToken')
     console.log('🔑 API CLIENT: Token check');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    console.log('  - vendorToken value:', JSON.stringify(vendorToken));
     
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
@@ -500,6 +504,26 @@ class ApiClient {
 
   async getCarrierStatus(): Promise<ApiResponse> {
     return this.makeRequest('/shipway/carriers/status')
+  }
+
+  async updateCarrier(carrierId: string, updates: { carrier_id?: string; status?: string }): Promise<ApiResponse> {
+    return this.makeRequest(`/shipway/carriers/${encodeURIComponent(carrierId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    })
+  }
+
+  async deleteCarrier(carrierId: string): Promise<ApiResponse> {
+    return this.makeRequest(`/shipway/carriers/${encodeURIComponent(carrierId)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async moveCarrier(carrierId: string, direction: 'up' | 'down'): Promise<ApiResponse> {
+    return this.makeRequest(`/shipway/carriers/${encodeURIComponent(carrierId)}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ direction }),
+    })
   }
 
   async downloadCarriersCSV(): Promise<void> {
@@ -682,18 +706,21 @@ class ApiClient {
     console.log('🔍 DOWNLOAD LABEL FILE DEBUG:');
     console.log('  - Shipping URL:', shippingUrl);
     
-    // For Shipway URLs, we don't need our backend's auth header
-    // Shipway URLs are public and don't require authentication
+    // Use backend proxy to avoid CORS issues (same as before migration)
+    const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
+    
     const config: RequestInit = {
-      method: 'GET',
+      method: 'POST',
       headers: {
-        'Accept': 'application/pdf,image/*,*/*',
+        'Content-Type': 'application/json',
+        ...(vendorToken && { 'Authorization': vendorToken }),
       },
+      body: JSON.stringify({ pdfUrl: shippingUrl })
     }
 
     try {
-      console.log('🔄 Fetching label file from Shipway...');
-      const response = await fetch(shippingUrl, config)
+      console.log('🔄 Fetching label file via backend proxy...');
+      const response = await fetch(`${API_BASE_URL}/orders/download-pdf`, config)
       
       console.log('🔍 Label file response:');
       console.log('  - Status:', response.status);
@@ -705,7 +732,7 @@ class ApiClient {
       }
 
       const blob = await response.blob()
-      console.log('✅ Label file downloaded successfully');
+      console.log('✅ Label file downloaded successfully via proxy');
       console.log('  - Blob size:', blob.size, 'bytes');
       console.log('  - Blob type:', blob.type);
       

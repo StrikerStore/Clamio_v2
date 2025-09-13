@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
 const fetch = require('node-fetch');
@@ -8,55 +9,49 @@ const carrierServiceabilityService = require('../services/carrierServiceabilityS
 
 /**
  * @route   GET /api/orders
- * @desc    Get all orders from MySQL database
+ * @desc    Get all orders from orders.xlsx (middleware)
  * @access  Public (add auth as needed)
  */
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
+  const ordersExcelPath = path.join(__dirname, '../data/orders.xlsx');
+  if (!fs.existsSync(ordersExcelPath)) {
+    return res.status(200).json({ success: true, data: { orders: [] } });
+  }
   try {
-    const database = require('../config/database');
-    
-    // Wait for MySQL initialization
-    await database.waitForMySQLInitialization();
-    
-    if (!database.isMySQLAvailable()) {
-      return res.status(500).json({ success: false, message: 'Database connection not available' });
-    }
-    
-    const orders = await database.getAllOrders();
+    const workbook = XLSX.readFile(ordersExcelPath);
+    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(worksheet);
     return res.status(200).json({ success: true, data: { orders } });
   } catch (err) {
-    console.error('Error getting orders:', err);
     return res.status(500).json({ success: false, message: 'Failed to read orders', error: err.message });
   }
 });
 
-
 /**
  * @route   GET /api/orders/last-updated
- * @desc    Get the last modification time from MySQL (returns current time for now)
+ * @desc    Get the last modification time of orders.xlsx
  * @access  Public
  */
-router.get('/last-updated', async (req, res) => {
+router.get('/last-updated', (req, res) => {
+  const ordersExcelPath = path.join(__dirname, '../data/orders.xlsx');
   try {
-    const database = require('../config/database');
-    
-    // Wait for MySQL initialization
-    await database.waitForMySQLInitialization();
-    
-    if (!database.isMySQLAvailable()) {
-      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    if (fs.existsSync(ordersExcelPath)) {
+      const stats = fs.statSync(ordersExcelPath);
+      return res.json({ 
+        success: true, 
+        data: {
+          lastUpdated: stats.mtime.toISOString() 
+        }
+      });
+    } else {
+      return res.json({ 
+        success: true, 
+        data: {
+          lastUpdated: null 
+        }
+      });
     }
-    
-    // For MySQL, we'll return current time as last updated
-    // In the future, we could add a last_updated column to track this
-    return res.json({ 
-      success: true, 
-      data: {
-        lastUpdated: new Date().toISOString() 
-      }
-    });
   } catch (err) {
-    console.error('Error getting last updated time:', err);
     return res.status(500).json({ 
       success: false, 
       message: 'Failed to get last updated time', 
@@ -72,26 +67,7 @@ router.get('/last-updated', async (req, res) => {
  */
 router.post('/claim', async (req, res) => {
   const { unique_id } = req.body;
-  let token = req.headers['authorization'];
-  
-  // Handle case where token might be an object
-  if (typeof token === 'object' && token !== null) {
-    console.log('⚠️  Token received as object, attempting to extract string value');
-    console.log('  - Object keys:', Object.keys(token));
-    console.log('  - Object values:', Object.values(token));
-    
-    // Try to extract the actual token string
-    if (token.token) {
-      token = token.token;
-    } else if (token.authorization) {
-      token = token.authorization;
-    } else if (Object.values(token).length === 1) {
-      token = Object.values(token)[0];
-    } else {
-      console.log('❌ Cannot extract token from object');
-      token = null;
-    }
-  }
+  const token = req.headers['authorization'];
   
   console.log('🔵 CLAIM REQUEST START');
   console.log('  - unique_id:', unique_id);
@@ -118,33 +94,13 @@ router.post('/claim', async (req, res) => {
     
     console.log('👥 Users loaded from MySQL');
     console.log('🔍 Looking for token match...');
-    console.log('  - Full token received:', token ? `"${token}"` : 'null');
-    console.log('  - Token length:', token ? token.length : 0);
-    console.log('  - Token type:', typeof token);
-    console.log('  - Token JSON:', JSON.stringify(token));
-    console.log('  - Token toString():', token ? token.toString() : 'null');
     
     const vendor = await database.getUserByToken(token);
     
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('\n❌ VENDOR NOT FOUND OR INACTIVE:');
-      console.log('  - Vendor object:', vendor);
-      console.log('  - Full token provided:', token ? `"${token}"` : 'null');
-      console.log('  - Token length:', token ? token.length : 0);
-      console.log('  - Token type:', typeof token);
-      console.log('  - Vendor found:', vendor ? 'YES' : 'NO');
-      if (vendor) {
-        console.log('  - Vendor active_session:', vendor.active_session);
-        console.log('  - Vendor name:', vendor.name);
-        console.log('  - Vendor warehouseId:', vendor.warehouseId);
-      }
-      
-      const errorResponse = { success: false, message: 'Invalid or inactive vendor token' };
-      console.log('\n📤 401 ERROR RESPONSE:');
-      console.log('  - Status: 401');
-      console.log('  - Response JSON:', JSON.stringify(errorResponse, null, 2));
-      
-      return res.status(401).json(errorResponse);
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      console.log('  - Token provided:', token?.substring(0, 8) + '...');
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
     
     console.log('✅ VENDOR FOUND');
@@ -154,17 +110,26 @@ router.post('/claim', async (req, res) => {
     
     const warehouseId = vendor.warehouseId;
 
-    // Get order from MySQL
-    console.log('📂 Loading order from MySQL...');
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    console.log('📂 Loading orders from:', ordersPath);
+    
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+    
+    console.log('📦 Orders loaded:', orders.length);
     console.log('🔍 Looking for unique_id:', unique_id);
     
-    const order = await database.getOrderByUniqueId(unique_id);
+    const orderIdx = orders.findIndex(o => String(o.unique_id) === String(unique_id));
     
-    if (!order) {
+    if (orderIdx === -1) {
       console.log('❌ ORDER NOT FOUND');
+      console.log('  - Available unique_ids (first 10):', orders.slice(0, 10).map(o => o.unique_id));
       return res.status(404).json({ success: false, message: 'Order row not found' });
     }
     
+    const order = orders[orderIdx];
     console.log('✅ ORDER FOUND');
     console.log('  - order_id:', order.order_id);
     console.log('  - product_name:', order.product_name);
@@ -184,50 +149,43 @@ router.post('/claim', async (req, res) => {
     console.log('  - Setting claimed_by to:', warehouseId);
     console.log('  - Setting timestamp to:', now);
     
-    // Update order object in memory (like Excel behavior)
-    const updatedOrder = {
-      ...order,
-      status: 'claimed',
-      claimed_by: warehouseId,
-      claimed_at: now,
-      last_claimed_by: warehouseId,
-      last_claimed_at: now
-    };
+    order.status = 'claimed';
+    order.claimed_by = warehouseId;
+    order.claimed_at = now;
+    order.last_claimed_by = warehouseId;
+    order.last_claimed_at = now;
     
-    // Automatically assign priority carrier for claimed order (using updated order object)
+    // Automatically assign priority carrier for claimed order
     try {
       console.log('🚚 ASSIGNING PRIORITY CARRIER...');
-      const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(updatedOrder);
-      updatedOrder.priority_carrier = carrierResult.data.carrier_id;
+      const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(order);
+      order.priority_carrier = carrierResult.data.carrier_id;
       console.log(`✅ Carrier assigned: ${carrierResult.data.carrier_id} (${carrierResult.data.carrier_name})`);
     } catch (carrierError) {
       console.log(`⚠️ Carrier assignment failed: ${carrierError.message}`);
-      updatedOrder.priority_carrier = ''; // Leave empty if assignment fails
+      order.priority_carrier = ''; // Leave empty if assignment fails
     }
     
-    // Now save everything to MySQL in one go
-    console.log('💾 SAVING TO MYSQL');
-    const finalUpdatedOrder = await database.updateOrder(unique_id, {
-      status: updatedOrder.status,
-      claimed_by: updatedOrder.claimed_by,
-      claimed_at: updatedOrder.claimed_at,
-      last_claimed_by: updatedOrder.last_claimed_by,
-      last_claimed_at: updatedOrder.last_claimed_at,
-      priority_carrier: updatedOrder.priority_carrier
+    // Write back to worksheet
+    console.log('💾 SAVING TO EXCEL');
+    const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+    const rowNum = orderIdx + 2; // +2 because sheet_to_json skips header and is 0-indexed
+    
+    console.log('  - Row number:', rowNum);
+    console.log('  - Headers:', header);
+    
+    header.forEach((col, i) => {
+      ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = { t: 's', v: order[col] || '' };
     });
     
-    if (!finalUpdatedOrder) {
-      console.log('❌ FAILED TO UPDATE ORDER IN MYSQL');
-      return res.status(500).json({ success: false, message: 'Failed to update order' });
-    }
-    
-    console.log('✅ MYSQL SAVED SUCCESSFULLY');
+    XLSX.writeFile(ordersWb, ordersPath);
+    console.log('✅ EXCEL SAVED SUCCESSFULLY');
     
     console.log('🟢 CLAIM SUCCESS');
     console.log('  - Order claimed by:', warehouseId);
-    console.log('  - Updated order:', { unique_id: updatedOrder.unique_id, status: updatedOrder.status, claimed_by: updatedOrder.claimed_by });
+    console.log('  - Updated order:', { unique_id: order.unique_id, status: order.status, claimed_by: order.claimed_by });
     
-    return res.json({ success: true, data: updatedOrder });
+    return res.json({ success: true, data: order });
     
   } catch (error) {
     console.log('💥 CLAIM ERROR:', error.message);
@@ -282,6 +240,15 @@ router.post('/bulk-claim', async (req, res) => {
     
     const warehouseId = vendor.warehouseId;
 
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    console.log('📂 Loading orders from:', ordersPath);
+    
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+    
+    console.log('📦 Orders loaded:', orders.length);
     console.log('🔍 Processing bulk claim for', unique_ids.length, 'orders');
     
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
@@ -290,15 +257,15 @@ router.post('/bulk-claim', async (req, res) => {
     
     // Process each unique_id
     for (const unique_id of unique_ids) {
-      console.log('🔍 Processing unique_id:', unique_id);
+      const orderIdx = orders.findIndex(o => String(o.unique_id) === String(unique_id));
       
-      const order = await database.getOrderByUniqueId(unique_id);
-      
-      if (!order) {
+      if (orderIdx === -1) {
         console.log('❌ ORDER NOT FOUND:', unique_id);
         failedClaims.push({ unique_id, reason: 'Order not found' });
         continue;
       }
+      
+      const order = orders[orderIdx];
       
       if (order.status !== 'unclaimed') {
         console.log('❌ ORDER NOT UNCLAIMED:', unique_id, 'Status:', order.status);
@@ -308,49 +275,40 @@ router.post('/bulk-claim', async (req, res) => {
       
       // Update order
       console.log('🔄 CLAIMING ORDER:', unique_id);
+      order.status = 'claimed';
+      order.claimed_by = warehouseId;
+      order.claimed_at = now;
+      order.last_claimed_by = warehouseId;
+      order.last_claimed_at = now;
       
-      // Update order object in memory (like Excel behavior)
-      const updatedOrder = {
-        ...order,
-        status: 'claimed',
-        claimed_by: warehouseId,
-        claimed_at: now,
-        last_claimed_by: warehouseId,
-        last_claimed_at: now
-      };
-      
-      // Automatically assign priority carrier for claimed order (using updated order object)
+      // Automatically assign priority carrier for claimed order
       try {
         console.log(`🚚 ASSIGNING PRIORITY CARRIER for order ${order.order_id}...`);
-        const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(updatedOrder);
-        updatedOrder.priority_carrier = carrierResult.data.carrier_id;
+        const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(order);
+        order.priority_carrier = carrierResult.data.carrier_id;
         console.log(`✅ Carrier assigned: ${carrierResult.data.carrier_id} (${carrierResult.data.carrier_name})`);
       } catch (carrierError) {
         console.log(`⚠️ Carrier assignment failed for order ${order.order_id}: ${carrierError.message}`);
-        updatedOrder.priority_carrier = ''; // Leave empty if assignment fails
+        order.priority_carrier = ''; // Leave empty if assignment fails
       }
       
-      // Now save everything to MySQL in one go
-      const finalUpdatedOrder = await database.updateOrder(unique_id, {
-        status: updatedOrder.status,
-        claimed_by: updatedOrder.claimed_by,
-        claimed_at: updatedOrder.claimed_at,
-        last_claimed_by: updatedOrder.last_claimed_by,
-        last_claimed_at: updatedOrder.last_claimed_at,
-        priority_carrier: updatedOrder.priority_carrier
-      });
-      
-      if (finalUpdatedOrder) {
-        successfulClaims.push({ unique_id, order_id: order.order_id });
-        console.log('✅ ORDER CLAIMED SUCCESSFULLY:', unique_id);
-      } else {
-        console.log('❌ FAILED TO UPDATE ORDER:', unique_id);
-        failedClaims.push({ unique_id, reason: 'Failed to update order' });
-      }
+      successfulClaims.push({ unique_id, order_id: order.order_id });
     }
     
     if (successfulClaims.length > 0) {
-      console.log('✅ MYSQL BULK UPDATE COMPLETED');
+      // Write back to worksheet
+      console.log('💾 SAVING TO EXCEL');
+      const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+      
+      orders.forEach((order, idx) => {
+        const rowNum = idx + 2; // +2 because sheet_to_json skips header and is 0-indexed
+        header.forEach((col, i) => {
+          ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = { t: 's', v: order[col] || '' };
+        });
+      });
+      
+      XLSX.writeFile(ordersWb, ordersPath);
+      console.log('✅ EXCEL SAVED SUCCESSFULLY');
     }
     
     console.log('🟢 BULK CLAIM COMPLETE');
@@ -380,50 +338,10 @@ router.post('/bulk-claim', async (req, res) => {
  * @access  Vendor (token required)
  */
 router.get('/grouped', async (req, res) => {
-  console.log('\n🔵 GROUPED ORDERS REQUEST START');
-  console.log('================================');
-  console.log('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('📥 Request Method:', req.method);
-  console.log('📥 Request URL:', req.url);
-  console.log('📥 Request IP:', req.ip);
-  
-  let token = req.headers['authorization'];
-  console.log('\n🔑 TOKEN ANALYSIS:');
-  console.log('  - Raw token:', token);
-  console.log('  - Token type:', typeof token);
-  console.log('  - Token length:', token ? token.length : 0);
-  console.log('  - Token JSON:', JSON.stringify(token));
-  
-  // Handle case where token might be an object
-  if (typeof token === 'object' && token !== null) {
-    console.log('\n⚠️  TOKEN RECEIVED AS OBJECT:');
-    console.log('  - Object keys:', Object.keys(token));
-    console.log('  - Object values:', Object.values(token));
-    console.log('  - Object stringify:', JSON.stringify(token));
-    
-    // Try to extract the actual token string
-    if (token.token) {
-      token = token.token;
-      console.log('  - Extracted from token.token:', token);
-    } else if (token.authorization) {
-      token = token.authorization;
-      console.log('  - Extracted from token.authorization:', token);
-    } else if (Object.values(token).length === 1) {
-      token = Object.values(token)[0];
-      console.log('  - Extracted from single value:', token);
-    } else {
-      console.log('❌ Cannot extract token from object');
-      token = null;
-    }
-  }
+  const token = req.headers['authorization'];
   
   console.log('🔵 GROUPED ORDERS REQUEST START');
-    console.log('  - token received:', token ? 'YES' : 'NO');
-    console.log('  - Full token:', token ? `"${token}"` : 'null');
-    console.log('  - Token length:', token ? token.length : 0);
-
-    
-    console.log('  - Full token:', token ? `"${token}"` : 'null');
+  console.log('  - token received:', token ? 'YES' : 'NO');
   
   if (!token) {
     console.log('❌ GROUPED ORDERS FAILED: Missing token');
@@ -455,14 +373,29 @@ router.get('/grouped', async (req, res) => {
     
     const warehouseId = vendor.warehouseId;
 
-    // Get individual orders from MySQL (like original Excel flow)
-    console.log('📂 Loading vendor orders from MySQL...');
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    console.log('📂 Loading orders from:', ordersPath);
     
-    const vendorOrders = await database.getGroupedOrders(warehouseId);
+    if (!fs.existsSync(ordersPath)) {
+      return res.status(200).json({ success: true, data: { groupedOrders: [] } });
+    }
     
-    console.log('📦 Vendor orders loaded:', vendorOrders.length);
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
     
-    // Group orders by order_id (exact same logic as original Excel flow)
+    console.log('📦 Orders loaded:', orders.length);
+    
+    // Filter orders claimed by this vendor
+    const vendorOrders = orders.filter(order => 
+      order.claimed_by === warehouseId && 
+      (order.status === 'claimed' || order.status === 'ready_for_handover')
+    );
+    
+    console.log('🏪 Vendor orders found:', vendorOrders.length);
+    
+    // Group orders by order_id
     const groupedOrders = {};
     
     vendorOrders.forEach(order => {
@@ -482,7 +415,7 @@ router.get('/grouped', async (req, res) => {
         };
       }
       
-      // Add product to the group (exact same structure as original Excel flow)
+      // Add product to the group
       groupedOrders[orderId].products.push({
         unique_id: order.unique_id,
         product_name: order.product_name || order.product,
@@ -498,47 +431,28 @@ router.get('/grouped', async (req, res) => {
       groupedOrders[orderId].total_products += 1;
     });
     
-    // Convert to array and sort by order_date (exact same logic as original Excel flow)
+    // Convert to array and sort by order_date
     const groupedOrdersArray = Object.values(groupedOrders).sort((a, b) => {
       const dateA = new Date(a.order_date || 0);
       const dateB = new Date(b.order_date || 0);
       return dateB - dateA; // Most recent first
     });
     
-    console.log('📊 Grouped orders processed:', groupedOrdersArray.length);
+    console.log('📊 Grouped orders created:', groupedOrdersArray.length);
     console.log('🟢 GROUPED ORDERS SUCCESS');
     
-    const responseData = { 
+    return res.json({ 
       success: true, 
       data: { 
         groupedOrders: groupedOrdersArray,
         totalOrders: groupedOrdersArray.length,
         totalProducts: vendorOrders.length
       }
-    };
-    
-    console.log('\n📤 RESPONSE DATA:');
-    console.log('  - Status: 200');
-    console.log('  - Success:', responseData.success);
-    console.log('  - Total Orders:', responseData.data.totalOrders);
-    console.log('  - Total Products:', responseData.data.totalProducts);
-    console.log('  - Grouped Orders Count:', responseData.data.groupedOrders.length);
-    console.log('  - Response JSON:', JSON.stringify(responseData, null, 2));
-    
-    return res.json(responseData);
+    });
     
   } catch (error) {
-    console.log('\n💥 GROUPED ORDERS ERROR:');
-    console.log('  - Error message:', error.message);
-    console.log('  - Error stack:', error.stack);
-    console.log('  - Error name:', error.name);
-    
-    const errorResponse = { success: false, message: 'Internal server error: ' + error.message };
-    console.log('\n📤 ERROR RESPONSE:');
-    console.log('  - Status: 500');
-    console.log('  - Response JSON:', JSON.stringify(errorResponse, null, 2));
-    
-    return res.status(500).json(errorResponse);
+    console.log('💥 GROUPED ORDERS ERROR:', error.message);
+    return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
   }
 });
 
@@ -551,7 +465,21 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
   console.log('🔵 ADMIN ORDERS REQUEST START');
   
   try {
-    // Load orders from MySQL
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    console.log('📂 Loading orders from:', ordersPath);
+    
+    if (!fs.existsSync(ordersPath)) {
+      return res.status(200).json({ success: true, data: { orders: [] } });
+    }
+    
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+    
+    console.log('📦 Orders loaded:', orders.length);
+    
+    // Load vendors from MySQL
     const database = require('../config/database');
     await database.waitForMySQLInitialization();
     
@@ -561,9 +489,6 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
         message: 'Database connection not available'
       });
     }
-    
-    const orders = await database.getAllOrders();
-    console.log('📦 Orders loaded from MySQL:', orders.length);
     
     const allUsers = await database.getAllUsers();
     const vendors = allUsers.filter(user => user.role === 'vendor');
@@ -575,33 +500,21 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
       vendorMap[vendor.warehouseId] = {
         name: vendor.name,
         email: vendor.email,
-        phone: vendor.phone,
-        status: vendor.status || 'inactive',
+        phone: vendor.phone
       };
     });
     
     // Process orders and add vendor information
-    const rowsNeedingFix = [];
-    const processedOrders = orders.map((order, idx) => {
+    const processedOrders = orders.map(order => {
       const vendorInfo = order.claimed_by ? vendorMap[order.claimed_by] : null;
-      const vendorIsActive = vendorInfo && String(vendorInfo.status).toLowerCase() === 'active';
-      let status = order.status || 'unclaimed';
-      let vendorName = vendorInfo ? vendorInfo.name : (order.claimed_by ? order.claimed_by : 'Unclaimed');
-
-      // If order is claimed but vendor is missing or inactive, treat as unclaimed and queue a fix
-      if ((order.claimed_by && !vendorIsActive) && status !== 'unclaimed') {
-        status = 'unclaimed';
-        vendorName = 'Unclaimed';
-        rowsNeedingFix.push(idx);
-      }
-
+      
       return {
         unique_id: order.unique_id,
         order_id: order.order_id,
         customer_name: order.customer_name || order.customer || 'N/A',
-        vendor_name: vendorName,
+        vendor_name: vendorInfo ? vendorInfo.name : (order.claimed_by ? order.claimed_by : 'Unclaimed'),
         product_name: order.product_name || order.product || 'N/A',
-        status,
+        status: order.status || 'unclaimed',
         value: order.value || order.price || order.selling_price || '0',
         priority: order.priority || 'medium',
         created_at: order.created_at || order.order_date || 'N/A',
@@ -610,26 +523,6 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
         image: order.product_image || order.image || '/placeholder.svg'
       };
     });
-
-    // Persist fixes back to Excel if necessary
-    if (rowsNeedingFix.length > 0) {
-      const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
-      rowsNeedingFix.forEach((idx) => {
-        const o = orders[idx];
-        o.status = 'unclaimed';
-        o.claimed_by = '';
-        o.claimed_at = '';
-        const rowNum = idx + 2; // account for header
-        header.forEach((col, i) => {
-          ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
-            t: 's',
-            v: o[col] || ''
-          };
-        });
-      });
-      XLSX.writeFile(ordersWb, ordersPath);
-      console.log(`🧹 Cleaned ${rowsNeedingFix.length} orders claimed by missing/inactive vendors`);
-    }
     
     console.log('🟢 ADMIN ORDERS SUCCESS');
     console.log('  - Processed orders:', processedOrders.length);
@@ -695,43 +588,53 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
     
     console.log('✅ VENDOR FOUND:', vendor.name);
 
-    // Get order from MySQL
-    const order = await database.getOrderByUniqueId(unique_id);
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
     
-    if (!order) {
+    const orderIdx = orders.findIndex(o => String(o.unique_id) === String(unique_id));
+    
+    if (orderIdx === -1) {
       return res.status(404).json({ 
         success: false, 
         message: 'Order not found' 
       });
     }
     
+    const order = orders[orderIdx];
     console.log('✅ ORDER FOUND:', order.order_id);
     
-    // Update order assignment in MySQL
+    // Update order assignment
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    const updatedOrder = await database.updateOrder(unique_id, {
-      status: 'claimed',
-      claimed_by: vendor_warehouse_id,
-      claimed_at: now,
-      last_claimed_by: vendor_warehouse_id,
-      last_claimed_at: now
+    order.status = 'claimed';
+    order.claimed_by = vendor_warehouse_id;
+    order.claimed_at = now;
+    order.last_claimed_by = vendor_warehouse_id;
+    order.last_claimed_at = now;
+    
+    // Write back to Excel
+    const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+    const rowNum = orderIdx + 2;
+    
+    header.forEach((col, i) => {
+      ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = { 
+        t: 's', 
+        v: order[col] || '' 
+      };
     });
     
-    if (!updatedOrder) {
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Failed to update order' 
-      });
-    }
+    XLSX.writeFile(ordersWb, ordersPath);
     
     console.log('✅ ORDER ASSIGNED SUCCESSFULLY');
     console.log(`  - Order ${order.order_id} assigned to ${vendor.name} (${vendor_warehouse_id})`);
     
     return res.json({ 
       success: true, 
-      message: `Order ${updatedOrder.order_id} assigned to ${vendor.name}`,
+      message: `Order ${order.order_id} assigned to ${vendor.name}`,
       data: {
-        order_id: updatedOrder.order_id,
+        order_id: order.order_id,
         vendor_name: vendor.name,
         vendor_warehouse_id: vendor_warehouse_id,
         assigned_at: now
@@ -748,133 +651,11 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
 });
 
 /**
- * @route   POST /api/orders/admin/bulk-assign
- * @desc    Admin assigns multiple orders to a vendor
- * @access  Admin/Superadmin only
- */
-router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
-  const { unique_ids, vendor_warehouse_id } = req.body || {};
-
-  console.log('🔵 ADMIN BULK ASSIGN REQUEST START');
-  console.log('  - unique_ids count:', Array.isArray(unique_ids) ? unique_ids.length : 0);
-  console.log('  - vendor_warehouse_id:', vendor_warehouse_id);
-
-  if (!Array.isArray(unique_ids) || unique_ids.length === 0 || !vendor_warehouse_id) {
-    return res.status(400).json({ success: false, message: 'unique_ids (array) and vendor_warehouse_id are required' });
-  }
-
-  try {
-    // Load users.xlsx to verify vendor exists
-    const usersPath = path.join(__dirname, '../data/users.xlsx');
-    const usersWb = XLSX.readFile(usersPath);
-    const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
-    const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
-    const vendor = users.find(u => u.warehouseId === vendor_warehouse_id && u.role === 'vendor');
-    if (!vendor) {
-      return res.status(400).json({ success: false, message: 'Vendor not found or invalid warehouse ID' });
-    }
-
-    // Load orders.xlsx
-    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
-    const ordersWb = XLSX.readFile(ordersPath);
-    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
-    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
-
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    let updatedCount = 0;
-    unique_ids.forEach((uid) => {
-      const idx = orders.findIndex(o => String(o.unique_id) === String(uid));
-      if (idx !== -1) {
-        const order = orders[idx];
-        order.status = 'claimed';
-        order.claimed_by = vendor_warehouse_id;
-        order.claimed_at = now;
-        order.last_claimed_by = vendor_warehouse_id;
-        order.last_claimed_at = now;
-
-        const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
-        const rowNum = idx + 2;
-        header.forEach((col, i) => {
-          ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
-            t: 's',
-            v: order[col] || ''
-          };
-        });
-        updatedCount += 1;
-      }
-    });
-
-    XLSX.writeFile(ordersWb, ordersPath);
-
-    return res.json({
-      success: true,
-      message: `Assigned ${updatedCount} orders to ${vendor.name}`,
-      data: { updated: updatedCount, vendor_warehouse_id }
-    });
-  } catch (error) {
-    console.error('💥 ADMIN BULK ASSIGN ERROR:', error.message);
-    return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
-  }
-});
-
-/**
- * @route   POST /api/orders/admin/bulk-unassign
- * @desc    Admin unassigns multiple orders
- * @access  Admin/Superadmin only
- */
-router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
-  const { unique_ids } = req.body || {};
-
-  console.log('🔵 ADMIN BULK UNASSIGN REQUEST START');
-  console.log('  - unique_ids count:', Array.isArray(unique_ids) ? unique_ids.length : 0);
-
-  if (!Array.isArray(unique_ids) || unique_ids.length === 0) {
-    return res.status(400).json({ success: false, message: 'unique_ids (array) is required' });
-  }
-
-  try {
-    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
-    const ordersWb = XLSX.readFile(ordersPath);
-    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
-    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
-
-    let updatedCount = 0;
-    unique_ids.forEach((uid) => {
-      const idx = orders.findIndex(o => String(o.unique_id) === String(uid));
-      if (idx !== -1) {
-        const order = orders[idx];
-        if (order.status !== 'unclaimed') {
-          order.status = 'unclaimed';
-          order.claimed_by = '';
-          order.claimed_at = '';
-          const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
-          const rowNum = idx + 2;
-          header.forEach((col, i) => {
-            ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
-              t: 's',
-              v: order[col] || ''
-            };
-          });
-          updatedCount += 1;
-        }
-      }
-    });
-
-    XLSX.writeFile(ordersWb, ordersPath);
-
-    return res.json({ success: true, message: `Unassigned ${updatedCount} orders`, data: { updated: updatedCount } });
-  } catch (error) {
-    console.error('💥 ADMIN BULK UNASSIGN ERROR:', error.message);
-    return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
-  }
-});
-
-/**
  * @route   POST /api/orders/admin/unassign
  * @desc    Admin unassigns an order from a vendor
  * @access  Admin/Superadmin only
  */
-router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
   const { unique_id } = req.body;
   
   console.log('🔵 ADMIN UNASSIGN ORDER REQUEST START');
@@ -888,25 +669,22 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
   }
 
   try {
-    // Load database
-    const database = require('../config/database');
-    await database.waitForMySQLInitialization();
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
     
-    if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
-      return res.status(500).json({ success: false, message: 'Database connection not available' });
-    }
+    const orderIdx = orders.findIndex(o => String(o.unique_id) === String(unique_id));
     
-    // Get order from MySQL
-    const order = await database.getOrderByUniqueId(unique_id);
-    
-    if (!order) {
+    if (orderIdx === -1) {
       return res.status(404).json({ 
         success: false, 
         message: 'Order not found' 
       });
     }
     
+    const order = orders[orderIdx];
     console.log('✅ ORDER FOUND:', order.order_id);
     
     if (order.status === 'unclaimed') {
@@ -918,29 +696,33 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
     
     const previousVendor = order.claimed_by;
     
-    // Update order to unclaimed in MySQL
-    const updatedOrder = await database.updateOrder(unique_id, {
-      status: 'unclaimed',
-      claimed_by: '',
-      claimed_at: null
-      // Keep last_claimed_by and last_claimed_at for history
+    // Update order to unclaimed
+    order.status = 'unclaimed';
+    order.claimed_by = '';
+    order.claimed_at = '';
+    // Keep last_claimed_by and last_claimed_at for history
+    
+    // Write back to Excel
+    const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
+    const rowNum = orderIdx + 2;
+    
+    header.forEach((col, i) => {
+      ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = { 
+        t: 's', 
+        v: order[col] || '' 
+      };
     });
     
-    if (!updatedOrder) {
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Failed to update order' 
-      });
-    }
+    XLSX.writeFile(ordersWb, ordersPath);
     
     console.log('✅ ORDER UNASSIGNED SUCCESSFULLY');
     console.log(`  - Order ${order.order_id} unassigned from ${previousVendor}`);
     
     return res.json({ 
       success: true, 
-      message: `Order ${updatedOrder.order_id} unassigned successfully`,
+      message: `Order ${order.order_id} unassigned successfully`,
       data: {
-        order_id: updatedOrder.order_id,
+        order_id: order.order_id,
         previous_vendor: previousVendor,
         unassigned_at: new Date().toISOString().replace('T', ' ').substring(0, 19)
       }
@@ -1147,8 +929,11 @@ router.post('/download-label', async (req, res) => {
     console.log('  - Role:', vendor.role);
     console.log('  - Active session:', vendor.active_session);
 
-    // Get orders from MySQL
-    const orders = await database.getAllOrders();
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
 
     // Check if this is already a clone order
     const isCloneOrder = order_id.includes('_');
@@ -1252,41 +1037,13 @@ async function generateLabelForOrder(orderId, products, vendor) {
     // Call Shipway API
     const response = await callShipwayPushOrderAPI(requestBody, true); // true for label generation
     
-    console.log('🔍 Shipway API Response Structure:');
-    console.log('  - Full response:', JSON.stringify(response, null, 2));
-    console.log('  - Response keys:', Object.keys(response));
-    
-    // Handle different possible response structures
-    let shipping_url, awb;
-    
-    if (response.awb_response) {
-      shipping_url = response.awb_response.shipping_url;
-      awb = response.awb_response.AWB;
-    } else if (response.shipping_url) {
-      shipping_url = response.shipping_url;
-      awb = response.AWB || response.awb;
-    } else if (response.data && response.data.awb_response) {
-      shipping_url = response.data.awb_response.shipping_url;
-      awb = response.data.awb_response.AWB;
-    } else if (response.data && response.data.shipping_url) {
-      shipping_url = response.data.shipping_url;
-      awb = response.data.AWB || response.data.awb;
-    } else {
-      console.log('❌ Could not find shipping_url in response structure');
-      console.log('  - Available keys:', Object.keys(response));
-      throw new Error('Invalid response structure from Shipway API - missing shipping_url');
-    }
-    
     console.log('✅ Label generated successfully');
-    console.log('  - Shipping URL:', shipping_url);
-    console.log('  - AWB:', awb);
-    
     return {
       success: true,
       message: 'Label generated successfully',
       data: {
-        shipping_url: shipping_url,
-        awb: awb,
+        shipping_url: response.awb_response.shipping_url,
+        awb: response.awb_response.AWB,
         order_id: orderId
       }
     };
@@ -1304,38 +1061,23 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
   try {
     console.log('🔄 Starting order cloning process');
     
-    // Get orders from MySQL to check for existing clones
-    const database = require('../config/database');
-    const orders = await database.getAllOrders();
+    // Update orders.xlsx - change order_id for claimed products
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
     
-    // Generate new clone order ID with proper sequencing (like Excel system)
+    // Generate new clone order ID with simple increment
     let cloneOrderId = `${originalOrderId}_1`;
     let counter = 1;
     
-    // Check if this clone already exists in MySQL AND in Shipway
+    // Check if this clone already exists and increment counter
     while (orders.some(order => order.order_id === cloneOrderId)) {
       counter++;
       cloneOrderId = `${originalOrderId}_${counter}`;
     }
     
-    // Additional check: Verify with Shipway API to ensure no conflicts
-    // This mimics the Excel system behavior of checking both local and remote data
-    try {
-      const shipwayService = require('../services/shipwayService');
-      const shipwayOrders = await shipwayService.fetchOrdersFromShipway();
-      
-      // Check if clone ID exists in Shipway orders
-      while (shipwayOrders.some(order => order.order_id === cloneOrderId)) {
-        counter++;
-        cloneOrderId = `${originalOrderId}_${counter}`;
-        console.log(`  - Clone ID ${cloneOrderId} exists in Shipway, incrementing to ${originalOrderId}_${counter + 1}`);
-      }
-    } catch (shipwayError) {
-      console.log('  - Warning: Could not verify clone ID with Shipway:', shipwayError.message);
-      console.log('  - Proceeding with MySQL-only check');
-    }
-    
-    console.log('  - Final Clone order ID:', cloneOrderId);
+    console.log('  - Clone order ID:', cloneOrderId);
     
     // Load raw shipway orders for contact info
     const rawOrdersPath = path.join(__dirname, '../data/raw_shipway_orders.json');
@@ -1388,53 +1130,28 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
     
     // Step 4: Update local database AFTER successful Shipway operations
     console.log('🔄 Step 4: Updating local database with clone order ID');
+    const updatedOrders = orders.map(order => {
+      if (order.order_id === originalOrderId && 
+          order.claimed_by === vendor.warehouseId && 
+          order.status === 'claimed') {
+        return { ...order, order_id: cloneOrderId };
+      }
+      return order;
+    });
     
-    // Update claimed products to have the new clone order ID
-    for (const product of claimedProducts) {
-      await database.updateOrder(product.unique_id, {
-        order_id: cloneOrderId,
-        clone_status: 'cloned',
-        cloned_order_id: cloneOrderId
-      });
-    }
-    
-    console.log('✅ Updated MySQL orders with clone order ID');
-    
-    console.log('🔍 Clone Response Structure:');
-    console.log('  - Full clone response:', JSON.stringify(cloneResponse, null, 2));
-    console.log('  - Clone response keys:', Object.keys(cloneResponse));
-    
-    // Handle different possible response structures for clone
-    let shipping_url, awb;
-    
-    if (cloneResponse.awb_response) {
-      shipping_url = cloneResponse.awb_response.shipping_url;
-      awb = cloneResponse.awb_response.AWB;
-    } else if (cloneResponse.shipping_url) {
-      shipping_url = cloneResponse.shipping_url;
-      awb = cloneResponse.AWB || cloneResponse.awb;
-    } else if (cloneResponse.data && cloneResponse.data.awb_response) {
-      shipping_url = cloneResponse.data.awb_response.shipping_url;
-      awb = cloneResponse.data.awb_response.AWB;
-    } else if (cloneResponse.data && cloneResponse.data.shipping_url) {
-      shipping_url = cloneResponse.data.shipping_url;
-      awb = cloneResponse.data.AWB || cloneResponse.data.awb;
-    } else {
-      console.log('❌ Could not find shipping_url in clone response structure');
-      console.log('  - Available keys:', Object.keys(cloneResponse));
-      throw new Error('Invalid response structure from Shipway API - missing shipping_url in clone response');
-    }
+    // Write updated orders back to Excel
+    const updatedWs = XLSX.utils.json_to_sheet(updatedOrders);
+    ordersWb.Sheets[ordersWb.SheetNames[0]] = updatedWs;
+    XLSX.writeFile(ordersWb, ordersPath);
+    console.log('✅ Updated orders.xlsx with clone order ID');
     
     console.log('✅ Order cloning completed successfully');
-    console.log('  - Clone Shipping URL:', shipping_url);
-    console.log('  - Clone AWB:', awb);
-    
     return {
       success: true,
       message: 'Order cloned and label generated successfully',
       data: {
-        shipping_url: shipping_url,
-        awb: awb,
+        shipping_url: cloneResponse.awb_response.shipping_url,
+        awb: cloneResponse.awb_response.AWB,
         original_order_id: originalOrderId,
         clone_order_id: cloneOrderId
       }
@@ -1452,7 +1169,7 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
 function prepareShipwayRequestBody(orderId, products, originalOrder, vendor, generateLabel = false) {
   // Get payment type from the first product (all products in an order should have same payment_type)
   const paymentType = products[0]?.payment_type || 'P';
-  console.log('🔍 Payment type from order data:', paymentType);
+  console.log('🔍 Payment type from orders.xlsx:', paymentType);
   
   const orderTotal = products.reduce((sum, product) => {
     if (paymentType === 'C') {
@@ -1499,7 +1216,7 @@ function prepareShipwayRequestBody(orderId, products, originalOrder, vendor, gen
     billing_country: originalOrder.b_country,
     billing_firstname: originalOrder.b_firstname,
     billing_lastname: originalOrder.b_lastname,
-    billing_phone: originalOrder.b_phone,
+    billing_phone: `+91${originalOrder.b_phone}`,
     billing_zipcode: originalOrder.b_zipcode,
     billing_latitude: "10",
     billing_longitude: "20",
@@ -1510,7 +1227,7 @@ function prepareShipwayRequestBody(orderId, products, originalOrder, vendor, gen
     shipping_country: originalOrder.s_country,
     shipping_firstname: originalOrder.s_firstname,
     shipping_lastname: originalOrder.s_lastname,
-    shipping_phone: originalOrder.s_phone,
+    shipping_phone: `+91${originalOrder.s_phone}`,
     shipping_zipcode: originalOrder.s_zipcode,
     shipping_latitude: "10",
     shipping_longitude: "20",
@@ -1610,7 +1327,7 @@ async function syncOrdersFromShipway() {
     const shipwayService = require('../services/shipwayService');
     
     // Call the sync method
-    await shipwayService.syncOrdersToMySQL();
+    await shipwayService.syncOrdersToExcel();
     
     console.log('✅ Orders synced successfully');
     
@@ -1664,8 +1381,11 @@ router.post('/bulk-download-labels', async (req, res) => {
     console.log('  - Email:', vendor.email);
     console.log('  - Warehouse ID:', vendor.warehouseId);
 
-    // Get orders from MySQL
-    const orders = await database.getAllOrders();
+    // Load orders.xlsx
+    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
+    const ordersWb = XLSX.readFile(ordersPath);
+    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
+    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
 
     const results = [];
     const errors = [];
@@ -1783,80 +1503,6 @@ router.post('/bulk-download-labels', async (req, res) => {
 });
 
 /**
- * @route   POST /api/orders/download-pdf
- * @desc    Proxy endpoint to download PDF from Shipway (avoids CORS issues)
- * @access  Vendor (token required)
- */
-router.post('/download-pdf', async (req, res) => {
-  const { pdfUrl } = req.body;
-  const token = req.headers['authorization'];
-  
-  console.log('🔵 DOWNLOAD PDF PROXY REQUEST START');
-  console.log('  - PDF URL:', pdfUrl);
-  console.log('  - token received:', token ? 'YES' : 'NO');
-  
-  if (!pdfUrl || !token) {
-    console.log('❌ DOWNLOAD PDF PROXY FAILED: Missing required fields');
-    return res.status(400).json({ 
-      success: false, 
-      message: 'pdfUrl and Authorization token required' 
-    });
-  }
-
-  try {
-    // Load users from MySQL to get vendor info
-    const database = require('../config/database');
-    
-    // Wait for MySQL initialization
-    await database.waitForMySQLInitialization();
-    
-    if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
-      return res.status(500).json({ success: false, message: 'Database connection not available' });
-    }
-    
-    const vendor = await database.getUserByToken(token);
-    
-    if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
-      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
-    }
-
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
-
-    // Fetch PDF from Shipway
-    console.log('🔄 Fetching PDF from Shipway...');
-    const response = await fetch(pdfUrl);
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
-    }
-    
-    const pdfBuffer = await response.arrayBuffer();
-    console.log('✅ PDF fetched successfully');
-    console.log('  - Size:', pdfBuffer.length, 'bytes');
-    
-    // Set response headers for PDF download
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="label.pdf"');
-    res.setHeader('Content-Length', pdfBuffer.length);
-    
-    // Send the PDF buffer
-    res.send(Buffer.from(pdfBuffer));
-    
-  } catch (error) {
-    console.error('❌ DOWNLOAD PDF PROXY ERROR:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to download PDF', 
-      error: error.message 
-    });
-  }
-});
-
-/**
  * Generate combined PDF from multiple label URLs
  */
 async function generateCombinedLabelsPDF(labels) {
@@ -1952,7 +1598,7 @@ router.post('/refresh', async (req, res) => {
     const shipwayService = require('../services/shipwayService');
     
     console.log('🔄 Starting orders sync from Shipway...');
-    const result = await shipwayService.syncOrdersToMySQL();
+    const result = await shipwayService.syncOrdersToExcel();
     
     console.log('✅ Orders synced successfully');
     console.log('  - Result:', result);

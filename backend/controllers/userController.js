@@ -3,6 +3,7 @@ const { hashPassword } = require('../middleware/auth');
 const shipwayService = require('../services/shipwayService');
 const fs = require('fs');
 const path = require('path');
+const XLSX = require('xlsx');
 
 /**
  * User Management Controller
@@ -77,7 +78,7 @@ class UserController {
             contactNumber
           };
 
-          const newUser = database.createUser(userData);
+          const newUser = await database.createUser(userData);
 
           res.status(201).json({
             success: true,
@@ -105,7 +106,7 @@ class UserController {
           warehouseId,
           contactNumber
         };
-        const newUser = database.createUser(userData);
+        const newUser = await database.createUser(userData);
         res.status(201).json({
           success: true,
           message: `${role} created successfully`,
@@ -136,7 +137,7 @@ class UserController {
     try {
       const { page = 1, limit = 10, role, status, q: searchQuery } = req.query;
       
-      let users = database.getAllUsers();
+      let users = await database.getAllUsers();
 
       // Filter by role
       if (role) {
@@ -209,7 +210,7 @@ class UserController {
     try {
       const { id } = req.params;
 
-      const user = database.getUserById(id);
+      const user = await database.getUserById(id);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -243,7 +244,7 @@ class UserController {
     try {
       const { id } = req.params;
       const updateData = req.body;
-      const existingUser = database.getUserById(id);
+      const existingUser = await database.getUserById(id);
       if (!existingUser) {
         return res.status(404).json({
           success: false,
@@ -277,12 +278,43 @@ class UserController {
           });
         }
       }
-      const updatedUser = database.updateUser(id, updateData);
+      const prevUser = await database.getUserById(id);
+      const updatedUser = await database.updateUser(id, updateData);
       if (!updatedUser) {
         return res.status(500).json({
           success: false,
           message: 'Failed to update user'
         });
+      }
+
+      // If vendor warehouseId changed or status became inactive, update their orders' claim state
+      try {
+        if (updatedUser.role === 'vendor') {
+          const prevWid = String((prevUser && (prevUser.warehouseId || prevUser.warehouse_id)) || '');
+          const newWid = String((updatedUser.warehouseId || updatedUser.warehouse_id) || '');
+          const deactivated = updateData.status && String(updateData.status).toLowerCase() === 'inactive';
+          const warehouseChanged = prevWid && newWid && prevWid !== newWid;
+
+          if (deactivated || warehouseChanged) {
+            // Get all orders claimed by this vendor from MySQL
+            const vendorOrders = await database.getOrdersByVendor(prevWid);
+            const targetWid = warehouseChanged ? prevWid : newWid || prevWid;
+
+            // Update each order to unclaimed status
+            for (const order of vendorOrders) {
+              await database.updateOrder(order.unique_id, {
+                status: 'unclaimed',
+                claimed_by: null,
+                claimed_at: null
+              });
+            }
+
+            console.log(`Updated ${vendorOrders.length} orders for vendor ${targetWid}`);
+          }
+        }
+      } catch (e) {
+        console.error('Error updating vendor orders on user update:', e);
+        // Continue even if this fails
       }
       res.json({
         success: true,
@@ -314,7 +346,7 @@ class UserController {
       const { id } = req.params;
 
       // Check if user exists
-      const user = database.getUserById(id);
+      const user = await database.getUserById(id);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -330,8 +362,34 @@ class UserController {
         });
       }
 
+      // If vendor, unclaim all orders assigned to this vendor before deleting
+      if (user.role === 'vendor') {
+        try {
+          const vendorWid = String(user.warehouseId || user.warehouse_id || '');
+          if (vendorWid) {
+            // Get all orders claimed by this vendor from MySQL
+            const vendorOrders = await database.getOrdersByVendor(vendorWid);
+            
+            // Update each order to unclaimed status
+            for (const order of vendorOrders) {
+              await database.updateOrder(order.unique_id, {
+                status: 'unclaimed',
+                claimed_by: null,
+                claimed_at: null
+                // Keep history in last_claimed_by/at as-is
+              });
+            }
+
+            console.log(`Unclaimed ${vendorOrders.length} orders for deleted vendor ${vendorWid}`);
+          }
+        } catch (e) {
+          console.error('Error unclaiming orders for deleted vendor:', e);
+          // Continue with deletion even if this fails
+        }
+      }
+
       // Delete user
-      const deleted = database.deleteUser(id);
+      const deleted = await database.deleteUser(id);
 
       if (!deleted) {
         return res.status(500).json({
@@ -370,7 +428,7 @@ class UserController {
         });
       }
 
-      const users = database.getUsersByRole(role);
+      const users = await database.getUsersByRole(role);
 
       // Remove passwords from response
       const usersWithoutPasswords = users.map(user => {
@@ -408,7 +466,7 @@ class UserController {
         });
       }
 
-      const users = database.getUsersByStatus(status);
+      const users = await database.getUsersByStatus(status);
 
       // Remove passwords from response
       const usersWithoutPasswords = users.map(user => {
@@ -439,7 +497,7 @@ class UserController {
     try {
       const { id } = req.params;
 
-      const user = database.getUserById(id);
+      const user = await database.getUserById(id);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -448,7 +506,7 @@ class UserController {
       }
 
       const newStatus = user.status === 'active' ? 'inactive' : 'active';
-      const updatedUser = database.updateUser(id, { status: newStatus });
+      const updatedUser = await database.updateUser(id, { status: newStatus });
 
       if (!updatedUser) {
         return res.status(500).json({

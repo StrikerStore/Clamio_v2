@@ -2,11 +2,11 @@ const axios = require('axios');
 const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
+const database = require('../config/database');
 
 class ShipwayCarrierService {
   constructor() {
     this.apiUrl = 'https://app.shipway.com/api/getcarrier';
-    this.carrierExcelPath = path.join(__dirname, '../data/carrier.xlsx');
     // Use the same Basic Auth header as other Shipway APIs
     this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
   }
@@ -139,67 +139,52 @@ class ShipwayCarrierService {
   }
 
   /**
-   * Save carriers to Excel file
+   * Save carriers to MySQL database
    * @param {Array} carriers - Array of carrier data
    */
-  saveCarriersToExcel(carriers) {
+  async saveCarriersToDatabase(carriers) {
     try {
-      console.log('🔵 SHIPWAY CARRIER: Saving carriers to Excel...');
-      
-      // Create backup if file exists
-      if (fs.existsSync(this.carrierExcelPath)) {
-        const backupPath = this.carrierExcelPath.replace('.xlsx', '_backup.xlsx');
-        fs.copyFileSync(this.carrierExcelPath, backupPath);
-        console.log('  - Backup created:', backupPath);
+      // Wait for MySQL initialization to complete
+      const isAvailable = await database.waitForMySQLInitialization();
+      if (!isAvailable) {
+        throw new Error('MySQL connection not available. Please ensure MySQL is running and configured.');
       }
 
-      // Create workbook and worksheet
-      const workbook = XLSX.utils.book_new();
-      const worksheet = XLSX.utils.json_to_sheet(carriers);
-
-      // Set column widths
-      const columnWidths = [
-        { wch: 15 }, // carrier_id
-        { wch: 30 }, // carrier_name
-        { wch: 10 }, // status
-        { wch: 12 }, // weight_in_kg
-        { wch: 10 }  // priority
-      ];
-      worksheet['!cols'] = columnWidths;
-
-      // Add worksheet to workbook
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Carriers');
-
-      // Write to file
-      XLSX.writeFile(workbook, this.carrierExcelPath);
+      console.log('🔵 SHIPWAY CARRIER: Saving carriers to MySQL...');
       
-      console.log('✅ SHIPWAY CARRIER: Carriers saved to Excel');
-      console.log('  - File path:', this.carrierExcelPath);
-      console.log('  - Total carriers saved:', carriers.length);
+      const result = await database.bulkUpsertCarriers(carriers);
+      
+      console.log('✅ SHIPWAY CARRIER: Carriers saved to MySQL');
+      console.log('  - Total carriers processed:', result.total);
+      console.log('  - Inserted:', result.inserted);
+      console.log('  - Updated:', result.updated);
 
       return {
         success: true,
-        message: `Successfully saved ${carriers.length} carriers to Excel`,
-        filePath: this.carrierExcelPath,
-        carrierCount: carriers.length
+        message: `Successfully saved ${result.total} carriers to MySQL (${result.inserted} inserted, ${result.updated} updated)`,
+        database: 'MySQL',
+        carrierCount: result.total,
+        inserted: result.inserted,
+        updated: result.updated
       };
     } catch (error) {
-      console.error('💥 SHIPWAY CARRIER: Error saving to Excel:', error.message);
-      throw new Error(`Failed to save carriers to Excel: ${error.message}`);
+      console.error('💥 SHIPWAY CARRIER: Error saving to MySQL:', error.message);
+      throw new Error(`Failed to save carriers to database: ${error.message}`);
     }
   }
 
+
   /**
-   * Main function to fetch and save carriers
+   * Main function to fetch and save carriers to MySQL
    * Preserves admin-set priorities and only adds new carriers
    * @returns {Promise<Object>} Result of the operation
    */
-  async syncCarriersToExcel() {
+  async syncCarriersToMySQL() {
     try {
-      console.log('🔵 SHIPWAY CARRIER: Starting smart carrier sync to Excel...');
+      console.log('🔵 SHIPWAY CARRIER: Starting smart carrier sync to MySQL...');
       
-      // Read existing carriers from Excel (preserves admin-set priorities)
-      const existingCarriers = this.readCarriersFromExcel();
+      // Read existing carriers from database (preserves admin-set priorities)
+      const existingCarriers = await this.readCarriersFromDatabase();
       const existingCarrierMap = new Map(existingCarriers.map(carrier => [carrier.carrier_id, carrier]));
       
       console.log(`📊 Existing carriers: ${existingCarriers.length}`);
@@ -213,11 +198,11 @@ class ShipwayCarrierService {
       console.log(`📊 New carriers from API: ${newCarriersFromAPI.length}`);
       console.log(`📊 New carrier IDs: ${Array.from(newCarrierMap.keys()).join(', ')}`);
       
-      // Find new carriers (not in existing file)
+      // Find new carriers (not in existing database)
       const newCarrierIds = newCarriersFromAPI.filter(carrier => !existingCarrierMap.has(carrier.carrier_id));
       console.log(`📊 New carrier IDs to add: ${newCarrierIds.map(c => c.carrier_id).join(', ')}`);
       
-      // Find removed carriers (in existing file but not in API)
+      // Find removed carriers (in existing database but not in API)
       const removedCarrierIds = existingCarriers.filter(carrier => !newCarrierMap.has(carrier.carrier_id));
       console.log(`📊 Removed carrier IDs: ${removedCarrierIds.map(c => c.carrier_id).join(', ')}`);
       
@@ -271,60 +256,73 @@ class ShipwayCarrierService {
       console.log(`📊 Final carriers: ${finalCarriers.length}`);
       console.log(`📊 Final priorities: ${finalCarriers.map(c => `${c.carrier_id}:${c.priority}`).join(', ')}`);
       
-      // Save to Excel file
-      const result = this.saveCarriersToExcel(finalCarriers);
+      // Save to MySQL database
+      const result = await this.saveCarriersToDatabase(finalCarriers);
       
       console.log('✅ SHIPWAY CARRIER: Smart carrier sync completed');
       console.log(`📊 Summary: ${newCarrierIds.length} added, ${removedCarrierIds.length} removed, ${finalCarriers.length} total`);
       
       return result;
     } catch (error) {
-      console.error('💥 SHIPWAY CARRIER: Error syncing carriers to Excel:', error.message);
+      console.error('💥 SHIPWAY CARRIER: Error syncing carriers to MySQL:', error.message);
       throw error;
     }
   }
 
   /**
-   * Read carriers from Excel file
-   * @returns {Array} Array of carrier data
+   * Main function to fetch and save carriers (backward compatibility)
+   * @returns {Promise<Object>} Result of the operation
    */
-  readCarriersFromExcel() {
-    try {
-      if (!fs.existsSync(this.carrierExcelPath)) {
-        console.log('📝 SHIPWAY CARRIER: Carrier Excel file does not exist');
-        return [];
-      }
-
-      const workbook = XLSX.readFile(this.carrierExcelPath);
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const carriers = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-
-      // Don't sort here - preserve the order from file (admin-set priorities)
-      console.log('✅ SHIPWAY CARRIER: Carriers loaded from Excel');
-      console.log('  - Total carriers:', carriers.length);
-      console.log('  - Preserving file order (admin-set priorities)');
-
-      return carriers;
-    } catch (error) {
-      console.error('💥 SHIPWAY CARRIER: Error reading from Excel:', error.message);
-      throw new Error(`Failed to read carriers from Excel: ${error.message}`);
-    }
+  async syncCarriersToExcel() {
+    // Redirect to MySQL sync method
+    return await this.syncCarriersToMySQL();
   }
 
   /**
-   * Export carriers data to CSV format
-   * @returns {string} CSV formatted string
+   * Read carriers from MySQL database
+   * @returns {Promise<Array>} Array of carrier data
    */
-  exportCarriersToCSV() {
+  async readCarriersFromDatabase() {
     try {
-      const carriers = this.readCarriersFromExcel();
+      // Wait for MySQL initialization to complete
+      const isAvailable = await database.waitForMySQLInitialization();
+      if (!isAvailable) {
+        throw new Error('MySQL connection not available. Please ensure MySQL is running and configured.');
+      }
+
+      const carriers = await database.getAllCarriers();
+      
+      console.log('✅ SHIPWAY CARRIER: Carriers loaded from MySQL');
+      console.log('  - Total carriers:', carriers.length);
+      console.log('  - Ordered by priority (admin-set priorities)');
+
+      return carriers;
+    } catch (error) {
+      console.error('💥 SHIPWAY CARRIER: Error reading from MySQL:', error.message);
+      throw new Error(`Failed to read carriers from database: ${error.message}`);
+    }
+  }
+
+
+  /**
+   * Export carriers data to CSV format
+   * @returns {Promise<string>} CSV formatted string
+   */
+  async exportCarriersToCSV() {
+    try {
+      const carriers = await this.readCarriersFromDatabase();
       
       if (!carriers || carriers.length === 0) {
         throw new Error('No carrier data found');
       }
 
-      // Sort carriers by priority for CSV export (1, 2, 3...)
+      // Sort carriers for CSV export: actives first by priority 1..N, then inactives
+      const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
       const sortedCarriers = [...carriers].sort((a, b) => {
+        const aActive = normalizeStatus(a.status) === 'active';
+        const bActive = normalizeStatus(b.status) === 'active';
+        if (aActive && !bActive) return -1;
+        if (!aActive && bActive) return 1;
         const priorityA = parseInt(a.priority) || 0;
         const priorityB = parseInt(b.priority) || 0;
         return priorityA - priorityB;
@@ -361,9 +359,9 @@ class ShipwayCarrierService {
   /**
    * Update carrier priorities from CSV content
    * @param {string} csvContent - CSV content with carrier_id and priority columns
-   * @returns {Object} Result object with success status and message
+   * @returns {Promise<Object>} Result object with success status and message
    */
-  updateCarrierPrioritiesFromCSV(csvContent) {
+  async updateCarrierPrioritiesFromCSV(csvContent) {
     try {
       console.log('🔍 CSV Content received:', csvContent.substring(0, 200) + '...');
       console.log('🔍 CSV Content length:', csvContent.length);
@@ -401,12 +399,13 @@ class ShipwayCarrierService {
 
       const carrierIdIndex = header.indexOf('carrier_id');
       const priorityIndex = header.indexOf('priority');
+      const statusIndex = header.indexOf('status');
 
       console.log('🔍 carrier_id index:', carrierIdIndex);
       console.log('🔍 priority index:', priorityIndex);
 
       // Read current carrier data to validate against
-      const currentCarriers = this.readCarriersFromExcel();
+      const currentCarriers = await this.readCarriersFromDatabase();
       const carrierMap = new Map(currentCarriers.map(carrier => [carrier.carrier_id, carrier]));
       const existingCarrierIds = new Set(currentCarriers.map(carrier => carrier.carrier_id));
       
@@ -423,6 +422,9 @@ class ShipwayCarrierService {
         const values = this.parseCSVLine(line);
         const carrierId = values[carrierIdIndex];
         const priority = parseInt(values[priorityIndex]);
+        const statusRaw = values[statusIndex] || '';
+        const statusNormalized = String(statusRaw).trim().toLowerCase();
+        const status = statusNormalized === 'inactive' ? 'inactive' : (statusNormalized === 'active' ? 'active' : statusRaw);
 
         console.log(`🔍 Row ${i}: carrier_id="${carrierId}", priority="${values[priorityIndex]}" -> ${priority}`);
 
@@ -441,7 +443,7 @@ class ShipwayCarrierService {
         }
 
         uploadedCarrierIds.add(carrierId);
-        updates.push({ carrier_id: carrierId, priority });
+        updates.push({ carrier_id: carrierId, priority, status });
       }
 
       console.log('🔍 Valid updates found:', updates.length);
@@ -464,27 +466,27 @@ class ShipwayCarrierService {
         throw new Error('Priority values must be unique. Duplicate priority values found in uploaded CSV.');
       }
 
-      // Update priorities
+      // Update priorities in database
       let updatedCount = 0;
-      updates.forEach(update => {
-        const carrier = carrierMap.get(update.carrier_id);
-        if (carrier && carrier.priority !== update.priority) {
-          carrier.priority = update.priority;
+      for (const update of updates) {
+        const existing = await database.getCarrierById(update.carrier_id);
+        if (existing) {
+          const updateData = { priority: update.priority };
+          if (update.status) {
+            updateData.status = update.status;
+          }
+          await database.updateCarrier(update.carrier_id, updateData);
           updatedCount++;
         }
-      });
-
-      // Save updated data back to Excel
-      const updatedCarriers = Array.from(carrierMap.values());
-      this.saveCarriersToExcel(updatedCarriers);
+      }
 
       return {
         success: true,
         message: `Successfully updated priorities for ${updatedCount} carriers. All ${updates.length} carriers validated.`,
         updatedCount,
-        totalCarriers: updatedCarriers.length,
+        totalCarriers: currentCarriers.length,
         validation: {
-          totalCarriersInExcel: currentCarriers.length,
+          totalCarriersInDatabase: currentCarriers.length,
           totalCarriersInCSV: updates.length,
           missingCarriers: 0,
           duplicatePriorities: false
@@ -497,12 +499,54 @@ class ShipwayCarrierService {
   }
 
   /**
-   * Get expected CSV format and current carrier data for validation
-   * @returns {Object} Expected format and current data
+   * Move a carrier up or down in priority ordering
+   * @param {string} carrierId
+   * @param {'up'|'down'} direction
+   * @returns {Promise<Object>} Result object
    */
-  getExpectedCSVFormat() {
+  async moveCarrier(carrierId, direction) {
     try {
-      const currentCarriers = this.readCarriersFromExcel();
+      const carriers = await this.readCarriersFromDatabase();
+      const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
+
+      const active = carriers
+        .filter(c => normalizeStatus(c.status) === 'active')
+        .sort((a, b) => (parseInt(a.priority) || 0) - (parseInt(b.priority) || 0));
+
+      const index = active.findIndex(c => String(c.carrier_id) === String(carrierId));
+      if (index === -1) {
+        throw new Error('Carrier not found or not active');
+      }
+      if (direction === 'up' && index === 0) {
+        return { success: true, message: 'Already at top' };
+      }
+      if (direction === 'down' && index === active.length - 1) {
+        return { success: true, message: 'Already at bottom' };
+      }
+
+      const swapWith = direction === 'up' ? index - 1 : index + 1;
+      const carrier1 = active[index];
+      const carrier2 = active[swapWith];
+
+      // Swap priorities
+      const tempPriority = carrier1.priority;
+      await database.updateCarrier(carrier1.carrier_id, { priority: carrier2.priority });
+      await database.updateCarrier(carrier2.carrier_id, { priority: tempPriority });
+
+      return { success: true, message: 'Carrier moved successfully' };
+    } catch (error) {
+      console.error('Error moving carrier:', error.message);
+      throw new Error(error.message || 'Failed to move carrier');
+    }
+  }
+
+  /**
+   * Get expected CSV format and current carrier data for validation
+   * @returns {Promise<Object>} Expected format and current data
+   */
+  async getExpectedCSVFormat() {
+    try {
+      const currentCarriers = await this.readCarriersFromDatabase();
       
       return {
         success: true,

@@ -48,11 +48,15 @@ import {
   Edit,
   Trash2,
   MoreHorizontal,
-  Key
+  Key,
+  Eye,
+  EyeOff
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useDeviceType } from "@/hooks/use-mobile"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 
 interface User {
   id: string
@@ -89,6 +93,7 @@ interface EditUserForm {
 
 export function UserManagement() {
   const { user: currentUser, logout } = useAuth()
+  const { isMobile, isTablet, isDesktop, deviceType } = useDeviceType()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -117,6 +122,10 @@ export function UserManagement() {
   const [warehouseVerifyLoading, setWarehouseVerifyLoading] = useState(false)
   const [warehouseVerifyError, setWarehouseVerifyError] = useState("")
   const [warehouseVerified, setWarehouseVerified] = useState(false)
+
+  // Mobile UI state
+  const [mobileTab, setMobileTab] = useState<'users' | 'create'>("users")
+  const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
 
   const [formData, setFormData] = useState<CreateUserForm>({
     name: "",
@@ -505,30 +514,503 @@ export function UserManagement() {
     })
   }
 
+  // Dedicated Mobile UI
+  if (isMobile) {
+    return (
+      <div className="min-h-screen bg-background">
+        {/* Header */}
+        <div className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10">
+          <div className="px-4">
+            <div className="flex items-center justify-between h-14">
+              <div className="min-w-0">
+                <h1 className="text-lg font-bold text-gray-900 truncate">Super Admin</h1>
+                <p className="text-xs text-gray-500 truncate">{currentUser?.email}</p>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleLogout}
+                disabled={logoutLoading}
+                className="gap-2"
+              >
+                {logoutLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                Logout
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="px-4 py-4 pb-24 space-y-4">
+          {/* Mobile Stats Cards */}
+          {mobileTab === 'users' && (
+            <div className={`grid gap-3 grid-cols-2`}>
+              <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-blue-100 text-xs font-medium">Total Users</p>
+                      <p className="text-2xl font-bold">{users.length}</p>
+                    </div>
+                    <Users className="h-6 w-6 text-blue-200" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-green-100 text-xs font-medium">Active Users</p>
+                      <p className="text-2xl font-bold">{users.filter(u => u.status === 'active').length}</p>
+                    </div>
+                    <UserCheck className="h-6 w-6 text-green-200" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-purple-100 text-xs font-medium">Admins</p>
+                      <p className="text-2xl font-bold">{users.filter(u => u.role === 'admin').length}</p>
+                    </div>
+                    <Shield className="h-6 w-6 text-purple-200" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-orange-100 text-xs font-medium">Vendors</p>
+                      <p className="text-2xl font-bold">{users.filter(u => u.role === 'vendor').length}</p>
+                    </div>
+                    <Building2 className="h-6 w-6 text-orange-200" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+          {/* Search + Filter Row */}
+          {mobileTab === 'users' && (
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Input
+                  placeholder="Search users..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+
+              <Sheet open={mobileFilterOpen} onOpenChange={setMobileFilterOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="outline" size="icon" className="shrink-0">
+                    <Filter className="h-4 w-4" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="bottom" className="space-y-4">
+                  <SheetHeader>
+                    <SheetTitle>Filters</SheetTitle>
+                  </SheetHeader>
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-sm">Role</Label>
+                      <Select value={roleFilter} onValueChange={setRoleFilter}>
+                        <SelectTrigger className="mt-1">
+                          <SelectValue placeholder="Filter by Role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Roles</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="vendor">Vendor</SelectItem>
+                          <SelectItem value="superadmin">Superadmin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-sm">Status</Label>
+                      <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="mt-1">
+                          <SelectValue placeholder="Filter by Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Status</SelectItem>
+                          <SelectItem value="active">Active</SelectItem>
+                          <SelectItem value="inactive">Inactive</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+          )}
+
+          {/* Users List */}
+          {mobileTab === 'users' && (
+            <div className="space-y-3">
+              {loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                </div>
+              ) : filteredUsers.length === 0 ? (
+                <div className="text-center py-12">
+                  <Users className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                  <h3 className="text-base font-medium text-gray-900 mb-1">No users found</h3>
+                  <p className="text-sm text-gray-500">Try adjusting your search or filters</p>
+                </div>
+              ) : (
+                filteredUsers.map((user) => (
+                  <Card key={user.id} className="border-gray-100">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center">
+                              {getRoleIcon(user.role)}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-gray-900 truncate">{user.name}</div>
+                              <div className="text-xs text-gray-500 truncate">{user.email}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <Badge variant={getRoleBadgeVariant(user.role)} className="text-xs">
+                              {user.role}
+                            </Badge>
+                            <Badge variant={getStatusBadgeVariant(user.status)} className="text-xs">
+                              {user.status}
+                            </Badge>
+                          </div>
+                        </div>
+                        {/* Actions */}
+                        {user.role !== 'superadmin' && (
+                          <div className="flex items-center gap-2">
+                            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+                              <DialogTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleEditUser(user)}
+                                  className="h-8 px-2"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                              </DialogTrigger>
+                            </Dialog>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleChangeUserPassword(user)}
+                              className="h-8 px-2"
+                            >
+                              <Key className="h-4 w-4" />
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 px-2"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete User</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to delete "{user.name}"? This action cannot be undone.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDeleteUser(user)} className="bg-red-600 hover:bg-red-700">
+                                    {deleting ? (
+                                      <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Deleting...
+                                      </>
+                                    ) : (
+                                      "Delete User"
+                                    )}
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Create Form */}
+          {mobileTab === 'create' && (
+            <Card className="border-gray-100 bg-white">
+              <CardHeader>
+                <CardTitle className="text-gray-900">Add New User</CardTitle>
+                <CardDescription>Create a new admin or vendor account</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSubmit} className="space-y-5">
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Full Name *</Label>
+                      <Input id="name" value={formData.name} onChange={(e) => handleInputChange('name', e.target.value)} required disabled={creating} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Email Address *</Label>
+                      <Input id="email" type="email" value={formData.email} onChange={(e) => handleInputChange('email', e.target.value)} required disabled={creating} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Phone Number *</Label>
+                      <Input id="phone" value={formData.phone} onChange={(e) => handleInputChange('phone', e.target.value)} required disabled={creating} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>User Role *</Label>
+                      <Select value={formData.role} onValueChange={(value: 'admin' | 'vendor') => handleInputChange('role', value)} disabled={creating}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="vendor">Vendor</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {formData.role === 'vendor' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="warehouseId">Warehouse ID *</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id="warehouseId"
+                            value={formData.warehouseId}
+                            onChange={(e) => handleInputChange('warehouseId', e.target.value)}
+                            required
+                            disabled={creating}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleVerifyWarehouse}
+                            disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating}
+                          >
+                            {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                          </Button>
+                        </div>
+                        {warehouseVerified && warehouseInfo && (
+                          <p className="text-xs text-green-700">
+                            Verified: {warehouseInfo.address}, {warehouseInfo.city}, {warehouseInfo.state}, {warehouseInfo.country} (Pincode: {warehouseInfo.pincode})
+                          </p>
+                        )}
+                        {warehouseVerifyError && !warehouseVerifyLoading && (
+                          <p className="text-xs text-red-600">{warehouseVerifyError}</p>
+                        )}
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="contactNumber">Contact Number</Label>
+                      <Input id="contactNumber" value={formData.contactNumber} onChange={(e) => handleInputChange('contactNumber', e.target.value)} disabled={creating} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password *</Label>
+                      <Input id="password" type="password" value={formData.password} onChange={(e) => handleInputChange('password', e.target.value)} required disabled={creating} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="confirmPassword">Confirm Password *</Label>
+                      <Input id="confirmPassword" type="password" value={formData.confirmPassword} onChange={(e) => handleInputChange('confirmPassword', e.target.value)} required disabled={creating} />
+                    </div>
+                  </div>
+
+                  {error && (
+                    <Alert variant="destructive" className="border-red-200 bg-red-50">
+                      <AlertDescription className="text-red-800">{error}</AlertDescription>
+                    </Alert>
+                  )}
+                  {success && (
+                    <Alert className="border-green-200 bg-green-50">
+                      <AlertDescription className="text-green-800">{success}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  <Button type="submit" className="w-full" disabled={creating || (formData.role === 'vendor' && !warehouseVerified)}>
+                    {creating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Creating User...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Create User Account
+                      </>
+                    )}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Bottom Nav */}
+        <div className="fixed inset-x-0 bottom-0 z-20 bg-white border-t">
+          <div className="grid grid-cols-2">
+            <Button variant={mobileTab === 'users' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('users')}>
+              <Users className="h-4 w-4 mr-2" /> Users
+            </Button>
+            <Button variant={mobileTab === 'create' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('create')}>
+              <UserPlus className="h-4 w-4 mr-2" /> Add
+            </Button>
+          </div>
+        </div>
+
+        {/* Edit and Password Dialogs for Mobile */}
+        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Edit className="h-5 w-5 text-blue-600" />
+                Edit User
+              </DialogTitle>
+              <DialogDescription>
+                Update user information and settings
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleEditSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-name" className="text-sm font-medium text-gray-700">Full Name *</Label>
+                  <Input id="edit-name" value={editFormData.name} onChange={(e) => handleEditInputChange('name', e.target.value)} required disabled={editing} className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-email" className="text-sm font-medium text-gray-700">Email Address *</Label>
+                  <Input id="edit-email" type="email" value={editFormData.email} onChange={(e) => handleEditInputChange('email', e.target.value)} required disabled={editing} className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-phone" className="text-sm font-medium text-gray-700">Phone Number *</Label>
+                  <Input id="edit-phone" value={editFormData.phone} onChange={(e) => handleEditInputChange('phone', e.target.value)} required disabled={editing} className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-role" className="text-sm font-medium text-gray-700">User Role *</Label>
+                  <Select value={editFormData.role} onValueChange={(value: 'admin' | 'vendor') => handleEditInputChange('role', value)} disabled={editing}>
+                    <SelectTrigger className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="vendor">Vendor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-status" className="text-sm font-medium text-gray-700">Status *</Label>
+                  <Select value={editFormData.status} onValueChange={(value: string) => handleEditInputChange('status', value)} disabled={editing}>
+                    <SelectTrigger className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={editing}>
+                  {editing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save Changes
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Key className="h-5 w-5 text-purple-600" />
+                Change Password for {passwordUser?.name}
+              </DialogTitle>
+              <DialogDescription>
+                Enter new password for {passwordUser?.name}
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="new-password">New Password</Label>
+                <Input id="new-password" type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-password">Confirm Password</Label>
+                <Input id="confirm-password" type="password" value={confirmUserPassword} onChange={(e) => setConfirmUserPassword(e.target.value)} required />
+              </div>
+
+              {passwordError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{passwordError}</AlertDescription>
+                </Alert>
+              )}
+
+              {passwordSuccess && (
+                <Alert className="border-green-200 bg-green-50">
+                  <AlertDescription className="text-green-800">{passwordSuccess}</AlertDescription>
+                </Alert>
+              )}
+              <DialogFooter>
+                <Button type="submit" disabled={passwordLoading}>
+                  {passwordLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Change Password
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                <Shield className="h-5 w-5 text-white" />
+          <div className={`flex items-center justify-between ${isMobile ? 'h-14' : 'h-16'}`}>
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className={`${isMobile ? 'w-8 h-8' : 'w-10 h-10'} bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center`}>
+                <Shield className={`${isMobile ? 'h-4 w-4' : 'h-5 w-5'} text-white`} />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">Super Admin Panel</h1>
-                <p className="text-sm text-gray-600">User Management & System Control</p>
+              <div className="min-w-0">
+                <h1 className={`font-bold text-gray-900 ${isMobile ? 'text-lg' : 'text-xl'}`}>
+                  {isMobile ? 'Admin Panel' : 'Super Admin Panel'}
+                </h1>
+                {!isMobile && (
+                  <p className="text-sm text-gray-600">User Management & System Control</p>
+                )}
               </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <div className="text-right">
-                <p className="text-sm font-medium text-gray-900">{currentUser?.name}</p>
-                <p className="text-xs text-gray-500">{currentUser?.email}</p>
-              </div>
+            <div className="flex items-center space-x-2">
+              {!isMobile && (
+                <div className="text-right">
+                  <p className="text-sm font-medium text-gray-900 truncate max-w-[120px]">{currentUser?.name}</p>
+                  <p className="text-xs text-gray-500 truncate max-w-[120px]">{currentUser?.email}</p>
+                </div>
+              )}
               <Button 
                 variant="outline" 
                 onClick={handleLogout}
                 disabled={logoutLoading}
+                size={isMobile ? 'sm' : 'default'}
                 className="flex items-center gap-2 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
               >
                 {logoutLoading ? (
@@ -536,7 +1018,7 @@ export function UserManagement() {
                 ) : (
                   <LogOut className="h-4 w-4" />
                 )}
-                Logout
+                {!isMobile && 'Logout'}
               </Button>
             </div>
           </div>
@@ -544,54 +1026,62 @@ export function UserManagement() {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="space-y-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
+        <div className={`space-y-6 md:space-y-8`}>
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className={`grid gap-4 md:gap-6 ${
+            isMobile ? 'grid-cols-2' : 
+            isTablet ? 'grid-cols-2' : 
+            'grid-cols-4'
+          }`}>
             <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
-              <CardContent className="p-6">
+              <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-blue-100 text-sm font-medium">Total Users</p>
-                    <p className="text-3xl font-bold">{users.length}</p>
+                    <p className={`text-blue-100 font-medium ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                      {isMobile ? 'Users' : 'Total Users'}
+                    </p>
+                    <p className={`font-bold ${isMobile ? 'text-2xl' : 'text-3xl'}`}>{users.length}</p>
                   </div>
-                  <Users className="h-8 w-8 text-blue-200" />
+                  <Users className={`text-blue-200 ${isMobile ? 'h-6 w-6' : 'h-8 w-8'}`} />
                 </div>
               </CardContent>
             </Card>
             
             <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
-              <CardContent className="p-6">
+              <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-green-100 text-sm font-medium">Active Users</p>
-                    <p className="text-3xl font-bold">{users.filter(u => u.status === 'active').length}</p>
+                    <p className={`text-green-100 font-medium ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                      {isMobile ? 'Active' : 'Active Users'}
+                    </p>
+                    <p className={`font-bold ${isMobile ? 'text-2xl' : 'text-3xl'}`}>{users.filter(u => u.status === 'active').length}</p>
                   </div>
-                  <UserCheck className="h-8 w-8 text-green-200" />
+                  <UserCheck className={`text-green-200 ${isMobile ? 'h-6 w-6' : 'h-8 w-8'}`} />
                 </div>
               </CardContent>
             </Card>
             
             <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg">
-              <CardContent className="p-6">
+              <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-purple-100 text-sm font-medium">Admins</p>
-                    <p className="text-3xl font-bold">{users.filter(u => u.role === 'admin').length}</p>
+                    <p className={`text-purple-100 font-medium ${isMobile ? 'text-xs' : 'text-sm'}`}>Admins</p>
+                    <p className={`font-bold ${isMobile ? 'text-2xl' : 'text-3xl'}`}>{users.filter(u => u.role === 'admin').length}</p>
                   </div>
-                  <Shield className="h-8 w-8 text-purple-200" />
+                  <Shield className={`text-purple-200 ${isMobile ? 'h-6 w-6' : 'h-8 w-8'}`} />
                 </div>
               </CardContent>
             </Card>
             
             <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
-              <CardContent className="p-6">
+              <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-orange-100 text-sm font-medium">Vendors</p>
-                    <p className="text-3xl font-bold">{users.filter(u => u.role === 'vendor').length}</p>
+                    <p className={`text-orange-100 font-medium ${isMobile ? 'text-xs' : 'text-sm'}`}>Vendors</p>
+                    <p className={`font-bold ${isMobile ? 'text-2xl' : 'text-3xl'}`}>{users.filter(u => u.role === 'vendor').length}</p>
                   </div>
-                  <Building2 className="h-8 w-8 text-orange-200" />
+                  <Building2 className={`text-orange-200 ${isMobile ? 'h-6 w-6' : 'h-8 w-8'}`} />
                 </div>
               </CardContent>
             </Card>
@@ -1207,29 +1697,53 @@ export function UserManagement() {
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="newPassword" className="text-sm font-medium text-gray-700">New Password *</Label>
-              <Input
-                id="newPassword"
-                type="password"
-                value={newUserPassword}
-                onChange={(e) => setNewUserPassword(e.target.value)}
-                required
-                disabled={passwordLoading}
-                className="bg-white border-gray-200 focus:border-purple-500 focus:ring-purple-500"
-                placeholder="Enter new password"
-              />
+              <div className="relative">
+                <Input
+                  id="newPassword"
+                  type={showNewUserPassword ? 'text' : 'password'}
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  required
+                  disabled={passwordLoading}
+                  className="bg-white border-gray-200 focus:border-purple-500 focus:ring-purple-500"
+                  placeholder="Enter new password"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                  disabled={passwordLoading}
+                >
+                  {showNewUserPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirmNewPassword" className="text-sm font-medium text-gray-700">Confirm New Password *</Label>
-              <Input
-                id="confirmNewPassword"
-                type="password"
-                value={confirmUserPassword}
-                onChange={(e) => setConfirmUserPassword(e.target.value)}
-                required
-                disabled={passwordLoading}
-                className="bg-white border-gray-200 focus:border-purple-500 focus:ring-purple-500"
-                placeholder="Confirm new password"
-              />
+              <div className="relative">
+                <Input
+                  id="confirmNewPassword"
+                  type={showConfirmUserPassword ? 'text' : 'password'}
+                  value={confirmUserPassword}
+                  onChange={(e) => setConfirmUserPassword(e.target.value)}
+                  required
+                  disabled={passwordLoading}
+                  className="bg-white border-gray-200 focus:border-purple-500 focus:ring-purple-500"
+                  placeholder="Confirm new password"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowConfirmUserPassword(!showConfirmUserPassword)}
+                  disabled={passwordLoading}
+                >
+                  {showConfirmUserPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
 
             {passwordError && (

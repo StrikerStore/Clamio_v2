@@ -19,7 +19,11 @@ const decodeBasicAuth = (authHeader) => {
 
     const base64Credentials = authHeader.split(' ')[1];
     const credentials = Buffer.from(base64Credentials, 'base64').toString('utf-8');
-    const [email, password] = credentials.split(':');
+    // Split only on the first colon to support colons in passwords
+    const sepIndex = credentials.indexOf(':');
+    if (sepIndex === -1) return null;
+    const email = credentials.slice(0, sepIndex);
+    const password = credentials.slice(sepIndex + 1);
 
     return { email, password };
   } catch (error) {
@@ -35,8 +39,9 @@ const decodeBasicAuth = (authHeader) => {
  * @returns {string} Basic Auth header value
  */
 const encodeBasicAuth = (email, password) => {
+  // Ensure we don't accidentally break if password contains colon; encoding preserves it
   const credentials = `${email}:${password}`;
-  const base64Credentials = Buffer.from(credentials).toString('base64');
+  const base64Credentials = Buffer.from(credentials, 'utf-8').toString('base64');
   return `Basic ${base64Credentials}`;
 };
 
@@ -64,7 +69,7 @@ const comparePassword = async (password, hash) => {
  * Basic Authentication middleware
  * Verifies Basic Auth credentials and adds user to request object
  */
-const authenticateBasicAuth = (req, res, next) => {
+const authenticateBasicAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
     if (!authHeader) {
@@ -84,8 +89,8 @@ const authenticateBasicAuth = (req, res, next) => {
 
     const { email, password } = credentials;
 
-    // Find user by email
-    const user = database.getUserByEmail(email);
+    // Find user by email - AWAIT the async call
+    const user = await database.getUserByEmail(email);
     if (!user) {
       return res.status(401).json({
         success: false,

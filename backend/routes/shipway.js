@@ -128,7 +128,7 @@ router.get('/verify-warehouse/:warehouseId', authenticateBasicAuth, requireAdmin
 
 /**
  * @route   GET /api/shipway/carriers
- * @desc    Get all carriers from Shipway API and sync to Excel
+ * @desc    Get all carriers from Shipway API and sync to MySQL
  * @access  Superadmin only
  */
 router.get('/carriers', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
@@ -136,14 +136,16 @@ router.get('/carriers', authenticateBasicAuth, requireAdminOrSuperadmin, async (
     console.log('🔵 SHIPWAY CARRIERS: API request received');
     
     const shipwayCarrierService = require('../services/shipwayCarrierService');
-    const result = await shipwayCarrierService.syncCarriersToExcel();
+    const result = await shipwayCarrierService.syncCarriersToMySQL();
     
     res.json({
       success: true,
       message: result.message,
       data: {
         carrierCount: result.carrierCount,
-        filePath: result.filePath
+        database: result.database,
+        inserted: result.inserted,
+        updated: result.updated
       }
     });
   } catch (error) {
@@ -157,7 +159,7 @@ router.get('/carriers', authenticateBasicAuth, requireAdminOrSuperadmin, async (
 
 /**
  * @route   GET /api/shipway/carriers/local
- * @desc    Get carriers from local Excel file
+ * @desc    Get carriers from local MySQL database
  * @access  Superadmin only
  */
 router.get('/carriers/local', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
@@ -165,11 +167,11 @@ router.get('/carriers/local', authenticateBasicAuth, requireAdminOrSuperadmin, a
     console.log('🔵 SHIPWAY CARRIERS LOCAL: API request received');
     
     const shipwayCarrierService = require('../services/shipwayCarrierService');
-    const carriers = shipwayCarrierService.readCarriersFromExcel();
+    const carriers = await shipwayCarrierService.readCarriersFromDatabase();
     
     res.json({
       success: true,
-      message: `Successfully loaded ${carriers.length} carriers from local file`,
+      message: `Successfully loaded ${carriers.length} carriers from database`,
       data: {
         carriers: carriers,
         carrierCount: carriers.length
@@ -257,7 +259,7 @@ router.get('/carriers/download', authenticateBasicAuth, requireAdminOrSuperadmin
     console.log('🔵 SHIPWAY CARRIERS DOWNLOAD: API request received');
     
     const shipwayCarrierService = require('../services/shipwayCarrierService');
-    const csvContent = shipwayCarrierService.exportCarriersToCSV();
+    const csvContent = await shipwayCarrierService.exportCarriersToCSV();
     
     // Set headers for file download
     res.setHeader('Content-Type', 'text/csv');
@@ -327,7 +329,7 @@ router.post('/carriers/upload-priority',
       console.log('🔍 CSV Content to process:', csvContent.substring(0, 200) + '...');
       console.log('🔍 CSV Content full length:', csvContent.length);
       
-      const result = shipwayCarrierService.updateCarrierPrioritiesFromCSV(csvContent);
+      const result = await shipwayCarrierService.updateCarrierPrioritiesFromCSV(csvContent);
       
       res.json({
         success: true,
@@ -451,6 +453,33 @@ router.post('/carriers/test-simple',
 );
 
 /**
+ * @route   GET /api/shipway/carrier-format
+ * @desc    Get expected CSV format and validation rules (frontend compatibility)
+ * @access  Admin/Superadmin only
+ */
+router.get('/carrier-format', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    console.log('🔵 SHIPWAY CARRIER FORMAT: API request received');
+    
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const formatInfo = await shipwayCarrierService.getExpectedCSVFormat();
+    
+    res.json({
+      success: true,
+      message: 'CSV format requirements retrieved successfully',
+      data: formatInfo
+    });
+  } catch (error) {
+    console.error('💥 SHIPWAY CARRIER FORMAT: API error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get CSV format requirements',
+      error: error.message
+    });
+  }
+});
+
+/**
  * @route   GET /api/shipway/carriers/format
  * @desc    Get expected CSV format and validation rules
  * @access  Admin/Superadmin only
@@ -460,7 +489,7 @@ router.get('/carriers/format', authenticateBasicAuth, requireAdminOrSuperadmin, 
     console.log('🔵 SHIPWAY CARRIERS FORMAT: API request received');
     
     const shipwayCarrierService = require('../services/shipwayCarrierService');
-    const formatInfo = shipwayCarrierService.getExpectedCSVFormat();
+    const formatInfo = await shipwayCarrierService.getExpectedCSVFormat();
     
     res.json({
       success: true,
@@ -473,6 +502,83 @@ router.get('/carriers/format', authenticateBasicAuth, requireAdminOrSuperadmin, 
       success: false,
       message: error.message
     });
+  }
+});
+
+/**
+ * @route   GET /api/shipway/carrier-format
+ * @desc    Backward-compatible alias for CSV format endpoint
+ * @access  Admin/Superadmin only
+ */
+router.get('/carrier-format', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    console.log('🔵 SHIPWAY CARRIERS FORMAT (alias): API request received');
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const formatInfo = shipwayCarrierService.getExpectedCSVFormat();
+    res.json({
+      success: true,
+      message: 'CSV format requirements retrieved successfully',
+      data: formatInfo
+    });
+  } catch (error) {
+    console.error('💥 SHIPWAY CARRIERS FORMAT (alias): API error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * @route   PUT /api/shipway/carriers/:carrierId
+ * @desc    Update carrier fields (carrier_id, status)
+ * @access  Admin/Superadmin only
+ */
+router.put('/carriers/:carrierId', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    const { carrierId } = req.params;
+    const { carrier_id, status } = req.body || {};
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const result = shipwayCarrierService.updateCarrier(carrierId, { carrier_id, status });
+    res.json({ success: true, message: result.message, data: result.carrier });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * @route   DELETE /api/shipway/carriers/:carrierId
+ * @desc    Delete carrier
+ * @access  Admin/Superadmin only
+ */
+router.delete('/carriers/:carrierId', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    const { carrierId } = req.params;
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const result = shipwayCarrierService.deleteCarrier(carrierId);
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/shipway/carriers/:carrierId/move
+ * @desc    Move carrier up or down in priority
+ * @access  Admin/Superadmin only
+ */
+router.post('/carriers/:carrierId/move', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    const { carrierId } = req.params;
+    const { direction } = req.body || {};
+    if (!['up', 'down'].includes(direction)) {
+      return res.status(400).json({ success: false, message: 'direction must be "up" or "down"' });
+    }
+    const shipwayCarrierService = require('../services/shipwayCarrierService');
+    const result = shipwayCarrierService.moveCarrier(carrierId, direction);
+    res.json({ success: true, message: result.message });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
   }
 });
 

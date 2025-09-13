@@ -37,10 +37,10 @@ const handleValidationErrors = (req, res, next) => {
 const validateUserRegistration = [
   body('name')
     .trim()
-    .isLength({ min: 2, max: 50 })
-    .withMessage('Name must be between 2 and 50 characters')
-    .matches(/^[a-zA-Z\s]+$/)
-    .withMessage('Name can only contain letters and spaces'),
+    .isLength({ min: 2, max: 80 })
+    .withMessage('Name must be between 2 and 80 characters')
+    .matches(/^[a-zA-Z0-9\s\-&_\.]+$/)
+    .withMessage('Name can include letters, numbers, spaces, -, &, _ and .'),
   
   body('email')
     .trim()
@@ -152,10 +152,10 @@ const validateUserUpdate = [
   body('name')
     .optional()
     .trim()
-    .isLength({ min: 2, max: 50 })
-    .withMessage('Name must be between 2 and 50 characters')
-    .matches(/^[a-zA-Z\s]+$/)
-    .withMessage('Name can only contain letters and spaces'),
+    .isLength({ min: 2, max: 80 })
+    .withMessage('Name must be between 2 and 80 characters')
+    .matches(/^[a-zA-Z0-9\s\-&_\.]+$/)
+    .withMessage('Name can include letters, numbers, spaces, -, &, _ and .'),
   
   body('email')
     .optional()

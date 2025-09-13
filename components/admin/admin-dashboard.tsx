@@ -18,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -42,7 +43,8 @@ import {
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { apiClient } from "@/lib/api"
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
+import { useDeviceType } from "@/hooks/use-mobile"
 
 // Mock data for admin dashboard
 const mockVendors = [
@@ -153,7 +155,7 @@ const mockSettlements = [
 ]
 
 export function AdminDashboard() {
-  const { user, logout } = useAuth()
+  const { user, logout, authHeader } = useAuth()
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("orders")
   const [searchTerm, setSearchTerm] = useState("")
@@ -172,7 +174,26 @@ export function AdminDashboard() {
     name: "",
     email: "",
     phone: "",
+    warehouseId: "",
+    contactNumber: "",
+    password: "",
+    confirmPassword: "",
   })
+  // Admin vendor warehouse verification state
+  const [vendorWarehouseVerifyLoading, setVendorWarehouseVerifyLoading] = useState(false)
+  const [vendorWarehouseVerifyError, setVendorWarehouseVerifyError] = useState("")
+  const [vendorWarehouseInfo, setVendorWarehouseInfo] = useState<null | { address: string, city: string, pincode: string, state: string, country: string }>(null)
+  const [vendorWarehouseVerified, setVendorWarehouseVerified] = useState(false)
+  // Edit dialog warehouse verification state (separate from add)
+  const [editWarehouseVerifyLoading, setEditWarehouseVerifyLoading] = useState(false)
+  const [editWarehouseVerifyError, setEditWarehouseVerifyError] = useState("")
+  const [editWarehouseInfo, setEditWarehouseInfo] = useState<null | { address: string, city: string, pincode: string, state: string, country: string }>(null)
+  const [editWarehouseVerified, setEditWarehouseVerified] = useState(false)
+  // Admin vendor view/edit/delete state
+  const [vendorDialogVendor, setVendorDialogVendor] = useState<any>(null)
+  const [showVendorViewDialog, setShowVendorViewDialog] = useState(false)
+  const [showVendorEditDialog, setShowVendorEditDialog] = useState(false)
+  const [editVendorForm, setEditVendorForm] = useState({ name: "", email: "", phone: "", status: "active", warehouseId: "", contactNumber: "" })
   const [newCarrier, setNewCarrier] = useState({
     name: "",
     priority: 1,
@@ -187,6 +208,30 @@ export function AdminDashboard() {
     claimedOrders: 0,
     unclaimedOrders: 0
   })
+  // Grouped view (mobile) state
+  const buildGroupedOrders = (list: any[]) => {
+    const groups: Record<string, any> = {}
+    list.forEach(o => {
+      const key = String(o.order_id)
+      if (!groups[key]) {
+        groups[key] = {
+          order_id: o.order_id,
+          created_at: o.created_at,
+          status: o.status,
+          vendor_name: o.vendor_name,
+          total_value: 0,
+          products: [] as any[]
+        }
+      }
+      groups[key].products.push({ ...o, key: String(o.unique_id || `${o.order_id}-${o.product_code || Math.random()}`) })
+      const val = parseFloat(o.value || 0)
+      groups[key].total_value += isNaN(val) ? 0 : val
+      if (o.vendor_name) groups[key].vendor_name = o.vendor_name
+      if (o.status) groups[key].status = o.status
+      if (o.created_at) groups[key].created_at = o.created_at
+    })
+    return Object.values(groups)
+  }
 
   // Settlement management state
   const [allSettlements, setAllSettlements] = useState<any[]>([])
@@ -213,10 +258,26 @@ export function AdminDashboard() {
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [selectedOrderForAssignment, setSelectedOrderForAssignment] = useState<any>(null)
   const [selectedVendorId, setSelectedVendorId] = useState<string>("")
+  // Bulk assign state
+  const [showBulkAssignModal, setShowBulkAssignModal] = useState(false)
+  const [selectedBulkVendorId, setSelectedBulkVendorId] = useState<string>("")
+  const [bulkAssignLoading, setBulkAssignLoading] = useState(false)
+
+  // Derived selection state for bulk actions
+  const selectedOrderObjects = orders.filter((o) => selectedOrders.includes(o.unique_id))
+  const assignedSelectedOrders = selectedOrderObjects.filter((o) => (o.status || '').toString().toLowerCase() !== 'unclaimed')
+  const unclaimedSelectedOrders = selectedOrderObjects.filter((o) => (o.status || '').toString().toLowerCase() === 'unclaimed')
+  const isAllUnclaimedSelected = selectedOrderObjects.length > 0 && assignedSelectedOrders.length === 0
+  const isAllAssignedSelected = selectedOrderObjects.length > 0 && unclaimedSelectedOrders.length === 0
+  const isMixedSelected = assignedSelectedOrders.length > 0 && unclaimedSelectedOrders.length > 0
 
   // Carrier state
   const [carriers, setCarriers] = useState<any[]>([])
   const [carriersLoading, setCarriersLoading] = useState(false)
+  // Carrier edit dialog state
+  const [carrierEditState, setCarrierEditState] = useState<{ open: boolean; carrierId: string | null; carrier_id: string; status: string }>({ open: false, carrierId: null, carrier_id: "", status: "active" })
+
+  const { isMobile } = useDeviceType()
 
   const getStatusBadge = (status: string) => {
     const colors = {
@@ -302,7 +363,9 @@ export function AdminDashboard() {
       const matchesSearch =
         carrier.carrier_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         carrier.carrier_id?.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = statusFilter === "all" || carrier.status === statusFilter
+      const carrierStatus = (carrier.status || '').toString().trim().toLowerCase()
+      const filterStatus = (statusFilter || '').toString().trim().toLowerCase()
+      const matchesStatus = filterStatus === "all" || carrierStatus === filterStatus
       return matchesSearch && matchesStatus
     })
 
@@ -348,13 +411,6 @@ export function AdminDashboard() {
     setSelectedOrders([])
   }
 
-  const handleVendorAction = (vendorId: string, action: string) => {
-    toast({
-      title: "Vendor Action",
-      description: `${action} applied to vendor ${vendorId}`,
-    })
-  }
-
   const handleCarrierAction = (carrierId: string, action: string) => {
     toast({
       title: "Carrier Action",
@@ -362,8 +418,8 @@ export function AdminDashboard() {
     })
   }
 
-  const handleAddVendor = () => {
-    if (!newVendor.name || !newVendor.email || !newVendor.phone) {
+  const handleAddVendor = async () => {
+    if (!newVendor.name || !newVendor.email || !newVendor.phone || !newVendor.password || !newVendor.confirmPassword) {
       toast({
         title: "Missing Information",
         description: "Please fill in all vendor details",
@@ -372,12 +428,90 @@ export function AdminDashboard() {
       return
     }
 
-    toast({
-      title: "Vendor Added",
-      description: `${newVendor.name} has been added successfully`,
-    })
-    setNewVendor({ name: "", email: "", phone: "" })
-    setShowVendorModal(false)
+    if (!vendorWarehouseVerified) {
+      toast({
+        title: "Verify Warehouse",
+        description: "Please verify the warehouse ID before creating vendor",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const response = await apiClient.createUser({
+        name: newVendor.name,
+        email: newVendor.email,
+        phone: newVendor.phone,
+        password: newVendor.password,
+        role: 'vendor',
+        warehouseId: newVendor.warehouseId,
+        contactNumber: newVendor.contactNumber,
+        status: 'active',
+      })
+      if (response.success) {
+        toast({
+          title: "Vendor Added",
+          description: `${newVendor.name} has been added successfully`,
+        })
+        setNewVendor({ name: "", email: "", phone: "", warehouseId: "", contactNumber: "", password: "", confirmPassword: "" })
+        setVendorWarehouseVerified(false)
+        setVendorWarehouseInfo(null)
+        setShowVendorModal(false)
+        fetchVendors()
+      } else {
+        toast({ title: "Error", description: response.message, variant: 'destructive' })
+      }
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || 'Failed to add vendor', variant: 'destructive' })
+    }
+  }
+
+  const handleVerifyVendorWarehouse = async (warehouseIdOverride?: string) => {
+    const id = (warehouseIdOverride ?? newVendor.warehouseId).trim();
+    if (!id) return;
+    setVendorWarehouseVerifyLoading(true)
+    setVendorWarehouseVerifyError("")
+    setVendorWarehouseInfo(null)
+    setVendorWarehouseVerified(false)
+    try {
+      const response = await apiClient.verifyWarehouse(id)
+      if (response.success && response.data && (response.data.address || (response.data.city && response.data.pincode))) {
+        setVendorWarehouseInfo(response.data)
+        setVendorWarehouseVerified(true)
+      } else {
+        setVendorWarehouseVerifyError(response.message || 'Invalid warehouse ID')
+        setVendorWarehouseVerified(false)
+        setVendorWarehouseInfo(null)
+      }
+    } catch (error: any) {
+      setVendorWarehouseVerifyError(error?.message || 'Verification failed')
+    } finally {
+      setVendorWarehouseVerifyLoading(false)
+    }
+  }
+
+  const handleVerifyEditWarehouse = async (warehouseId: string) => {
+    const id = (warehouseId || '').trim();
+    if (!id) return;
+    setEditWarehouseVerifyLoading(true)
+    setEditWarehouseVerifyError("")
+    setEditWarehouseInfo(null)
+    setEditWarehouseVerified(false)
+    try {
+      const response = await apiClient.verifyWarehouse(id)
+      if (response.success && response.data && (response.data.address || (response.data.city && response.data.pincode))) {
+        setEditWarehouseInfo(response.data)
+        setEditWarehouseVerified(true)
+      } else {
+        setEditWarehouseVerifyError(response.message || 'Invalid warehouse ID')
+        setEditWarehouseVerified(false)
+        setEditWarehouseInfo(null)
+      }
+    } catch (error: any) {
+      setEditWarehouseVerifyError(error?.message || 'Verification failed')
+    } finally {
+      setEditWarehouseVerifyLoading(false)
+    }
   }
 
   const handleAddCarrier = () => {
@@ -873,48 +1007,33 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardContent className="p-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Stats Cards - compact, colorful, 2x2 on mobile */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6 mb-4 md:mb-8">
+          <Card className="border-0 shadow-sm bg-gradient-to-br from-blue-50 to-blue-100">
+            <CardContent className="p-4 md:p-6">
               <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Package className="w-6 h-6 text-blue-600" />
+                <div className="p-2 md:p-2.5 bg-white/70 rounded-lg">
+                  <Package className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">{ordersStats.totalOrders}</p>
+                <div className="ml-3 md:ml-4">
+                  <p className="text-xs md:text-sm font-medium text-blue-700">Total Orders</p>
+                  <p className="text-xl md:text-2xl font-bold text-blue-900">{ordersStats.totalOrders}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <Users className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Active Vendors</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {mockVendors.filter((v) => v.status === "active").length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
-          <Card>
-            <CardContent className="p-6">
+          <Card className="border-0 shadow-sm bg-gradient-to-br from-indigo-50 to-indigo-100">
+            <CardContent className="p-4 md:p-6">
               <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Package className="w-6 h-6 text-blue-600" />
+                <div className="p-2 md:p-2.5 bg-white/70 rounded-lg">
+                  <Package className="w-5 h-5 md:w-6 md:h-6 text-indigo-600" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Claimed Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                <div className="ml-3 md:ml-4">
+                  <p className="text-xs md:text-sm font-medium text-indigo-700">Claimed Orders</p>
+                  <p className="text-xl md:text-2xl font-bold text-indigo-900">
                     {ordersStats.claimedOrders}
                   </p>
                 </div>
@@ -922,43 +1041,71 @@ export function AdminDashboard() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="p-6">
+          <Card className="border-0 shadow-sm bg-gradient-to-br from-amber-50 to-amber-100">
+            <CardContent className="p-4 md:p-6">
               <div className="flex items-center">
-                <div className="p-2 bg-yellow-100 rounded-lg">
-                  <Clock className="w-6 h-6 text-yellow-600" />
+                <div className="p-2 md:p-2.5 bg-white/70 rounded-lg">
+                  <Clock className="w-5 h-5 md:w-6 md:h-6 text-amber-600" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Unclaimed Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                <div className="ml-3 md:ml-4">
+                  <p className="text-xs md:text-sm font-medium text-amber-700">Unclaimed Orders</p>
+                  <p className="text-xl md:text-2xl font-bold text-amber-900">
                     {ordersStats.unclaimedOrders}
                   </p>
                 </div>
               </div>
             </CardContent>
           </Card>
+
+
+          <Card className="border-0 shadow-sm bg-gradient-to-br from-emerald-50 to-emerald-100">
+            <CardContent className="p-4 md:p-6">
+              <div className="flex items-center">
+                <div className="p-2 md:p-2.5 bg-white/70 rounded-lg">
+                  <Users className="w-5 h-5 md:w-6 md:h-6 text-emerald-600" />
+                </div>
+                <div className="ml-3 md:ml-4">
+                  <p className="text-xs md:text-sm font-medium text-emerald-700">Active Vendors</p>
+                  <p className="text-xl md:text-2xl font-bold text-emerald-900">
+                    {vendors.filter((v) => (v.status || '').toString().trim().toLowerCase() === 'active').length}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          
         </div>
 
         {/* Main Content */}
         <Card>
           <CardHeader>
             <CardTitle>Admin Management</CardTitle>
-            <CardDescription>Manage orders, vendors, and settlements</CardDescription>
           </CardHeader>
           <CardContent>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Fixed Controls Section */}
-              <div className="sticky top-20 bg-white z-40 pb-4 border-b mb-4">
-                <TabsList className="grid w-full grid-cols-4 mb-6">
-                  <TabsTrigger value="orders">Orders ({ordersStats.totalOrders})</TabsTrigger>
-                  <TabsTrigger value="vendors">Vendors ({vendors.length})</TabsTrigger>
-                  <TabsTrigger value="carrier">Carrier ({carriers.length})</TabsTrigger>
-                  <TabsTrigger value="settlement-management">Settlement Management</TabsTrigger>
+              <div className={isMobile ? "pb-3 border-b mb-3" : "sticky top-20 bg-white z-40 pb-6 border-b mb-6"}>
+                <TabsList className="flex flex-wrap items-center gap-3 md:gap-4 p-0 bg-transparent border-0 h-auto">
+                  <TabsTrigger value="orders" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                    <span className={isMobile ? "" : "font-semibold"}>Orders</span>
+                    <span className={isMobile ? "ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{ordersStats.totalOrders}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="vendors" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                    <span className={isMobile ? "" : "font-semibold"}>Vendors</span>
+                    <span className={isMobile ? "ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{vendors.length}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="carrier" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                    <span className={isMobile ? "" : "font-semibold"}>Carrier</span>
+                    <span className={isMobile ? "ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{carriers.length}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="settlement-management" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                    <span className={isMobile ? "" : "font-semibold"}>Settlement Management</span>
+                  </TabsTrigger>
                 </TabsList>
 
                 {/* Filters - Only show for orders, vendors, and carriers tabs */}
                 {(activeTab === "orders" || activeTab === "vendors" || activeTab === "carrier") && (
-                  <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                  <div className={isMobile ? "flex flex-col sm:flex-row gap-4 mb-6" : "mt-3 flex flex-col sm:flex-row gap-4 mb-6"}>
                     <div className="flex-1">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -1003,16 +1150,26 @@ export function AdminDashboard() {
                       </SelectContent>
                     </Select>
                 {activeTab === "orders" && (
-                        <Button
-                        onClick={fetchOrders}
-                        disabled={ordersLoading}
-                          variant="outline"
-                        size="sm"
-                      >
-                        <Search className="w-4 h-4 mr-2" />
-                        {ordersLoading ? "Refreshing..." : "Refresh Orders"}
-                      </Button>
-                    )}
+                  <>
+                    <Button
+                      onClick={() => setShowBulkAssignModal(true)}
+                      disabled={selectedOrders.length === 0}
+                      variant="default"
+                      size="sm"
+                    >
+                      Bulk Assign ({selectedOrders.length})
+                    </Button>
+                    <Button
+                      onClick={fetchOrders}
+                      disabled={ordersLoading}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <Search className="w-4 h-4 mr-2" />
+                      {ordersLoading ? "Refreshing..." : "Refresh Orders"}
+                    </Button>
+                  </>
+                )}
                     {activeTab === "carrier" && (
                       <>
                         <Button
@@ -1093,20 +1250,72 @@ export function AdminDashboard() {
                                   placeholder="Enter phone number"
                                 />
                               </div>
+                              <div>
+                                <Label htmlFor="vendor-warehouse">Warehouse ID</Label>
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    id="vendor-warehouse"
+                                    value={newVendor.warehouseId}
+                                    onChange={(e) => setNewVendor({ ...newVendor, warehouseId: e.target.value })}
+                                    placeholder="Enter warehouse ID"
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleVerifyVendorWarehouse()}
+                                    disabled={vendorWarehouseVerifyLoading || !newVendor.warehouseId.trim()}
+                                  >
+                                    {vendorWarehouseVerifyLoading ? 'Verifying...' : 'Verify'}
+                                  </Button>
+                                </div>
+                                {vendorWarehouseVerified && vendorWarehouseInfo && (
+                                  <p className="text-xs text-green-700 mt-1">
+                                    Verified: {vendorWarehouseInfo.address}, {vendorWarehouseInfo.city}, {vendorWarehouseInfo.state}, {vendorWarehouseInfo.country} (Pincode: {vendorWarehouseInfo.pincode})
+                                  </p>
+                                )}
+                                {vendorWarehouseVerifyError && !vendorWarehouseVerifyLoading && (
+                                  <p className="text-xs text-red-600 mt-1">{vendorWarehouseVerifyError}</p>
+                                )}
+                              </div>
+                              <div>
+                                <Label htmlFor="vendor-contact">Contact Number</Label>
+                                <Input
+                                  id="vendor-contact"
+                                  value={newVendor.contactNumber}
+                                  onChange={(e) => setNewVendor({ ...newVendor, contactNumber: e.target.value })}
+                                  placeholder="Enter contact number (optional)"
+                                />
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                  <Label htmlFor="vendor-password">Password</Label>
+                                  <Input
+                                    id="vendor-password"
+                                    type="password"
+                                    value={newVendor.password}
+                                    onChange={(e) => setNewVendor({ ...newVendor, password: e.target.value })}
+                                    placeholder="Enter password"
+                                  />
+                                </div>
+                                <div>
+                                  <Label htmlFor="vendor-cpassword">Confirm Password</Label>
+                                  <Input
+                                    id="vendor-cpassword"
+                                    type="password"
+                                    value={newVendor.confirmPassword}
+                                    onChange={(e) => setNewVendor({ ...newVendor, confirmPassword: e.target.value })}
+                                    placeholder="Confirm password"
+                                  />
+                                </div>
+                              </div>
                               <Button onClick={handleAddVendor} className="w-full">
                                 Add Vendor
                               </Button>
                             </div>
                           </DialogContent>
                         </Dialog>
-                        <Button
-                          onClick={() => handleBulkOrderAction("Export Vendors")}
-                          disabled={selectedVendors.length === 0}
-                          variant="outline"
-                        >
-                          <Download className="w-4 h-4 mr-2" />
-                          Export Selected ({selectedVendors.length})
-                        </Button>
+                        
                       </div>
                     </CardContent>
                   </Card>
@@ -1116,10 +1325,11 @@ export function AdminDashboard() {
               </div>
 
               {/* Scrollable Content Section */}
-              <div className="max-h-[600px] overflow-y-auto">
+              <div className={isMobile ? "" : "max-h-[600px] overflow-y-auto"}>
                 <TabsContent value="orders" className="mt-0">
                   <div className="rounded-md border">
-                    <Table>
+                    {!isMobile ? (
+                      <Table>
                       <TableHeader className="sticky top-0 bg-white z-30">
                         <TableRow>
                           <TableHead className="w-12">
@@ -1195,12 +1405,20 @@ export function AdminDashboard() {
                                <TableCell>{order.product_name}</TableCell>
                                <TableCell>₹{order.value}</TableCell>
                             <TableCell>{getStatusBadge(order.status)}</TableCell>
-                               <TableCell>{order.created_at}</TableCell>
+                               <TableCell>
+                                 {order.created_at ? (
+                                   <div className="flex flex-col">
+                                     <span className="text-sm font-medium">
+                                       {new Date(order.created_at).toLocaleDateString()}
+                                     </span>
+                                     <span className="text-xs text-gray-500">
+                                       {new Date(order.created_at).toLocaleTimeString()}
+                                     </span>
+                                   </div>
+                                 ) : "N/A"}
+                               </TableCell>
                             <TableCell>
                               <div className="flex gap-1">
-                                <Button size="sm" variant="outline">
-                                  <Eye className="w-3 h-3" />
-                                </Button>
                                   {order.status === 'unclaimed' ? (
                                     <Button 
                                       size="sm" 
@@ -1230,13 +1448,72 @@ export function AdminDashboard() {
                            </TableRow>
                          )}
                       </TableBody>
-                    </Table>
+                      </Table>
+                    ) : (
+                      <div className="space-y-3 p-2">
+                        {ordersLoading ? (
+                          <Card className="p-4 text-center">Loading orders...</Card>
+                        ) : (
+                          getFilteredOrdersForTab("orders").map((order: any) => (
+                            <Card key={order.unique_id} className="p-3">
+                              <div className="flex items-start gap-3">
+                                <img
+                                  src={order.image || "/placeholder.svg"}
+                                  alt={order.product_name}
+                                  className="w-14 h-14 rounded object-cover cursor-pointer"
+                                  onClick={() => { setSelectedImageUrl(order.image || null); setSelectedImageProduct(order.product_name || null); setShowImageModal(true); }}
+                                  onError={(e) => { const t = e.target as HTMLImageElement; t.src = "/placeholder.svg"; }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between">
+                                    <p className="font-medium truncate">{order.order_id}</p>
+                                    {getStatusBadge(order.status)}
+                                  </div>
+                                  <p className="text-xs font-medium text-gray-800 whitespace-normal break-words leading-snug">
+                                    {order.product_name}
+                                  </p>
+                                  <div className="mt-2 space-y-1 text-xs text-gray-700">
+                                    <div>
+                                      <span className="text-gray-600">Vendor: </span>
+                                      <span className={String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-700' : 'text-blue-700'}>
+                                        {order.vendor_name || 'Unclaimed'}
+                                      </span>
+                                    </div>
+                                    <div><span className="text-gray-600">Value:</span> ₹{order.value}</div>
+                                    <div><span className="text-gray-600">Created:</span> {order.created_at}</div>
+                                  </div>
+                                  <div className="mt-2 flex gap-2 items-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedOrders.includes(order.unique_id)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSelectedOrders([...selectedOrders, order.unique_id])
+                                        } else {
+                                          setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
+                                        }
+                                      }}
+                                    />
+                                    {order.status === 'unclaimed' ? (
+                                      <Button size="sm" onClick={() => openAssignModal(order)}>Assign</Button>
+                                    ) : (
+                                      <Button size="sm" variant="destructive" onClick={() => handleUnassignOrder(order)}>Unassign</Button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </Card>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
 
                 <TabsContent value="vendors" className="mt-0">
                   <div className="rounded-md border">
-                    <Table>
+                    {!isMobile ? (
+                      <Table>
                       <TableHeader className="sticky top-0 bg-white z-30">
                         <TableRow>
                           <TableHead className="w-12">
@@ -1245,7 +1522,7 @@ export function AdminDashboard() {
                               onChange={(e) => {
                                 const vendors = getFilteredVendors()
                                 if (e.target.checked) {
-                                  setSelectedVendors(vendors.map((v) => v.id))
+                                  setSelectedVendors(vendors.map((v) => v.warehouse_id))
                                 } else {
                                   setSelectedVendors([])
                                 }
@@ -1255,15 +1532,15 @@ export function AdminDashboard() {
                               }
                             />
                           </TableHead>
-                          <TableHead>Vendor ID</TableHead>
-                          <TableHead>Name</TableHead>
+                          <TableHead>Vendor Name</TableHead>
                           <TableHead>Email</TableHead>
+                          <TableHead>Warehouse ID</TableHead>
+                          <TableHead>City</TableHead>
                           <TableHead>Phone</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Total Orders</TableHead>
                           <TableHead>Completed</TableHead>
                           <TableHead>Revenue</TableHead>
-                          <TableHead>Joined</TableHead>
                           <TableHead>Actions</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1273,56 +1550,270 @@ export function AdminDashboard() {
                             <TableCell>
                               <input
                                 type="checkbox"
-                                checked={selectedVendors.includes(vendor.id)}
+                                checked={selectedVendors.includes(vendor.warehouse_id)}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedVendors([...selectedVendors, vendor.id])
+                                    setSelectedVendors([...selectedVendors, vendor.warehouse_id])
                                   } else {
-                                    setSelectedVendors(selectedVendors.filter((id) => id !== vendor.id))
+                                    setSelectedVendors(selectedVendors.filter((id) => id !== vendor.warehouse_id))
                                   }
                                 }}
                               />
                             </TableCell>
-                            <TableCell className="font-medium">{vendor.id}</TableCell>
-                            <TableCell>{vendor.name}</TableCell>
+                            <TableCell className="font-medium">{vendor.name}</TableCell>
                             <TableCell>{vendor.email}</TableCell>
-                            <TableCell>{vendor.phone}</TableCell>
-                            <TableCell>{getStatusBadge(vendor.status)}</TableCell>
-                            <TableCell>{vendor.totalOrders}</TableCell>
-                            <TableCell>{vendor.completedOrders}</TableCell>
-                            <TableCell>{vendor.revenue}</TableCell>
-                            <TableCell>{vendor.joinedDate}</TableCell>
+                            <TableCell>{vendor.warehouseId || '—'}</TableCell>
+                            <TableCell>{vendor.city || '—'}</TableCell>
+                            <TableCell>{vendor.phone || '—'}</TableCell>
+                            <TableCell>{getStatusBadge(vendor.status === 'active' || vendor.status === 'inactive' ? vendor.status : (vendor.status ? vendor.status : 'unclaimed'))}</TableCell>
+                            <TableCell>{vendor.totalOrders ?? 0}</TableCell>
+                            <TableCell>{vendor.completedOrders ?? 0}</TableCell>
+                            <TableCell>{vendor.revenue ?? '0.00'}</TableCell>
                             <TableCell>
                               <div className="flex gap-1">
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleVendorAction(vendor.id, "View")}
+                                  onClick={() => { setVendorDialogVendor(vendor); setShowVendorViewDialog(true) }}
                                 >
                                   <Eye className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleVendorAction(vendor.id, "Edit")}
+                                  onClick={() => { setVendorDialogVendor(vendor); setEditVendorForm({ name: vendor.name, email: vendor.email, phone: vendor.phone, status: vendor.status, warehouseId: vendor.warehouseId || '', contactNumber: vendor.contactNumber || '' }); setShowVendorEditDialog(true) }}
                                 >
                                   <Edit className="w-3 h-3" />
                                 </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => handleVendorAction(vendor.id, "Delete")}
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </Button>
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button size="sm" variant="destructive">
+                                      <Trash2 className="w-3 h-3" />
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Delete Vendor</DialogTitle>
+                                      <DialogDescription>
+                                        Are you sure you want to delete {vendor.name}? This action cannot be undone.
+                                      </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="flex justify-end gap-2">
+                                      <Button variant="outline">Cancel</Button>
+                                      <Button
+                                        variant="destructive"
+                                        onClick={async () => {
+                                          try {
+                                            const res = await apiClient.deleteUser(vendor.id)
+                                            if (res.success) {
+                                              toast({ title: 'Vendor Deleted', description: `${vendor.name} removed.` })
+                                              fetchVendors()
+                                            } else {
+                                              toast({ title: 'Error', description: res.message, variant: 'destructive' })
+                                            }
+                                          } catch (err: any) {
+                                            toast({ title: 'Error', description: err?.message || 'Failed to delete vendor', variant: 'destructive' })
+                                          }
+                                        }}
+                                      >
+                                        Confirm Delete
+                                      </Button>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
                               </div>
                             </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
-                    </Table>
+                      </Table>
+                    ) : (
+                      <div className="space-y-3 p-2">
+                        {getFilteredVendors().map((vendor) => (
+                          <Card key={vendor.id} className="p-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">{vendor.name}</p>
+                                <p className="text-xs text-gray-600 truncate">{vendor.email}</p>
+                              </div>
+                              {getStatusBadge(vendor.status)}
+                            </div>
+                            <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-700">
+                              <span>Warehouse: {vendor.warehouseId || '—'}</span>
+                              <span>City: {vendor.city || '—'}</span>
+                              <span>Phone: {vendor.phone || '—'}</span>
+                              <span>Orders: {vendor.totalOrders ?? 0} • Completed: {vendor.completedOrders ?? 0}</span>
+                            </div>
+                            <div className="mt-2 flex gap-2">
+                              <Button size="sm" variant="outline" onClick={() => { setVendorDialogVendor(vendor); setShowVendorViewDialog(true) }}><Eye className="w-3 h-3" /></Button>
+                              <Button size="sm" variant="outline" onClick={() => { setVendorDialogVendor(vendor); setEditVendorForm({ name: vendor.name, email: vendor.email, phone: vendor.phone, status: vendor.status, warehouseId: vendor.warehouseId || '', contactNumber: vendor.contactNumber || '' }); setShowVendorEditDialog(true) }}><Edit className="w-3 h-3" /></Button>
+                              <Button size="sm" variant="destructive" onClick={async () => {
+                                try {
+                                  // Ensure auth header exists (admin only action)
+                                  if (!authHeader) throw new Error('Not authenticated. Please login again.')
+                                  const res = await apiClient.deleteUser(vendor.id)
+                                  if (res.success) {
+                                    toast({ title: 'Vendor Deleted', description: `${vendor.name} removed.` })
+                                    fetchVendors()
+                                  } else {
+                                    toast({ title: 'Error', description: res.message, variant: 'destructive' })
+                                  }
+                                } catch (err: any) {
+                                  toast({ title: 'Error', description: err?.message || 'Failed to delete vendor', variant: 'destructive' })
+                                }
+                              }}><Trash2 className="w-3 h-3" /></Button>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
+
+                {/* View Vendor Dialog */}
+                {vendorDialogVendor && (
+                  <Dialog open={showVendorViewDialog} onOpenChange={setShowVendorViewDialog}>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Vendor Details</DialogTitle>
+                        <DialogDescription>View vendor information</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-2 text-sm">
+                        <div><strong>ID:</strong> {vendorDialogVendor.id}</div>
+                        <div><strong>Name:</strong> {vendorDialogVendor.name}</div>
+                        <div><strong>Email:</strong> {vendorDialogVendor.email}</div>
+                        <div><strong>Phone:</strong> {vendorDialogVendor.phone}</div>
+                        <div><strong>Status:</strong> {vendorDialogVendor.status}</div>
+                        <div><strong>Warehouse ID:</strong> {vendorDialogVendor.warehouseId || '—'}</div>
+                        <div><strong>Joined:</strong> {vendorDialogVendor.joinedDate}</div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
+
+                {/* Edit Vendor Dialog */}
+                {vendorDialogVendor && (
+                  <Dialog open={showVendorEditDialog} onOpenChange={(open) => {
+                    // Reset edit verification state when dialog closes
+                    if (!open) {
+                      setEditWarehouseVerifyLoading(false)
+                      setEditWarehouseVerifyError("")
+                      setEditWarehouseInfo(null)
+                      setEditWarehouseVerified(false)
+                    }
+                    setShowVendorEditDialog(open)
+                  }}>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Edit Vendor</DialogTitle>
+                        <DialogDescription>Update vendor details</DialogDescription>
+                      </DialogHeader>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label>Name</Label>
+                          <Input value={editVendorForm.name} onChange={(e) => setEditVendorForm({ ...editVendorForm, name: e.target.value })} />
+                        </div>
+                        <div>
+                          <Label>Email</Label>
+                          <Input type="email" value={editVendorForm.email} onChange={(e) => setEditVendorForm({ ...editVendorForm, email: e.target.value })} />
+                        </div>
+                        <div>
+                          <Label>Phone</Label>
+                          <Input value={editVendorForm.phone} onChange={(e) => setEditVendorForm({ ...editVendorForm, phone: e.target.value })} />
+                        </div>
+                        <div>
+                          <Label>Warehouse ID</Label>
+                          <Input 
+                            value={editVendorForm.warehouseId} 
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setEditVendorForm({ ...editVendorForm, warehouseId: value });
+                              // Reset verification state when input changes
+                              setEditWarehouseVerified(false);
+                              setEditWarehouseInfo(null);
+                              setEditWarehouseVerifyError("");
+                            }} 
+                          />
+                          <div className="flex items-center gap-2 mt-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleVerifyEditWarehouse(editVendorForm.warehouseId)}
+                              disabled={editWarehouseVerifyLoading || !editVendorForm.warehouseId.trim()}
+                            >
+                              {editWarehouseVerifyLoading ? 'Verifying...' : 'Verify Warehouse'}
+                            </Button>
+                            {editWarehouseVerified && (
+                              <Badge className="bg-green-100 text-green-800">Verified</Badge>
+                            )}
+                          </div>
+                          {editWarehouseVerified && editWarehouseInfo && (
+                            <p className="text-xs text-green-700 mt-1">
+                              {editWarehouseInfo.address && editWarehouseInfo.city && editWarehouseInfo.state && editWarehouseInfo.pincode
+                                ? `${editWarehouseInfo.address}, ${editWarehouseInfo.city}, ${editWarehouseInfo.state} - ${editWarehouseInfo.pincode}`
+                                : `${editWarehouseInfo.address || ''}${editWarehouseInfo.city ? (editWarehouseInfo.address ? ', ' : '') + editWarehouseInfo.city : ''}${editWarehouseInfo.state ? (editWarehouseInfo.address || editWarehouseInfo.city ? ', ' : '') + editWarehouseInfo.state : ''}${editWarehouseInfo.pincode ? ` - ${editWarehouseInfo.pincode}` : ''}`}
+                            </p>
+                          )}
+                          {editWarehouseVerifyError && !editWarehouseVerifyLoading && (
+                            <p className="text-xs text-red-600 mt-1">{editWarehouseVerifyError}</p>
+                          )}
+                        </div>
+                        <div>
+                          <Label>Contact Number</Label>
+                          <Input value={editVendorForm.contactNumber} onChange={(e) => setEditVendorForm({ ...editVendorForm, contactNumber: e.target.value })} />
+                        </div>
+                        <div>
+                          <Label>Status</Label>
+                          <Select value={editVendorForm.status} onValueChange={(value) => setEditVendorForm({ ...editVendorForm, status: value })}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="active">Active</SelectItem>
+                              <SelectItem value="inactive">Inactive</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-4">
+                        <Button variant="outline" onClick={() => setShowVendorEditDialog(false)}>Cancel</Button>
+                        <Button onClick={async () => {
+                          try {
+                            if (!authHeader) throw new Error('Not authenticated. Please login again.')
+                            const payload: any = {}
+                            if (editVendorForm.name && editVendorForm.name.trim()) payload.name = editVendorForm.name.trim()
+                            if (editVendorForm.email && editVendorForm.email.trim()) payload.email = editVendorForm.email.trim()
+                            if (editVendorForm.phone && editVendorForm.phone.trim()) payload.phone = editVendorForm.phone.trim()
+                            if (editVendorForm.status) payload.status = editVendorForm.status
+                            if (editVendorForm.contactNumber && editVendorForm.contactNumber.trim()) payload.contactNumber = editVendorForm.contactNumber.trim()
+                            if (editVendorForm.warehouseId && editVendorForm.warehouseId.trim()) {
+                              const wid = editVendorForm.warehouseId.trim()
+                              const currentWid = String(vendorDialogVendor.warehouseId || vendorDialogVendor.warehouse_id || '')
+                              // Only send warehouseId if unchanged OR verified
+                              if (wid === currentWid || editWarehouseVerified) {
+                                payload.warehouseId = wid
+                              }
+                            }
+
+                            const res = await apiClient.updateUser(vendorDialogVendor.id, payload)
+                            if (res.success) {
+                              toast({ title: 'Vendor Updated', description: 'Changes saved.' })
+                              setShowVendorEditDialog(false)
+                              fetchVendors()
+                            } else {
+                              toast({ title: 'Error', description: res.message, variant: 'destructive' })
+                            }
+                          } catch (err: any) {
+                            // Surface backend validation errors if available
+                            const msg = err?.message || 'Failed to update vendor'
+                            toast({ title: 'Validation error', description: msg, variant: 'destructive' })
+                          }
+                        }}>Save</Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
 
                 <TabsContent value="carrier" className="mt-0">
                   <div className="rounded-md border">
@@ -1332,83 +1823,67 @@ export function AdminDashboard() {
                         <p className="text-gray-600">Loading carriers...</p>
                       </div>
                     ) : (
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
-                        <TableRow>
-                          <TableHead className="w-12">
-                            <input
-                              type="checkbox"
-                              onChange={(e) => {
-                                const carriers = getFilteredCarriers()
-                                if (e.target.checked) {
-                                  setSelectedCarriers(carriers.map((c) => c.carrier_id))
-                                } else {
-                                  setSelectedCarriers([])
-                                }
-                              }}
-                              checked={
-                                selectedCarriers.length > 0 && selectedCarriers.length === getFilteredCarriers().length
-                              }
-                            />
-                          </TableHead>
-                          <TableHead>Carrier ID</TableHead>
-                          <TableHead>Carrier Name</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Priority</TableHead>
-                          <TableHead>Weight</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredCarriers().map((carrier) => (
-                          <TableRow key={carrier.carrier_id}>
-                            <TableCell>
-                              <input
-                                type="checkbox"
-                                checked={selectedCarriers.includes(carrier.carrier_id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedCarriers([...selectedCarriers, carrier.carrier_id])
-                                  } else {
-                                    setSelectedCarriers(selectedCarriers.filter((id) => id !== carrier.carrier_id))
-                                  }
-                                }}
-                              />
-                            </TableCell>
-                            <TableCell className="font-medium">{carrier.carrier_id}</TableCell>
-                            <TableCell>{carrier.carrier_name}</TableCell>
-                            <TableCell>{getStatusBadge(carrier.status)}</TableCell>
-                            <TableCell>{getPriorityNumberBadge(carrier.priority)}</TableCell>
-                            <TableCell>{carrier.weight_in_kg ? `${carrier.weight_in_kg}kg` : 'N/A'}</TableCell>
-                            <TableCell>
-                              <div className="flex gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleCarrierAction(carrier.carrier_id, "View")}
-                                >
-                                  <Eye className="w-3 h-3" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleCarrierAction(carrier.carrier_id, "Edit")}
-                                >
-                                  <Edit className="w-3 h-3" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => handleCarrierAction(carrier.carrier_id, "Delete")}
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                      <>
+                        {/* Desktop table */}
+                        {!isMobile ? (
+                          <Table>
+                            <TableHeader className="sticky top-0 bg-white z-30">
+                              <TableRow>
+                                <TableHead>Carrier ID</TableHead>
+                                <TableHead>Carrier Name</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Priority</TableHead>
+                                <TableHead>Weight</TableHead>
+                                <TableHead>Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {getFilteredCarriers().map((carrier) => (
+                                <TableRow key={carrier.carrier_id}>
+                                  <TableCell className="font-medium">{carrier.carrier_id}</TableCell>
+                                  <TableCell>{carrier.carrier_name}</TableCell>
+                                  <TableCell>{getStatusBadge(carrier.status)}</TableCell>
+                                  <TableCell>{getPriorityNumberBadge(carrier.priority)}</TableCell>
+                                  <TableCell>{carrier.weight_in_kg ? `${carrier.weight_in_kg}kg` : 'N/A'}</TableCell>
+                                  <TableCell>
+                                    <div className="flex gap-1">
+                                      <Button size="sm" variant="outline" onClick={async () => { try { const res = await apiClient.moveCarrier(carrier.carrier_id, 'up'); if (!res.success) throw new Error(res.message); await fetchCarriers() } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to move carrier', variant: 'destructive' }) } }} title="Move Up">▲</Button>
+                                      <Button size="sm" variant="outline" onClick={async () => { try { const res = await apiClient.moveCarrier(carrier.carrier_id, 'down'); if (!res.success) throw new Error(res.message); await fetchCarriers() } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to move carrier', variant: 'destructive' }) } }} title="Move Down">▼</Button>
+                                      <Button size="sm" variant="outline" onClick={() => { setCarrierEditState({ open: true, carrierId: carrier.carrier_id, carrier_id: carrier.carrier_id, status: carrier.status || 'active' }) }}><Edit className="w-3 h-3" /></Button>
+                                      <Button size="sm" variant="destructive" onClick={async () => { try { const res = await apiClient.deleteCarrier(carrier.carrier_id); if (res.success) { toast({ title: 'Carrier Deleted', description: `Carrier ${carrier.carrier_id} removed` }); await fetchCarriers() } else { toast({ title: 'Error', description: res.message, variant: 'destructive' }) } } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to delete carrier', variant: 'destructive' }) } }}><Trash2 className="w-3 h-3" /></Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        ) : (
+                          // Mobile card layout
+                          <div className="space-y-3 p-2">
+                            {getFilteredCarriers().map((carrier) => (
+                              <Card key={carrier.carrier_id} className="p-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-medium truncate">{carrier.carrier_name}</p>
+                                    <p className="text-xs text-gray-600 truncate">ID: {carrier.carrier_id}</p>
+                                  </div>
+                                  {getStatusBadge(carrier.status)}
+                                </div>
+                                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-700">
+                                  <span>Priority: {carrier.priority || '—'}</span>
+                                  <span>Weight: {carrier.weight_in_kg ? `${carrier.weight_in_kg}kg` : 'N/A'}</span>
+                                </div>
+                                <div className="mt-2 flex gap-2">
+                                  <Button size="sm" variant="outline" onClick={async () => { try { const res = await apiClient.moveCarrier(carrier.carrier_id, 'up'); if (!res.success) throw new Error(res.message); await fetchCarriers() } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to move carrier', variant: 'destructive' }) } }} title="Move Up">▲</Button>
+                                  <Button size="sm" variant="outline" onClick={async () => { try { const res = await apiClient.moveCarrier(carrier.carrier_id, 'down'); if (!res.success) throw new Error(res.message); await fetchCarriers() } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to move carrier', variant: 'destructive' }) } }} title="Move Down">▼</Button>
+                                  <Button size="sm" variant="outline" onClick={() => { setCarrierEditState({ open: true, carrierId: carrier.carrier_id, carrier_id: carrier.carrier_id, status: carrier.status || 'active' }) }}><Edit className="w-3 h-3" /></Button>
+                                  <Button size="sm" variant="destructive" onClick={async () => { try { const res = await apiClient.deleteCarrier(carrier.carrier_id); if (res.success) { toast({ title: 'Carrier Deleted', description: `Carrier ${carrier.carrier_id} removed` }); await fetchCarriers() } else { toast({ title: 'Error', description: res.message, variant: 'destructive' }) } } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to delete carrier', variant: 'destructive' }) } }}><Trash2 className="w-3 h-3" /></Button>
+                                </div>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </TabsContent>
@@ -1483,8 +1958,9 @@ export function AdminDashboard() {
                       </CardContent>
                     </Card>
 
-                    {/* Settlements Table */}
+                    {/* Settlements: table on desktop, cards on mobile */}
                     <div className="rounded-md border">
+                      {!isMobile ? (
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -1582,6 +2058,39 @@ export function AdminDashboard() {
                           )}
                         </TableBody>
                       </Table>
+                      ) : (
+                        <div className="space-y-3 p-2">
+                          {settlementsLoading ? (
+                            <Card className="p-4 text-center">Loading settlements...</Card>
+                          ) : (
+                            allSettlements.map((s: any) => (
+                              <Card key={s.id} className="p-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-medium truncate">{s.vendorName}</p>
+                                    <p className="text-xs text-gray-600 truncate">Settlement #{s.id}</p>
+                                  </div>
+                                  <Badge className={s.status === 'approved' ? 'bg-green-100 text-green-800' : s.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}>{s.status.toUpperCase()}</Badge>
+                                </div>
+                                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-700">
+                                  <span>Amount: ₹{s.amount}</span>
+                                  <span>Date: {new Date(s.createdAt).toLocaleDateString('en-IN')}</span>
+                                  <span className="col-span-2">UPI: {s.upiId || '—'}</span>
+                                </div>
+                                <div className="mt-2 flex gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => handleViewSettlement(s)}>View</Button>
+                                  {s.status === 'pending' && (
+                                    <>
+                                      <Button size="sm" onClick={() => handleApproveSettlement(s)}>Approve</Button>
+                                      <Button size="sm" variant="destructive" onClick={() => handleRejectSettlement(s)}>Reject</Button>
+                                    </>
+                                  )}
+                                </div>
+                              </Card>
+                            ))
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Pagination */}
@@ -1942,14 +2451,8 @@ export function AdminDashboard() {
        <Dialog open={showAssignModal} onOpenChange={setShowAssignModal}>
          <DialogContent className="max-w-md">
            <DialogHeader>
-             <DialogTitle>Assign Order to Vendor</DialogTitle>
-             <DialogDescription>
-               {selectedOrderForAssignment && 
-                 `Assign order ${selectedOrderForAssignment.order_id} to a vendor`
-               }
-             </DialogDescription>
+             <DialogTitle>Assign / Unassign Order</DialogTitle>
            </DialogHeader>
-           
            {selectedOrderForAssignment && (
              <div className="space-y-4">
                <div className="p-4 bg-gray-50 rounded-lg">
@@ -1958,39 +2461,198 @@ export function AdminDashboard() {
                  <p className="text-sm text-gray-600">Customer: {selectedOrderForAssignment.customer_name}</p>
                  <p className="text-sm text-gray-600">Product: {selectedOrderForAssignment.product_name}</p>
                </div>
-
                <div>
-                 <Label htmlFor="vendor-select">Select Vendor</Label>
+                 <Label htmlFor="vendor-select">Choose one</Label>
                  <Select value={selectedVendorId} onValueChange={setSelectedVendorId}>
-                   <SelectTrigger>
-                     <SelectValue placeholder="Choose a vendor..." />
+                   <SelectTrigger id="vendor-select">
+                     <SelectValue placeholder="Select vendor or Unassign" />
                    </SelectTrigger>
                    <SelectContent>
-                     {vendors.map((vendor) => (
-                       <SelectItem key={vendor.warehouse_id} value={vendor.warehouse_id}>
-                         {vendor.name} ({vendor.warehouse_id})
-                       </SelectItem>
-                     ))}
+                     <SelectItem value="__UNASSIGN__">Unassign</SelectItem>
+                     {vendors
+                       .filter((v) => (v.warehouse_id || v.warehouseId))
+                       .map((vendor) => {
+                         const key = String(vendor.id ?? vendor.warehouse_id ?? vendor.warehouseId)
+                         const value = String(vendor.warehouse_id ?? vendor.warehouseId)
+                         const labelWid = String(vendor.warehouse_id ?? vendor.warehouseId)
+                         return (
+                           <SelectItem key={key} value={value}>
+                             {vendor.name} ({labelWid})
+                           </SelectItem>
+                         )
+                       })}
                    </SelectContent>
                  </Select>
                </div>
-
                <div className="flex justify-end gap-2">
-                 <Button
-                   variant="outline"
-                   onClick={() => setShowAssignModal(false)}
-                 >
-                   Cancel
-                 </Button>
-                 <Button
-                   onClick={handleAssignOrder}
-                   disabled={!selectedVendorId}
-                 >
-                   Assign Order
-                 </Button>
+                 <Button variant="outline" onClick={() => setShowAssignModal(false)}>Cancel</Button>
+                 <Button onClick={async () => {
+                   if (selectedVendorId === '__UNASSIGN__') {
+                     await handleUnassignOrder(selectedOrderForAssignment)
+                     setShowAssignModal(false)
+                   } else {
+                     await handleAssignOrder()
+                   }
+                 }} disabled={!selectedVendorId}>Confirm</Button>
                </div>
              </div>
            )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Assign Modal */}
+      <Dialog open={showBulkAssignModal} onOpenChange={setShowBulkAssignModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Bulk Assign / Unassign</DialogTitle>
+            <DialogDescription>
+              Assign or unassign the selected {selectedOrders.length} orders
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="p-3 rounded bg-gray-50 text-xs text-gray-700">
+              <div className="font-medium mb-1">Selection Summary</div>
+              <div>Total Selected: {selectedOrderObjects.length}</div>
+              <div>Assigned: {assignedSelectedOrders.length}</div>
+              <div>Unclaimed: {unclaimedSelectedOrders.length}</div>
+            </div>
+            <div>
+              <Label htmlFor="bulk-vendor-select">Select Vendor</Label>
+              <Select value={selectedBulkVendorId} onValueChange={setSelectedBulkVendorId}>
+                <SelectTrigger id="bulk-vendor-select">
+                  <SelectValue placeholder={isAllUnclaimedSelected ? "Choose a vendor" : "Choose a vendor (optional)"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {vendors
+                    .filter((v) => (v.warehouse_id || v.warehouseId))
+                    .map((vendor) => {
+                      const key = String(vendor.id ?? vendor.warehouse_id ?? vendor.warehouseId)
+                      const value = String(vendor.warehouse_id ?? vendor.warehouseId)
+                      const labelWid = String(vendor.warehouse_id ?? vendor.warehouseId)
+                      return (
+                        <SelectItem key={key} value={value}>
+                          {vendor.name} ({labelWid})
+                        </SelectItem>
+                      )
+                    })}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowBulkAssignModal(false)}>Cancel</Button>
+              <Button variant="destructive" disabled={selectedOrders.length === 0 || bulkAssignLoading || isAllUnclaimedSelected} onClick={async () => {
+                try {
+                  setBulkAssignLoading(true)
+                  // If mixed, unassign only assigned ones
+                  const targetIds = isMixedSelected ? assignedSelectedOrders.map(o => o.unique_id) : selectedOrders
+                  const res = await apiClient.bulkUnassignOrders(targetIds)
+                  if (res.success) {
+                    toast({ title: 'Bulk Unassigned', description: res.message })
+                    setShowBulkAssignModal(false)
+                    setSelectedBulkVendorId('')
+                    setSelectedOrders([])
+                    await fetchOrders()
+                  } else {
+                    toast({ title: 'Error', description: res.message, variant: 'destructive' })
+                  }
+                } catch (err: any) {
+                  toast({ title: 'Error', description: err?.message || 'Bulk unassignment failed', variant: 'destructive' })
+                } finally {
+                  setBulkAssignLoading(false)
+                }
+              }}>Unassign</Button>
+              <Button disabled={(isAllUnclaimedSelected && !selectedBulkVendorId) || selectedOrders.length === 0 || bulkAssignLoading} onClick={async () => {
+                if (selectedOrders.length === 0) return;
+                try {
+                  setBulkAssignLoading(true)
+                  // If no vendor chosen and mixed/all assigned, treat as unassign assigned ones
+                  if (!selectedBulkVendorId) {
+                    const targetIds = isMixedSelected ? assignedSelectedOrders.map(o => o.unique_id) : selectedOrders
+                    const resUn = await apiClient.bulkUnassignOrders(targetIds)
+                    if (resUn.success) {
+                      toast({ title: 'Bulk Unassigned', description: resUn.message })
+                      setShowBulkAssignModal(false)
+                      setSelectedBulkVendorId('')
+                      setSelectedOrders([])
+                      await fetchOrders()
+                    } else {
+                      toast({ title: 'Error', description: resUn.message, variant: 'destructive' })
+                    }
+                    return;
+                  }
+                  // Assign chosen vendor to all selected
+                  const res = await apiClient.bulkAssignOrdersToVendor(selectedOrders, selectedBulkVendorId)
+                  if (res.success) {
+                    toast({ title: 'Bulk Assigned', description: res.message })
+                    setShowBulkAssignModal(false)
+                    setSelectedBulkVendorId('')
+                    setSelectedOrders([])
+                    await fetchOrders()
+                  } else {
+                    toast({ title: 'Error', description: res.message, variant: 'destructive' })
+                  }
+                } catch (err: any) {
+                  toast({ title: 'Error', description: err?.message || 'Bulk assignment failed', variant: 'destructive' })
+                } finally {
+                  setBulkAssignLoading(false)
+                }
+              }}>Assign</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Carrier Edit Dialog */}
+      <Dialog open={carrierEditState.open} onOpenChange={(open) => setCarrierEditState(prev => ({ ...prev, open }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Carrier</DialogTitle>
+            <DialogDescription>Update carrier ID and status</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Carrier ID</Label>
+              <Input
+                value={carrierEditState.carrier_id}
+                onChange={(e) => setCarrierEditState(prev => ({ ...prev, carrier_id: e.target.value }))}
+                placeholder="Enter carrier ID"
+              />
+            </div>
+            <div>
+              <Label>Status</Label>
+              <Select value={carrierEditState.status} onValueChange={(v) => setCarrierEditState(prev => ({ ...prev, status: v }))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCarrierEditState({ open: false, carrierId: null, carrier_id: "", status: "active" })}>Cancel</Button>
+            <Button
+              onClick={async () => {
+                if (!carrierEditState.carrierId) return;
+                try {
+                  const res = await apiClient.updateCarrier(carrierEditState.carrierId, { carrier_id: carrierEditState.carrier_id, status: carrierEditState.status })
+                  if (res.success) {
+                    toast({ title: 'Carrier Updated', description: `Carrier updated successfully` })
+                    setCarrierEditState({ open: false, carrierId: null, carrier_id: "", status: "active" })
+                    await fetchCarriers()
+                  } else {
+                    toast({ title: 'Error', description: res.message, variant: 'destructive' })
+                  }
+                } catch (err: any) {
+                  toast({ title: 'Error', description: err?.message || 'Failed to update carrier', variant: 'destructive' })
+                }
+              }}
+            >
+              Save Changes
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

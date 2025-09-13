@@ -20,17 +20,18 @@ class CarrierSyncService {
     try {
       console.log('🚀 CARRIER SYNC: Starting independent carrier sync...');
       
-      const result = await shipwayCarrierService.syncCarriersToExcel();
+      const result = await shipwayCarrierService.syncCarriersToMySQL();
       
       console.log('✅ CARRIER SYNC: Completed successfully');
       console.log('  - Carriers synced:', result.carrierCount);
-      console.log('  - File path:', result.filePath);
+      console.log('  - Database:', result.database || 'MySQL');
       
       return {
         success: true,
         message: result.message,
         carrierCount: result.carrierCount,
-        filePath: result.filePath,
+        database: result.database || 'MySQL',
+        filePath: result.filePath, // Keep for backward compatibility
         timestamp: new Date().toISOString()
       };
       
