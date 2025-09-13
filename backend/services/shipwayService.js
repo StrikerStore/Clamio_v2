@@ -90,7 +90,7 @@ class ShipwayService {
         error: error.message,
         stack: error.stack,
       });
-      console.error('Error fetching warehouse from Shipway API:', error.message);
+      console.error('Error fetching for warehouseId:', warehouseId, 'from Shipway API:', error.message);
       
       // Handle specific error cases
       if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {

@@ -22,23 +22,36 @@ class ExcelDatabase {
    */
   async initializeMySQL() {
     try {
+      // Get database configuration from environment variables
+      const dbConfig = {
+        host: process.env.DB_HOST,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME
+      };
+
+      // Validate required environment variables
+      if (!dbConfig.host || !dbConfig.user || !dbConfig.password || !dbConfig.database) {
+        throw new Error('Missing required database environment variables: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
+      }
+
       // First try to connect without database to create it if needed
       let connection = await mysql.createConnection({
-        host: 'localhost',
-        user: 'root',
-        password: 'root'
+        host: dbConfig.host,
+        user: dbConfig.user,
+        password: dbConfig.password
       });
 
       // Create database if it doesn't exist
-      await connection.execute('CREATE DATABASE IF NOT EXISTS clamio_v3');
+      await connection.execute(`CREATE DATABASE IF NOT EXISTS ${dbConfig.database}`);
       await connection.end();
 
       // Now connect to the specific database
       this.mysqlConnection = await mysql.createConnection({
-        host: 'localhost',
-        user: 'root',
-        password: 'root',
-        database: 'clamio_v3'
+        host: dbConfig.host,
+        user: dbConfig.user,
+        password: dbConfig.password,
+        database: dbConfig.database
       });
       
       console.log('✅ MySQL connection established');
