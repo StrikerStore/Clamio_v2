@@ -1439,7 +1439,7 @@ export function VendorDashboard() {
                                 />
                               </TableCell>
                               <TableCell className="font-medium">
-                                {order.original_order_id || order.order_id}
+                                {order.order_id}
                               </TableCell>
                               <TableCell>
                                 {order.order_date ? (
