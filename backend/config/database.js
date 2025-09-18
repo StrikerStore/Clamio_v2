@@ -282,8 +282,51 @@ class ExcelDatabase {
       
       await this.mysqlConnection.execute(createTableQuery);
       console.log('✅ Orders table created/verified');
+
+      // Add is_in_new_order column if it doesn't exist
+      try {
+        await this.mysqlConnection.execute(`
+          ALTER TABLE orders 
+          ADD COLUMN is_in_new_order BOOLEAN DEFAULT 1
+        `);
+        console.log('✅ Added is_in_new_order column to orders table');
+      } catch (error) {
+        // Column might already exist, check if it's the expected error
+        if (error.code === 'ER_DUP_FIELDNAME') {
+          console.log('ℹ️ is_in_new_order column already exists');
+        } else {
+          console.error('❌ Error adding is_in_new_order column:', error.message);
+        }
+      }
+
+      // Create labels table for caching label URLs
+      await this.createLabelsTable();
     } catch (error) {
       console.error('❌ Error creating orders table:', error.message);
+    }
+  }
+
+  /**
+   * Create labels table for caching label URLs
+   */
+  async createLabelsTable() {
+    try {
+      const createLabelsTableQuery = `
+        CREATE TABLE IF NOT EXISTS labels (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          order_id VARCHAR(100) UNIQUE NOT NULL,
+          label_url VARCHAR(1000) NOT NULL,
+          awb VARCHAR(100),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_order_id (order_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+      
+      await this.mysqlConnection.execute(createLabelsTableQuery);
+      console.log('✅ Labels table created/verified');
+    } catch (error) {
+      console.error('❌ Error creating labels table:', error.message);
     }
   }
 
@@ -1653,8 +1696,8 @@ class ExcelDatabase {
           prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
           pincode, status, claimed_by, claimed_at, last_claimed_by, last_claimed_at,
           clone_status, cloned_order_id, is_cloned_row, label_downloaded,
-          handover_at, priority_carrier
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          handover_at, priority_carrier, is_in_new_order
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderData.id || null,
           orderData.unique_id || null,
@@ -1682,7 +1725,8 @@ class ExcelDatabase {
           orderData.is_cloned_row || false,
           orderData.label_downloaded || false,
           orderData.handover_at || null,
-          orderData.priority_carrier || null
+          orderData.priority_carrier || null,
+          orderData.is_in_new_order !== undefined ? orderData.is_in_new_order : true
         ]
       );
 
@@ -1748,7 +1792,7 @@ class ExcelDatabase {
 
     try {
       const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM orders ORDER BY order_date DESC, order_id, product_name'
+        'SELECT * FROM orders WHERE (is_in_new_order = 1 OR label_downloaded = 1) ORDER BY order_date DESC, order_id, product_name'
       );
       return rows;
     } catch (error) {
@@ -1769,7 +1813,7 @@ class ExcelDatabase {
 
     try {
       const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM orders WHERE claimed_by = ? ORDER BY claimed_at DESC',
+        'SELECT * FROM orders WHERE claimed_by = ? AND (is_in_new_order = 1 OR label_downloaded = 1) ORDER BY claimed_at DESC',
         [warehouseId]
       );
       return rows;
@@ -1795,6 +1839,7 @@ class ExcelDatabase {
         `SELECT * FROM orders 
         WHERE claimed_by = ? 
         AND (status = 'claimed' OR status = 'ready_for_handover')
+        AND (is_in_new_order = 1 OR label_downloaded = 1)
         ORDER BY order_date DESC, order_id`,
         [warehouseId]
       );
@@ -1827,7 +1872,8 @@ class ExcelDatabase {
         'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split',
         'collectable_amount', 'pincode', 'status', 'claimed_by', 'claimed_at',
         'last_claimed_by', 'last_claimed_at', 'clone_status', 'cloned_order_id',
-        'is_cloned_row', 'label_downloaded', 'handover_at', 'priority_carrier'
+        'is_cloned_row', 'label_downloaded', 'handover_at', 'priority_carrier',
+        'is_in_new_order'
       ];
 
       allowedFields.forEach(field => {
@@ -1921,8 +1967,9 @@ class ExcelDatabase {
     try {
       const [rows] = await this.mysqlConnection.execute(
         `SELECT * FROM orders 
-         WHERE order_id LIKE ? OR customer_name LIKE ? OR product_name LIKE ? 
-         OR product_code LIKE ? OR pincode LIKE ?
+         WHERE (order_id LIKE ? OR customer_name LIKE ? OR product_name LIKE ? 
+         OR product_code LIKE ? OR pincode LIKE ?)
+         AND (is_in_new_order = 1 OR label_downloaded = 1)
          ORDER BY order_date DESC, order_id`,
         [
           `%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`,
@@ -1954,6 +2001,94 @@ class ExcelDatabase {
    */
   isMySQLAvailable() {
     return this.mysqlConnection !== null;
+  }
+
+  /**
+   * Labels Table CRUD Operations
+   */
+
+  /**
+   * Get label by order_id
+   * @param {string} orderId - Order ID (can be clone order ID)
+   * @returns {Object|null} Label data or null if not found
+   */
+  async getLabelByOrderId(orderId) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT * FROM labels WHERE order_id = ?',
+        [orderId]
+      );
+      return rows.length > 0 ? rows[0] : null;
+    } catch (error) {
+      console.error('Error getting label by order ID:', error);
+      throw new Error('Failed to get label from database');
+    }
+  }
+
+  /**
+   * Create or update label
+   * @param {Object} labelData - Label data {order_id, label_url, awb}
+   * @returns {Object} Created/updated label
+   */
+  async upsertLabel(labelData) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [result] = await this.mysqlConnection.execute(
+        `INSERT INTO labels (order_id, label_url, awb) 
+         VALUES (?, ?, ?) 
+         ON DUPLICATE KEY UPDATE 
+         label_url = VALUES(label_url), 
+         awb = VALUES(awb),
+         updated_at = CURRENT_TIMESTAMP`,
+        [
+          labelData.order_id,
+          labelData.label_url,
+          labelData.awb || null
+        ]
+      );
+
+      return await this.getLabelByOrderId(labelData.order_id);
+    } catch (error) {
+      console.error('Error creating/updating label:', error);
+      throw new Error('Failed to save label to database');
+    }
+  }
+
+  /**
+   * Check if label exists for order_id
+   * @param {string} orderId - Order ID
+   * @returns {boolean} True if label exists
+   */
+  async labelExists(orderId) {
+    const label = await this.getLabelByOrderId(orderId);
+    return label !== null;
+  }
+
+  /**
+   * Get all labels
+   * @returns {Array} Array of all labels
+   */
+  async getAllLabels() {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT * FROM labels ORDER BY created_at DESC'
+      );
+      return rows;
+    } catch (error) {
+      console.error('Error getting all labels:', error);
+      throw new Error('Failed to get labels from database');
+    }
   }
 }
 
