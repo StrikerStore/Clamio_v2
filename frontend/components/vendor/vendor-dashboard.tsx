@@ -202,7 +202,7 @@ export function VendorDashboard() {
   const [showProofDialog, setShowProofDialog] = useState(false)
   const [selectedSettlementForView, setSelectedSettlementForView] = useState<any>(null)
   const [showViewRequestDialog, setShowViewRequestDialog] = useState(false)
-  const [selectedImageProduct, setSelectedImageProduct] = useState<string | null>(null)
+  const [selectedImageProduct, setSelectedImageProduct] = useState<{url: string, title: string} | null>(null)
 
   useEffect(() => {
     async function fetchAddress() {
@@ -284,6 +284,37 @@ export function VendorDashboard() {
       console.log("useEffect: User is not a vendor, skipping fetch functions");
     }
   }, [user])
+
+  // Reusable function to refresh orders data
+  const refreshOrders = async () => {
+    try {
+      console.log('🔄 Refreshing orders data...');
+      const response = await apiClient.getOrders();
+      if (response.success && response.data && Array.isArray(response.data.orders)) {
+        setOrders(response.data.orders);
+        console.log('✅ Orders refreshed successfully');
+      } else if (response.success && response.data && response.data.orders) {
+        setOrders([response.data.orders]);
+        console.log('✅ Orders refreshed successfully');
+      } else {
+        setOrders([]);
+        setOrdersError("No orders found");
+      }
+
+      // Also refresh grouped orders for My Orders tab
+      console.log('🔄 Refreshing grouped orders data...');
+      const groupedResponse = await apiClient.getGroupedOrders();
+      if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+        setGroupedOrders(groupedResponse.data.groupedOrders);
+        console.log('✅ Grouped orders refreshed successfully');
+      } else {
+        console.log('⚠️ Failed to refresh grouped orders');
+      }
+    } catch (err: any) {
+      console.error("Error refreshing orders:", err);
+      setOrdersError(err.message || "Failed to refresh orders");
+    }
+  };
 
   useEffect(() => {
     async function fetchOrders() {
@@ -401,18 +432,8 @@ export function VendorDashboard() {
                 // Refresh orders to ensure tabs are updated correctly
         console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
         try {
-          const refreshResponse = await apiClient.getOrders();
-          if (refreshResponse.success && refreshResponse.data && Array.isArray(refreshResponse.data.orders)) {
-            setOrders(refreshResponse.data.orders);
-            console.log('✅ FRONTEND: Orders refreshed successfully');
-          }
-          
-          // Also refresh grouped orders for My Orders tab
-          const groupedRefreshResponse = await apiClient.getGroupedOrders();
-          if (groupedRefreshResponse.success && groupedRefreshResponse.data && Array.isArray(groupedRefreshResponse.data.groupedOrders)) {
-            setGroupedOrders(groupedRefreshResponse.data.groupedOrders);
-            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
-          }
+          await refreshOrders();
+          console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
         } catch (refreshError) {
           console.log('⚠️ FRONTEND: Failed to refresh orders, but claim was successful');
         }
@@ -826,6 +847,9 @@ export function VendorDashboard() {
             description: `${format} label for order ${orderDisplayId} downloaded successfully`,
           });
           
+          // Refresh orders to update the UI
+          await refreshOrders();
+          
         } catch (downloadError) {
           console.error('❌ FRONTEND: Label file download failed:', downloadError);
           
@@ -909,6 +933,9 @@ export function VendorDashboard() {
         description: `Successfully downloaded labels for ${selectedOrders.length} orders`,
       })
 
+      // Refresh orders to update the UI
+      await refreshOrders();
+
       // Clear selected orders
       if (tab === "my-orders") {
         setSelectedMyOrders([])
@@ -966,18 +993,8 @@ export function VendorDashboard() {
         // Refresh orders to update the UI
         console.log('🔄 FRONTEND: Refreshing orders after bulk claim...');
         try {
-          const refreshResponse = await apiClient.getOrders();
-          if (refreshResponse.success && refreshResponse.data && Array.isArray(refreshResponse.data.orders)) {
-            setOrders(refreshResponse.data.orders);
-            console.log('✅ FRONTEND: Orders refreshed successfully');
-          }
-          
-          // Also refresh grouped orders for My Orders tab
-          const groupedRefreshResponse = await apiClient.getGroupedOrders();
-          if (groupedRefreshResponse.success && groupedRefreshResponse.data && Array.isArray(groupedRefreshResponse.data.groupedOrders)) {
-            setGroupedOrders(groupedRefreshResponse.data.groupedOrders);
-            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
-          }
+          await refreshOrders();
+          console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
         } catch (refreshError) {
           console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim was successful');
         }
@@ -1339,7 +1356,7 @@ export function VendorDashboard() {
                                       src={order.product_image || "/placeholder.svg"}
                                       alt={order.product_name}
                                       className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                      onClick={() => order.product_image && setSelectedImageProduct(order.product_image)}
+                                      onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})}
                                       onError={(e) => {
                                         e.currentTarget.src = "/placeholder.svg";
                                       }}
@@ -1464,7 +1481,7 @@ export function VendorDashboard() {
                                               src={product.image || "/placeholder.svg"}
                                               alt={product.product_name}
                                               className="w-10 h-10 rounded-md object-cover flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
-                                              onClick={() => product.image && setSelectedImageProduct(product.image)}
+                                              onClick={() => product.image && setSelectedImageProduct({url: product.image, title: product.product_name || "Product Image"})}
                                               onError={(e) => {
                                                 e.currentTarget.src = "/placeholder.svg";
                                               }}
@@ -1567,7 +1584,7 @@ export function VendorDashboard() {
                                       src={order.product_image || "/placeholder.svg"}
                                       alt={order.product_name || order.product}
                                       className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                      onClick={() => order.product_image && setSelectedImageProduct(order.product_image)}
+                                      onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
                                       onError={(e) => {
                                         e.currentTarget.src = "/placeholder.svg";
                                       }}
@@ -1931,14 +1948,14 @@ export function VendorDashboard() {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {selectedImageProduct ? `${selectedImageProduct}` : "Image Preview"}
+              {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
             </DialogTitle>
           </DialogHeader>
           <div className="flex justify-center">
             {selectedImageProduct ? (
               <img
-                src={selectedImageProduct}
-                alt="Product Image"
+                src={selectedImageProduct.url}
+                alt={selectedImageProduct.title}
                 className="max-w-full max-h-[70vh] object-contain rounded-lg"
                 onError={(e) => {
                   e.currentTarget.src = "/placeholder.svg";

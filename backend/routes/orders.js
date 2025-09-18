@@ -2177,13 +2177,19 @@ router.post('/download-pdf', async (req, res) => {
     }
     
     const pdfBuffer = await response.arrayBuffer();
+    
+    // Validate that we received a valid buffer
+    if (!pdfBuffer || pdfBuffer.byteLength === 0) {
+      throw new Error('Received empty or invalid PDF buffer');
+    }
+    
     console.log('✅ PDF fetched successfully');
-    console.log('  - Size:', pdfBuffer.length, 'bytes');
+    console.log('  - Size:', pdfBuffer.byteLength, 'bytes');
     
     // Set response headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="label.pdf"');
-    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Length', pdfBuffer.byteLength);
     
     // Send the PDF buffer
     res.send(Buffer.from(pdfBuffer));

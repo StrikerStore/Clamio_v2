@@ -135,8 +135,9 @@ class ApiClient {
     warehouseId: string
     contactNumber: string
   }>): Promise<ApiResponse> {
-    const isVendor = userData?.warehouseId !== undefined
-    const endpoint = isVendor ? `/users/vendor/${userId}` : `/users/${userId}`
+    // Always use the general users endpoint for superadmin operations
+    // The superadmin route /users/:id can update any user type
+    const endpoint = `/users/${userId}`
     return this.makeRequest(endpoint, {
       method: 'PUT',
       body: JSON.stringify(userData)
@@ -144,8 +145,9 @@ class ApiClient {
   }
 
   async deleteUser(userId: string): Promise<ApiResponse> {
-    // prefer vendor-specific delete for admin permissions
-    return this.makeRequest(`/users/vendor/${userId}`, {
+    // Use the general users endpoint for superadmin operations
+    // The superadmin route /users/:id can delete any user type
+    return this.makeRequest(`/users/${userId}`, {
       method: 'DELETE'
     })
   }
@@ -709,6 +711,10 @@ class ApiClient {
     // Use backend proxy to avoid CORS issues (same as before migration)
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
+    console.log('🔍 FRONTEND TOKEN DEBUG:');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    console.log('  - vendorToken value:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    
     const config: RequestInit = {
       method: 'POST',
       headers: {
@@ -717,6 +723,10 @@ class ApiClient {
       },
       body: JSON.stringify({ pdfUrl: shippingUrl })
     }
+
+    console.log('🔍 REQUEST CONFIG DEBUG:');
+    console.log('  - Headers:', config.headers);
+    console.log('  - Body:', config.body);
 
     try {
       console.log('🔄 Fetching label file via backend proxy...');
@@ -728,7 +738,14 @@ class ApiClient {
       console.log('  - Content-Type:', response.headers.get('content-type'));
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        // Try to get the error message from the response
+        try {
+          const errorData = await response.json();
+          console.log('🔍 Error response data:', errorData);
+          throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+        } catch (jsonError) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
       }
 
       const blob = await response.blob()

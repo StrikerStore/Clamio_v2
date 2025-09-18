@@ -17,7 +17,7 @@ class AuthController {
       const { email, password } = req.body;
 
       // Find user by email
-      const user = await await database.getUserByEmail(email);
+      const user = await database.getUserByEmail(email);
       if (!user) {
         return res.status(401).json({
           success: false,
@@ -43,7 +43,7 @@ class AuthController {
       }
 
       // Update last login
-      await await database.updateUser(user.id, { lastLogin: new Date() });
+      await database.updateUser(user.id, { lastLogin: new Date() });
 
       // Generate Basic Auth header for client
       const basicAuthHeader = encodeBasicAuth(email, password);
@@ -120,7 +120,7 @@ class AuthController {
       }
 
       // Update last login
-      await await database.updateUser(user.id, { lastLogin: new Date() });
+      await database.updateUser(user.id, { lastLogin: new Date() });
 
       // Generate Basic Auth header for client
       const basicAuthHeader = encodeBasicAuth(user.email, password);
@@ -184,7 +184,7 @@ class AuthController {
       const userId = req.user.id;
 
       // Get user with password
-      const user = await await database.getUserById(userId);
+      const user = await database.getUserById(userId);
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -476,7 +476,7 @@ class AuthController {
       }
 
       // Verify credentials
-      const user = await await database.getUserByEmail(email);
+      const user = await database.getUserByEmail(email);
       if (!user) {
         return res.status(401).json({
           success: false,
@@ -501,7 +501,7 @@ class AuthController {
       }
 
       // Update last login
-      await await database.updateUser(user.id, { lastLogin: new Date() });
+      await database.updateUser(user.id, { lastLogin: new Date() });
 
       // Generate Basic Auth header
       const basicAuthHeader = encodeBasicAuth(email, password);
