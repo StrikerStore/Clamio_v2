@@ -470,8 +470,7 @@ router.get('/grouped', async (req, res) => {
       
       if (!groupedOrders[orderId]) {
         groupedOrders[orderId] = {
-          order_id: orderId,
-          original_order_id: orderId.includes('_') ? orderId.split('_')[0] : orderId, // Extract original order ID
+          order_id: orderId, // Always use the actual order_id (clone ID if cloned)
           status: order.status,
           order_date: order.order_date || order.created_at,
           customer_name: order.customer_name || order.customer,
@@ -1150,12 +1149,6 @@ router.post('/download-label', async (req, res) => {
     // Get orders from MySQL
     const orders = await database.getAllOrders();
 
-    // Check if this is already a clone order
-    const isCloneOrder = order_id.includes('_');
-    console.log('🔍 Order ID Analysis:');
-    console.log('  - Order ID requested:', order_id);
-    console.log('  - Is clone order:', isCloneOrder);
-    
     // Get all products for this order_id
     const orderProducts = orders.filter(order => order.order_id === order_id);
     const claimedProducts = orderProducts.filter(order => 
@@ -1163,6 +1156,7 @@ router.post('/download-label', async (req, res) => {
     );
 
     console.log('📊 Order Analysis:');
+    console.log('  - Order ID requested:', order_id);
     console.log('  - Vendor warehouse ID:', vendor.warehouseId);
     console.log('  - Total products in order:', orderProducts.length);
     console.log('  - Products claimed by vendor:', claimedProducts.length);
@@ -1173,31 +1167,68 @@ router.post('/download-label', async (req, res) => {
       console.log(`  ${index + 1}. Product: ${product.product_name}`);
       console.log(`     - Status: ${product.status}`);
       console.log(`     - Claimed by: ${product.claimed_by}`);
-      console.log(`     - Vendor warehouse ID: ${vendor.warehouseId}`);
       console.log(`     - Match: ${product.claimed_by === vendor.warehouseId && product.status === 'claimed' ? 'YES' : 'NO'}`);
     });
 
-    // Check condition
-    if (isCloneOrder) {
-      // Condition 3: Already a clone order - direct download
-      console.log('✅ CONDITION 3: Already a clone order - direct download');
+    // Check if label already downloaded for this order_id
+    console.log('🔍 Checking if label already downloaded...');
+    const orderWithLabel = orderProducts.find(product => 
+      product.claimed_by === vendor.warehouseId && 
+      product.status === 'claimed' && 
+      product.label_downloaded === 1
+    );
+    
+    if (orderWithLabel && claimedProducts.length > 0) {
+      console.log('✅ LABEL ALREADY DOWNLOADED: Found label_downloaded = 1 in orders table');
+      console.log(`  - Order ID: ${order_id}`);
+      console.log(`  - Checking labels table for cached URL...`);
       
-      if (claimedProducts.length === 0) {
-        console.log('❌ No products claimed by this vendor for clone order:', order_id);
-        return res.status(400).json({ 
-          success: false, 
-          message: 'No products claimed by this vendor for this clone order' 
+      const cachedLabel = await database.getLabelByOrderId(order_id);
+      
+      if (cachedLabel) {
+        console.log('✅ CACHED LABEL FOUND: Returning cached label URL');
+        console.log(`  - Cached Label URL: ${cachedLabel.label_url}`);
+        console.log(`  - Cached AWB: ${cachedLabel.awb}`);
+        
+        return res.json({
+          success: true,
+          message: 'Label retrieved from cache',
+          data: {
+            shipping_url: cachedLabel.label_url,
+            awb: cachedLabel.awb,
+            original_order_id: order_id,
+            clone_order_id: order_id,
+            cached: true
+          }
         });
+      } else {
+        console.log('⚠️ label_downloaded = 1 but no cached URL found, regenerating...');
       }
-      
-      const labelResponse = await generateLabelForOrder(order_id, claimedProducts, vendor);
-      return res.json(labelResponse);
-      
-    } else if (orderProducts.length === claimedProducts.length) {
+    }
+    
+    console.log('🔍 No downloaded label found, proceeding with label generation...');
+
+    // Updated logic: Only 2 conditions (removed underscore check)
+    if (orderProducts.length === claimedProducts.length) {
       // Condition 1: Direct download - all products claimed by vendor
       console.log('✅ CONDITION 1: Direct download - all products claimed by vendor');
       
       const labelResponse = await generateLabelForOrder(order_id, claimedProducts, vendor);
+      
+      // Store label in cache after successful generation
+      if (labelResponse.success && labelResponse.data.shipping_url) {
+        try {
+          await database.upsertLabel({
+            order_id: order_id,
+            label_url: labelResponse.data.shipping_url,
+            awb: labelResponse.data.awb
+          });
+          console.log(`✅ Stored label URL in cache for direct download order ${order_id}`);
+        } catch (cacheError) {
+          console.log(`⚠️ Failed to cache label URL: ${cacheError.message}`);
+        }
+      }
+      
       return res.json(labelResponse);
       
     } else if (claimedProducts.length > 0) {
@@ -1301,149 +1332,460 @@ async function generateLabelForOrder(orderId, products, vendor) {
  * Handle order cloning (Condition 2: Clone required)
  */
 async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProducts, vendor) {
+  const MAX_ATTEMPTS = 5;
+  let cloneOrderId;
+  
+  console.log('🚀 Starting updated clone process...');
+  console.log(`📊 Input Analysis:`);
+  console.log(`  - Original Order ID: ${originalOrderId}`);
+  console.log(`  - Total products in order: ${allOrderProducts.length}`);
+  console.log(`  - Products claimed by vendor: ${claimedProducts.length}`);
+  console.log(`  - Vendor warehouse ID: ${vendor.warehouseId}`);
+  
   try {
-    console.log('🔄 Starting order cloning process');
+    // ============================================================================
+    // STEP 0: DATA PREPARATION & CONSISTENCY
+    // ============================================================================
+    console.log('\n📋 STEP 0: Capturing and freezing input data...');
     
-    // Get orders from MySQL to check for existing clones
-    const database = require('../config/database');
-    const orders = await database.getAllOrders();
+    const inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor);
+    cloneOrderId = inputData.cloneOrderId;
     
-    // Generate new clone order ID with proper sequencing (like Excel system)
-    let cloneOrderId = `${originalOrderId}_1`;
-    let counter = 1;
+    console.log(`✅ Input data captured and frozen:`);
+    console.log(`  - Clone Order ID: ${cloneOrderId}`);
+    console.log(`  - Claimed products: ${inputData.claimedProducts.length}`);
+    console.log(`  - Remaining products: ${inputData.remainingProducts.length}`);
+    console.log(`  - Data timestamp: ${inputData.timestamp}`);
     
-    // Check if this clone already exists in MySQL AND in Shipway
-    while (orders.some(order => order.order_id === cloneOrderId)) {
-      counter++;
-      cloneOrderId = `${originalOrderId}_${counter}`;
+    // ============================================================================
+    // STEP 1: CREATE CLONE ORDER (NO LABEL)
+    // ============================================================================
+    console.log('\n🔧 STEP 1: Creating clone order (without label)...');
+    
+    await retryOperation(
+      (data) => createCloneOrderOnly(data),
+      MAX_ATTEMPTS,
+      'Create clone order',
+      inputData
+    );
+    
+    console.log('✅ STEP 1 COMPLETED: Clone order created successfully');
+    
+    // ============================================================================
+    // STEP 2: VERIFY CLONE CREATION
+    // ============================================================================
+    console.log('\n🔍 STEP 2: Verifying clone creation...');
+    
+    await retryOperation(
+      (data) => verifyCloneExists(data),
+      MAX_ATTEMPTS,
+      'Verify clone creation',
+      inputData
+    );
+    
+    console.log('✅ STEP 2 COMPLETED: Clone creation verified');
+    
+    // ============================================================================
+    // STEP 3: UPDATE ORIGINAL ORDER
+    // ============================================================================
+    console.log('\n📝 STEP 3: Updating original order (removing claimed products)...');
+    
+    await retryOperation(
+      (data) => updateOriginalOrder(data),
+      MAX_ATTEMPTS,
+      'Update original order',
+      inputData
+    );
+    
+    console.log('✅ STEP 3 COMPLETED: Original order updated');
+    
+    // ============================================================================
+    // STEP 4: VERIFY ORIGINAL ORDER UPDATE
+    // ============================================================================
+    console.log('\n🔍 STEP 4: Verifying original order update...');
+    
+    await retryOperation(
+      (data) => verifyOriginalOrderUpdate(data),
+      MAX_ATTEMPTS,
+      'Verify original order update',
+      inputData
+    );
+    
+    console.log('✅ STEP 4 COMPLETED: Original order update verified');
+    
+    // ============================================================================
+    // STEP 5: UPDATE LOCAL DATABASE (AFTER CLONE CREATION)
+    // ============================================================================
+    console.log('\n💾 STEP 5: Updating local database after clone creation...');
+    
+    await retryOperation(
+      (data) => updateLocalDatabaseAfterClone(data),
+      MAX_ATTEMPTS,
+      'Update local database after clone',
+      inputData
+    );
+    
+    console.log('✅ STEP 5 COMPLETED: Local database updated');
+    
+    // ============================================================================
+    // STEP 6: GENERATE LABEL FOR CLONE
+    // ============================================================================
+    console.log('\n🏷️ STEP 6: Generating label for clone order...');
+    
+    const labelResponse = await retryOperation(
+      (data) => generateLabelForClone(data),
+      MAX_ATTEMPTS,
+      'Generate clone order label',
+      inputData
+    );
+    
+    console.log('✅ STEP 6 COMPLETED: Label generated successfully');
+    
+    // ============================================================================
+    // STEP 7: MARK LABEL AS DOWNLOADED AND STORE IN LABELS TABLE
+    // ============================================================================
+    console.log('\n✅ STEP 7: Marking label as downloaded and caching URL...');
+    
+    await retryOperation(
+      (data) => markLabelAsDownloaded(data, labelResponse),
+      MAX_ATTEMPTS,
+      'Mark label as downloaded and cache URL',
+      inputData
+    );
+    
+    console.log('✅ STEP 7 COMPLETED: Label marked as downloaded and cached');
+    
+    // ============================================================================
+    // STEP 8: RETURN SUCCESS
+    // ============================================================================
+    console.log('\n🎉 STEP 8: Clone process completed successfully!');
+    console.log(`  - Original Order ID: ${inputData.originalOrderId}`);
+    console.log(`  - Clone Order ID: ${cloneOrderId}`);
+    console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
+    console.log(`  - AWB: ${labelResponse.data.awb}`);
+    
+    return {
+      success: true,
+      message: 'Order cloned and label generated successfully',
+      data: {
+        shipping_url: labelResponse.data.shipping_url,
+        awb: labelResponse.data.awb,
+        original_order_id: inputData.originalOrderId,
+        clone_order_id: cloneOrderId
+      }
+    };
+    
+  } catch (error) {
+    console.error(`❌ Clone process failed after ${MAX_ATTEMPTS} attempts for each step:`, error);
+    throw new Error(`Order cloning failed: ${error.message}`);
+  }
+}
+
+/**
+ * Helper Functions for Updated Clone Logic
+ */
+
+// Generic retry function with exponential backoff
+async function retryOperation(operation, maxAttempts, stepName, inputData) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`🔄 ${stepName} - Attempt ${attempt}/${maxAttempts}`);
+      console.log(`🔒 Using consistent input data (captured at: ${inputData.timestamp})`);
+      
+      // Pass the same inputData to every attempt
+      const result = await operation(inputData);
+      console.log(`✅ ${stepName} - Success on attempt ${attempt}`);
+      return result;
+      
+    } catch (error) {
+      lastError = error;
+      console.log(`❌ ${stepName} - Failed on attempt ${attempt}: ${error.message}`);
+      
+      if (attempt === maxAttempts) {
+        console.log(`💥 ${stepName} - All ${maxAttempts} attempts failed with same data`);
+        break;
+      }
+      
+      // Wait before retry (exponential backoff)
+      const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // 1s, 2s, 4s, 8s, 10s max
+      console.log(`⏳ ${stepName} - Waiting ${waitTime}ms before retry with SAME data...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
+  }
+  
+  throw lastError;
+}
+
+// Step 0: Prepare and freeze input data
+async function prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor) {
+  console.log('📋 Capturing input data for clone process...');
+  
+  // Generate unique clone ID
+  const cloneOrderId = await generateUniqueCloneId(originalOrderId);
+  
+  // Load original order data once
+  const rawOrdersPath = path.join(__dirname, '../data/raw_shipway_orders.json');
+  const rawOrdersData = JSON.parse(fs.readFileSync(rawOrdersPath, 'utf8'));
+  const originalOrder = rawOrdersData.message.find(order => order.order_id === originalOrderId);
+  
+  if (!originalOrder) {
+    throw new Error('Original order not found in raw_shipway_orders.json');
+  }
+  
+  const inputData = {
+    originalOrderId,
+    claimedProducts: [...claimedProducts], // Deep copy to prevent mutations
+    allOrderProducts: [...allOrderProducts], // Deep copy
+    vendor: { ...vendor }, // Copy vendor data
+    remainingProducts: allOrderProducts.filter(order => 
+      !(order.claimed_by === vendor.warehouseId && order.status === 'claimed')
+    ),
+    originalOrder: { ...originalOrder }, // Copy original order data
+    cloneOrderId,
+    timestamp: new Date().toISOString() // Fixed timestamp for consistency
+  };
+  
+  console.log('✅ Input data captured and frozen');
+  return inputData;
+}
+
+// Generate unique clone order ID
+async function generateUniqueCloneId(originalOrderId) {
+    const database = require('../config/database');
+  
+  // Get ALL orders from database (no filters) for clone ID checking
+  let allOrders;
+  try {
+    const [rows] = await database.mysqlConnection.execute(
+      'SELECT order_id FROM orders'
+    );
+    allOrders = rows;
+  } catch (dbError) {
+    console.log('⚠️ Direct query failed, falling back to getAllOrders method');
+    // Fallback: use getAllOrders but understand it might be filtered
+    const orders = await database.getAllOrders();
+    allOrders = orders;
+  }
+  
+  let cloneOrderId = `${originalOrderId}_1`;
+  let counter = 1;
+  
+  // Check if this clone already exists in MySQL (check ALL orders)
+  while (allOrders.some(order => order.order_id === cloneOrderId)) {
+    counter++;
+    cloneOrderId = `${originalOrderId}_${counter}`;
+  }
     
     // Additional check: Verify with Shipway API to ensure no conflicts
-    // This mimics the Excel system behavior of checking both local and remote data
     try {
       const shipwayService = require('../services/shipwayService');
       const shipwayOrders = await shipwayService.fetchOrdersFromShipway();
       
-      // Check if clone ID exists in Shipway orders
       while (shipwayOrders.some(order => order.order_id === cloneOrderId)) {
         counter++;
         cloneOrderId = `${originalOrderId}_${counter}`;
-        console.log(`  - Clone ID ${cloneOrderId} exists in Shipway, incrementing to ${originalOrderId}_${counter + 1}`);
+      console.log(`  - Clone ID exists in Shipway, incrementing to ${cloneOrderId}`);
       }
     } catch (shipwayError) {
       console.log('  - Warning: Could not verify clone ID with Shipway:', shipwayError.message);
       console.log('  - Proceeding with MySQL-only check');
     }
     
-    console.log('  - Final Clone order ID:', cloneOrderId);
-    
-    // Load raw shipway orders for contact info
-    const rawOrdersPath = path.join(__dirname, '../data/raw_shipway_orders.json');
-    const rawOrdersData = JSON.parse(fs.readFileSync(rawOrdersPath, 'utf8'));
-    const originalOrder = rawOrdersData.message.find(order => order.order_id === originalOrderId);
-    
-    if (!originalOrder) {
-      throw new Error('Original order not found in raw_shipway_orders.json');
-    }
-    
-    // Step 1: Create clone order with label generation FIRST
-    console.log('🔄 Step 1: Creating clone order with label generation');
-    const cloneRequestBody = prepareShipwayRequestBody(cloneOrderId, claimedProducts, originalOrder, vendor, true); // true for label generation
-    const cloneResponse = await callShipwayPushOrderAPI(cloneRequestBody, true); // true for label generation
-    
-    // Verify clone was created successfully
-    if (!cloneResponse.success) {
-      throw new Error(`Failed to create clone order: ${cloneResponse.message || 'Unknown error'}`);
+  console.log(`  - Generated unique Clone Order ID: ${cloneOrderId}`);
+  return cloneOrderId;
+}
+
+// Step 1: Create clone order (NO label generation)
+async function createCloneOrderOnly(inputData) {
+  const { cloneOrderId, claimedProducts, originalOrder, vendor } = inputData;
+  
+  console.log(`🔒 Creating clone with consistent data:`);
+  console.log(`  - Clone ID: ${cloneOrderId}`);
+  console.log(`  - Products count: ${claimedProducts.length}`);
+  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  
+  const requestBody = prepareShipwayRequestBody(
+    cloneOrderId, 
+    claimedProducts, 
+    originalOrder, 
+    vendor, 
+    false // NO label generation
+  );
+  
+  const response = await callShipwayPushOrderAPI(requestBody, false);
+  
+  if (!response.success) {
+    throw new Error(`Failed to create clone order: ${response.message || 'Unknown error'}`);
     }
     
     console.log('✅ Clone order created successfully in Shipway');
-    console.log('  - Clone Order ID:', cloneOrderId);
-    console.log('  - Shipway Response:', cloneResponse.message);
-    
-    // Step 2: Update original order (remove claimed products) ONLY AFTER clone is confirmed
-    console.log('🔄 Step 2: Updating original order (removing claimed products) - AFTER clone confirmation');
-    const remainingProducts = allOrderProducts.filter(order => 
-      !(order.claimed_by === vendor.warehouseId && order.status === 'claimed')
-    );
+  return response;
+}
+
+// Step 2: Verify clone exists
+async function verifyCloneExists(inputData) {
+  const { cloneOrderId } = inputData;
+  
+  console.log(`🔒 Verifying clone exists with consistent data:`);
+  console.log(`  - Clone ID: ${cloneOrderId}`);
+  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  
+  // Call Shipway API to verify clone order exists
+  const shipwayService = require('../services/shipwayService');
+  const shipwayOrders = await shipwayService.fetchOrdersFromShipway();
+  
+  const cloneExists = shipwayOrders.some(order => order.order_id === cloneOrderId);
+  
+  if (!cloneExists) {
+    throw new Error(`Clone order ${cloneOrderId} not found in Shipway`);
+  }
+  
+  console.log('✅ Clone order verified in Shipway');
+  return { success: true, verified: true };
+}
+
+// Step 3: Update original order
+async function updateOriginalOrder(inputData) {
+  const { originalOrderId, remainingProducts, originalOrder, vendor } = inputData;
+  
+  console.log(`🔒 Updating original with consistent data:`);
+  console.log(`  - Original ID: ${originalOrderId}`);
+  console.log(`  - Remaining products: ${remainingProducts.length}`);
+  console.log(`  - Timestamp: ${inputData.timestamp}`);
     
     if (remainingProducts.length > 0) {
-      console.log('  - Updating original order with remaining products:', remainingProducts.length);
-      const originalRequestBody = prepareShipwayRequestBody(originalOrderId, remainingProducts, originalOrder, vendor, false); // false for no label generation
-      const originalResponse = await callShipwayPushOrderAPI(originalRequestBody, false); // false for no label generation
-      
-      if (!originalResponse.success) {
-        console.log('⚠️ Warning: Failed to update original order, but clone was created successfully');
-        console.log('  - Original order update error:', originalResponse.message);
-      } else {
-        console.log('✅ Original order updated successfully in Shipway');
-      }
-    } else {
-      console.log('⚠️ No remaining products in original order - all products claimed');
-      console.log('  - Original order will be empty after clone creation');
+    const requestBody = prepareShipwayRequestBody(
+      originalOrderId,
+      remainingProducts,
+      originalOrder,
+      vendor,
+      false // NO label generation
+    );
+    
+    const response = await callShipwayPushOrderAPI(requestBody, false);
+    
+    if (!response.success) {
+      throw new Error(`Failed to update original order: ${response.message || 'Unknown error'}`);
     }
     
-    // Step 3: Sync data with Shipway
-    console.log('🔄 Step 3: Syncing data with Shipway');
-    await syncOrdersFromShipway();
-    
-    // Step 4: Update local database AFTER successful Shipway operations
-    console.log('🔄 Step 4: Updating local database with clone order ID');
-    
-    // Update claimed products to have the new clone order ID
+    console.log('✅ Original order updated successfully in Shipway');
+    return response;
+    } else {
+    console.log('ℹ️ No remaining products - original order will be empty');
+    return { success: true, message: 'No remaining products to update' };
+  }
+}
+
+// Step 4: Verify original order update
+async function verifyOriginalOrderUpdate(inputData) {
+  const { originalOrderId, remainingProducts } = inputData;
+  
+  console.log(`🔒 Verifying original order update with consistent data:`);
+  console.log(`  - Original ID: ${originalOrderId}`);
+  console.log(`  - Expected remaining products: ${remainingProducts.length}`);
+  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  
+  // Call Shipway API to verify original order was updated correctly
+  const shipwayService = require('../services/shipwayService');
+  const shipwayOrders = await shipwayService.fetchOrdersFromShipway();
+  
+  const originalOrder = shipwayOrders.find(order => order.order_id === originalOrderId);
+  
+  if (!originalOrder && remainingProducts.length > 0) {
+    throw new Error(`Original order ${originalOrderId} not found in Shipway after update`);
+  }
+  
+  console.log('✅ Original order update verified in Shipway');
+  return { success: true, verified: true };
+}
+
+// Step 5: Update local database after clone creation
+async function updateLocalDatabaseAfterClone(inputData) {
+  const { claimedProducts, cloneOrderId, originalOrderId } = inputData;
+  const database = require('../config/database');
+  
+  console.log(`🔒 Updating local database with consistent data:`);
+  console.log(`  - Claimed products: ${claimedProducts.length}`);
+  console.log(`  - Clone Order ID: ${cloneOrderId}`);
+  console.log(`  - Original Order ID: ${originalOrderId}`);
+  console.log(`  - Setting label_downloaded = 0 (not downloaded yet)`);
+  
     for (const product of claimedProducts) {
       await database.updateOrder(product.unique_id, {
-        order_id: cloneOrderId,
-        clone_status: 'cloned',
-        cloned_order_id: cloneOrderId
-      });
-    }
+      order_id: cloneOrderId,           // ✅ Set to clone order ID
+      clone_status: 'cloned',           // ✅ Mark as cloned
+      cloned_order_id: originalOrderId, // ✅ Store original order ID (not clone ID)
+      label_downloaded: 0               // ✅ Initially 0 (not downloaded)
+    });
     
-    console.log('✅ Updated MySQL orders with clone order ID');
-    
-    console.log('🔍 Clone Response Structure:');
-    console.log('  - Full clone response:', JSON.stringify(cloneResponse, null, 2));
-    console.log('  - Clone response keys:', Object.keys(cloneResponse));
-    
-    // Handle different possible response structures for clone
-    let shipping_url, awb;
-    
-    if (cloneResponse.awb_response) {
-      shipping_url = cloneResponse.awb_response.shipping_url;
-      awb = cloneResponse.awb_response.AWB;
-    } else if (cloneResponse.shipping_url) {
-      shipping_url = cloneResponse.shipping_url;
-      awb = cloneResponse.AWB || cloneResponse.awb;
-    } else if (cloneResponse.data && cloneResponse.data.awb_response) {
-      shipping_url = cloneResponse.data.awb_response.shipping_url;
-      awb = cloneResponse.data.awb_response.AWB;
-    } else if (cloneResponse.data && cloneResponse.data.shipping_url) {
-      shipping_url = cloneResponse.data.shipping_url;
-      awb = cloneResponse.data.AWB || cloneResponse.data.awb;
-    } else {
-      console.log('❌ Could not find shipping_url in clone response structure');
-      console.log('  - Available keys:', Object.keys(cloneResponse));
-      throw new Error('Invalid response structure from Shipway API - missing shipping_url in clone response');
-    }
-    
-    console.log('✅ Order cloning completed successfully');
-    console.log('  - Clone Shipping URL:', shipping_url);
-    console.log('  - Clone AWB:', awb);
-    
-    return {
-      success: true,
-      message: 'Order cloned and label generated successfully',
-      data: {
-        shipping_url: shipping_url,
-        awb: awb,
-        original_order_id: originalOrderId,
-        clone_order_id: cloneOrderId
-      }
-    };
-    
-  } catch (error) {
-    console.error('❌ Order cloning failed:', error);
-    throw error;
+    console.log(`  ✅ Updated product ${product.unique_id} after clone creation:`);
+    console.log(`     - order_id: ${cloneOrderId}`);
+    console.log(`     - clone_status: cloned`);
+    console.log(`     - cloned_order_id: ${originalOrderId}`);
+    console.log(`     - label_downloaded: 0`);
   }
+  
+  console.log('✅ Local database updated after clone creation');
+  return { success: true, updatedProducts: claimedProducts.length };
+}
+
+// Step 6: Generate label for clone
+async function generateLabelForClone(inputData) {
+  const { cloneOrderId, claimedProducts, vendor } = inputData;
+  
+  console.log(`🔒 Generating label with consistent data:`);
+  console.log(`  - Clone ID: ${cloneOrderId}`);
+  console.log(`  - Products for label: ${claimedProducts.length}`);
+  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  
+  // Generate label for the clone order
+  const labelResponse = await generateLabelForOrder(cloneOrderId, claimedProducts, vendor);
+  
+  if (!labelResponse.success) {
+    throw new Error(`Failed to generate label for clone: ${labelResponse.message || 'Unknown error'}`);
+  }
+  
+  console.log('✅ Label generated successfully for clone order');
+  return labelResponse;
+}
+
+// Step 7: Mark label as downloaded and store in labels table
+async function markLabelAsDownloaded(inputData, labelResponse) {
+  const { claimedProducts, cloneOrderId } = inputData;
+  const database = require('../config/database');
+  
+  console.log(`🔒 Marking label as downloaded and storing in labels table:`);
+  console.log(`  - Clone Order ID: ${cloneOrderId}`);
+  console.log(`  - Products count: ${claimedProducts.length}`);
+  console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
+  console.log(`  - AWB: ${labelResponse.data.awb}`);
+  
+  // Update orders table: mark label as downloaded
+  for (const product of claimedProducts) {
+    await database.updateOrder(product.unique_id, {
+      label_downloaded: 1  // ✅ Mark as downloaded only after successful label generation
+    });
+    
+    console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
+  }
+  
+  // Store label URL in labels table (one entry per order_id, no duplicates)
+  if (labelResponse.data.shipping_url) {
+    await database.upsertLabel({
+      order_id: cloneOrderId,
+      label_url: labelResponse.data.shipping_url,
+      awb: labelResponse.data.awb
+    });
+    
+    console.log(`  ✅ Stored label URL in labels table for order ${cloneOrderId}`);
+  } else {
+    console.log(`  ⚠️ No shipping URL found in label response, skipping labels table storage`);
+  }
+  
+  console.log('✅ All product labels marked as downloaded and cached');
+  return { success: true, markedProducts: claimedProducts.length };
 }
 
 /**
@@ -1835,13 +2177,19 @@ router.post('/download-pdf', async (req, res) => {
     }
     
     const pdfBuffer = await response.arrayBuffer();
+    
+    // Validate that we received a valid buffer
+    if (!pdfBuffer || pdfBuffer.byteLength === 0) {
+      throw new Error('Received empty or invalid PDF buffer');
+    }
+    
     console.log('✅ PDF fetched successfully');
-    console.log('  - Size:', pdfBuffer.length, 'bytes');
+    console.log('  - Size:', pdfBuffer.byteLength, 'bytes');
     
     // Set response headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="label.pdf"');
-    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Length', pdfBuffer.byteLength);
     
     // Send the PDF buffer
     res.send(Buffer.from(pdfBuffer));

@@ -354,23 +354,31 @@ class OrderEnhancementService {
       // Create a map of order_id to customer name
       const customerMap = new Map();
       shipwayOrders.forEach(order => {
-        if (order.order_id && order.s_name) {
-          customerMap.set(order.order_id, order.s_name);
+        if (order.order_id) {
+          const firstName = order.s_firstname || '';
+          const lastName = order.s_lastname || '';
+          const customerName = `${firstName} ${lastName}`.trim();
+          
+          if (customerName) {
+            customerMap.set(order.order_id.toString(), customerName);
+          }
         }
       });
 
+      console.log(`🗺️  OrderEnhancementService: Created customer map with ${customerMap.size} entries for MySQL update`);
+
       // Update orders in MySQL
       for (const order of orders) {
-        if (!order.customer_name && customerMap.has(order.order_id)) {
+        if (!order.customer_name && customerMap.has(order.order_id.toString())) {
           await database.updateOrder(order.unique_id, {
-            customer_name: customerMap.get(order.order_id)
+            customer_name: customerMap.get(order.order_id.toString())
           });
           customerNamesAdded++;
         }
       }
       
     } catch (error) {
-      console.error('Error adding customer names to MySQL:', error);
+      console.error('❌ OrderEnhancementService: Error adding customer names to MySQL:', error);
     }
     
     return customerNamesAdded;
