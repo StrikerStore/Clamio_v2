@@ -52,8 +52,8 @@ class AuthController {
       let vendorToken = null;
       if (user.warehouseId) {
         try {
-          // Ensure tokens and sessions are initialized
-          await userSessionService.ensureTokensAndSessions();
+          // Ensure tokens and sessions are initialized for this specific user
+          await userSessionService.ensureUserTokenAndSession(user.id);
           // Login vendor and get token
           vendorToken = await userSessionService.loginVendor(user.warehouseId);
         } catch (error) {
@@ -209,11 +209,11 @@ class AuthController {
         password: hashedNewPassword
       });
 
-      // Invalidate any existing vendor session token for this user to avoid stale sessions
+      // Invalidate vendor session if user is a vendor
       try {
         if (user.warehouseId) {
-          userSessionService.ensureTokensAndSessions();
-          userSessionService.logoutVendor(user.warehouseId);
+          await userSessionService.ensureUserTokenAndSession(user.id);
+          await userSessionService.logoutVendor(user.warehouseId);
         }
       } catch (e) {
         console.warn('Warning: failed to invalidate vendor session on password change:', e.message);
@@ -305,11 +305,11 @@ class AuthController {
         password: hashedNewPassword
       });
 
-      // Invalidate any existing vendor session token for this user to avoid stale sessions
+      // Invalidate vendor session if user is a vendor
       try {
         if (user.warehouseId) {
-          userSessionService.ensureTokensAndSessions();
-          userSessionService.logoutVendor(user.warehouseId);
+          await userSessionService.ensureUserTokenAndSession(user.id);
+          await userSessionService.logoutVendor(user.warehouseId);
         }
       } catch (e) {
         console.warn('Warning: failed to invalidate vendor session on password change:', e.message);
@@ -374,8 +374,8 @@ class AuthController {
       // Invalidate vendor session if target user is a vendor
       try {
         if (targetUser.warehouseId) {
-          userSessionService.ensureTokensAndSessions();
-          userSessionService.logoutVendor(targetUser.warehouseId);
+          await userSessionService.ensureUserTokenAndSession(targetUser.id);
+          await userSessionService.logoutVendor(targetUser.warehouseId);
         }
       } catch (e) {
         console.warn('Warning: failed to invalidate vendor session on admin password change:', e.message);
@@ -510,8 +510,8 @@ class AuthController {
       let vendorToken = null;
       if (user.warehouseId) {
         try {
-          // Ensure tokens and sessions are initialized
-          await userSessionService.ensureTokensAndSessions();
+          // Ensure tokens and sessions are initialized for this specific user
+          await userSessionService.ensureUserTokenAndSession(user.id);
           // Login vendor and get token
           vendorToken = await userSessionService.loginVendor(user.warehouseId);
         } catch (error) {

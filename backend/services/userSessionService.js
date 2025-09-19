@@ -54,6 +54,44 @@ class UserSessionService {
     }
   }
 
+  async ensureUserTokenAndSession(userId) {
+    try {
+      // Wait for MySQL initialization
+      await database.waitForMySQLInitialization();
+      
+      if (!database.isMySQLAvailable()) {
+        console.error('MySQL connection not available for user session service');
+        return;
+      }
+
+      // Get specific user instead of all users
+      const user = await database.getUserById(userId);
+      if (!user) {
+        console.error('User not found for token/session initialization:', userId);
+        return;
+      }
+
+      const updates = {};
+
+      // Ensure token exists
+      if (!user.token) {
+        updates.token = generateUUID();
+      }
+
+      // Ensure active_session is set to FALSE initially
+      if (user.active_session !== 'TRUE' && user.active_session !== 'FALSE') {
+        updates.active_session = 'FALSE';
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await database.updateUser(user.id, updates);
+      }
+    } catch (error) {
+      console.error('Error ensuring user token and session:', error);
+      throw error;
+    }
+  }
+
   async loginVendor(warehouseId) {
     try {
       // Wait for MySQL initialization

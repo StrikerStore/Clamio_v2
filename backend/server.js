@@ -237,7 +237,7 @@ process.on('uncaughtException', (error) => {
 /**
  * Start Server
  */
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
@@ -245,6 +245,15 @@ app.listen(PORT, () => {
   
   // Log database initialization
   console.log('📁 Database initialized successfully');
+  
+  // Initialize user sessions (run once on startup)
+  const userSessionService = require('./services/userSessionService');
+  try {
+    await userSessionService.ensureTokensAndSessions();
+    console.log('✅ User sessions initialized');
+  } catch (error) {
+    console.error('❌ User session initialization failed:', error.message);
+  }
   
   // Log default superadmin credentials
   console.log('👤 Default superadmin: superadmin@example.com / password123');
