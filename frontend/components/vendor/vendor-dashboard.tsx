@@ -606,11 +606,20 @@ export function VendorDashboard() {
         baseOrders = orders;
     }
     
-    // Apply product name search filter
+    // Apply search filter across order id, product name, SKU, and customer name
     if (tabFilter.searchTerm.trim()) {
+      const term = tabFilter.searchTerm.toLowerCase();
       baseOrders = baseOrders.filter(order => {
-        const productName = order.product_name || order.product || '';
-        return productName.toLowerCase().includes(tabFilter.searchTerm.toLowerCase());
+        const orderId = String(order.order_id || order.id || '').toLowerCase();
+        const productName = String(order.product_name || order.product || '').toLowerCase();
+        const sku = String(order.product_code || order.sku || '').toLowerCase();
+        const customer = String(order.customer_name || order.customer || '').toLowerCase();
+        return (
+          orderId.includes(term) ||
+          productName.includes(term) ||
+          sku.includes(term) ||
+          customer.includes(term)
+        );
       });
     }
     
@@ -668,13 +677,18 @@ export function VendorDashboard() {
     let baseOrders = groupedOrders;
     const tabFilter = tabFilters[tab as keyof typeof tabFilters];
     
-    // Apply search filter (search across all products in each order)
+    // Apply search filter (search across order id, customer, and all products in each order)
     if (tabFilter.searchTerm.trim()) {
+      const term = tabFilter.searchTerm.toLowerCase();
       baseOrders = baseOrders.filter(order => {
-        return order.products.some((product: any) => {
-          const productName = product.product_name || '';
-          return productName.toLowerCase().includes(tabFilter.searchTerm.toLowerCase());
+        const orderId = String(order.order_id || order.id || '').toLowerCase();
+        const customer = String(order.customer_name || order.customer || '').toLowerCase();
+        const productMatch = Array.isArray(order.products) && order.products.some((product: any) => {
+          const name = String(product.product_name || '').toLowerCase();
+          const sku = String(product.product_code || product.sku || '').toLowerCase();
+          return name.includes(term) || sku.includes(term);
         });
+        return orderId.includes(term) || customer.includes(term) || productMatch;
       });
     }
     
@@ -1237,7 +1251,7 @@ export function VendorDashboard() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                       <Input
-                        placeholder="Search product names..."
+                        placeholder="Search by order id, product, SKU, customer..."
                         value={getCurrentTabFilters().searchTerm}
                         onChange={(e) => updateCurrentTabFilter('searchTerm', e.target.value)}
                         className="pl-10"
