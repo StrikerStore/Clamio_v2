@@ -441,23 +441,42 @@ export function VendorDashboard() {
       } else {
         console.log('❌ FRONTEND: Claim failed');
         console.log('  - Error message:', response.message);
-        toast({
-          title: 'Claim Failed',
-          description: response.message || 'Could not claim order',
-          variant: 'destructive',
-        });
+        const msg = (response.message || '').toLowerCase();
+        if (msg.includes('not unclaimed') || msg.includes('already claimed')) {
+          toast({
+            title: 'No Longer Available',
+            description: 'This order is no longer available for claim.',
+          });
+          // Refresh to reflect latest availability
+          try { await refreshOrders(); } catch {}
+        } else {
+          toast({
+            title: 'Claim Failed',
+            description: response.message || 'Could not claim order',
+            variant: 'destructive',
+          });
+        }
       }
-    } catch (err: any) {
+  } catch (err: any) {
       console.log('💥 FRONTEND: Exception occurred');
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
       console.log('  - Error stack:', err.stack);
       
-      toast({
-        title: 'Claim Failed',
-        description: err.message || 'Network error occurred',
-        variant: 'destructive',
-      });
+      const message = String(err?.message || '').toLowerCase();
+      if (message.includes('not unclaimed') || message.includes('already claimed')) {
+        toast({
+          title: 'No Longer Available',
+          description: 'This order is no longer available for claim.',
+        });
+        try { await refreshOrders(); } catch {}
+      } else {
+        toast({
+          title: 'Claim Failed',
+          description: err.message || 'Network error occurred',
+          variant: 'destructive',
+        });
+      }
     }
   }
 
@@ -606,11 +625,20 @@ export function VendorDashboard() {
         baseOrders = orders;
     }
     
-    // Apply product name search filter
+    // Apply search filter across order id, product name, SKU, and customer name
     if (tabFilter.searchTerm.trim()) {
+      const term = tabFilter.searchTerm.toLowerCase();
       baseOrders = baseOrders.filter(order => {
-        const productName = order.product_name || order.product || '';
-        return productName.toLowerCase().includes(tabFilter.searchTerm.toLowerCase());
+        const orderId = String(order.order_id || order.id || '').toLowerCase();
+        const productName = String(order.product_name || order.product || '').toLowerCase();
+        const sku = String(order.product_code || order.sku || '').toLowerCase();
+        const customer = String(order.customer_name || order.customer || '').toLowerCase();
+        return (
+          orderId.includes(term) ||
+          productName.includes(term) ||
+          sku.includes(term) ||
+          customer.includes(term)
+        );
       });
     }
     
@@ -668,13 +696,18 @@ export function VendorDashboard() {
     let baseOrders = groupedOrders;
     const tabFilter = tabFilters[tab as keyof typeof tabFilters];
     
-    // Apply search filter (search across all products in each order)
+    // Apply search filter (search across order id, customer, and all products in each order)
     if (tabFilter.searchTerm.trim()) {
+      const term = tabFilter.searchTerm.toLowerCase();
       baseOrders = baseOrders.filter(order => {
-        return order.products.some((product: any) => {
-          const productName = product.product_name || '';
-          return productName.toLowerCase().includes(tabFilter.searchTerm.toLowerCase());
+        const orderId = String(order.order_id || order.id || '').toLowerCase();
+        const customer = String(order.customer_name || order.customer || '').toLowerCase();
+        const productMatch = Array.isArray(order.products) && order.products.some((product: any) => {
+          const name = String(product.product_name || '').toLowerCase();
+          const sku = String(product.product_code || product.sku || '').toLowerCase();
+          return name.includes(term) || sku.includes(term);
         });
+        return orderId.includes(term) || customer.includes(term) || productMatch;
       });
     }
     
@@ -977,47 +1010,77 @@ export function VendorDashboard() {
       if (response.success && response.data) {
         const { successful_claims, failed_claims, total_successful, total_failed } = response.data;
         
-        console.log('✅ FRONTEND: Bulk claim successful');
+        console.log('✅ FRONTEND: Bulk claim processed');
         console.log('  - Successful:', total_successful);
         console.log('  - Failed:', total_failed);
         
-        // Show success message
+        // Summary toast
         toast({
           title: "Bulk Claim Complete",
-          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `. ${total_failed} orders failed to claim.` : ''}`,
+          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `, ${total_failed} could not be claimed` : ''}.`,
         });
         
-        // Clear selected orders
-        setSelectedUnclaimedOrders([]);
+        // Friendly notice for items no longer available
+        if (Array.isArray(failed_claims) && failed_claims.length > 0) {
+          const alreadyClaimed = failed_claims.filter((f: any) => {
+            const reason = String(f?.reason || '').toLowerCase();
+            return reason.includes('not unclaimed') || reason.includes('already claimed');
+          });
+          if (alreadyClaimed.length > 0) {
+            toast({
+              title: 'Some Orders No Longer Available',
+              description: `${alreadyClaimed.length} order(s) are no longer available for claim.`,
+            });
+          }
+        }
         
-        // Refresh orders to update the UI
+        // Clear selection and refresh
+        setSelectedUnclaimedOrders([]);
         console.log('🔄 FRONTEND: Refreshing orders after bulk claim...');
         try {
           await refreshOrders();
           console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
         } catch (refreshError) {
-          console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim was successful');
+          console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim request completed');
         }
         
       } else {
         console.log('❌ FRONTEND: Bulk claim failed');
         console.log('  - Error message:', response.message);
-        toast({
-          title: 'Bulk Claim Failed',
-          description: response.message || 'Could not claim selected orders',
-          variant: 'destructive',
-        });
+        const msg = (response.message || '').toLowerCase();
+        if (msg.includes('not unclaimed') || msg.includes('already claimed')) {
+          toast({
+            title: 'No Longer Available',
+            description: 'Some selected orders are no longer available for claim.',
+          });
+          try { await refreshOrders(); } catch {}
+        } else {
+          toast({
+            title: 'Bulk Claim Failed',
+            description: response.message || 'Could not claim selected orders',
+            variant: 'destructive',
+          });
+        }
       }
     } catch (err: any) {
       console.log('💥 FRONTEND: Exception occurred during bulk claim');
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
       
-      toast({
-        title: 'Bulk Claim Failed',
-        description: err.message || 'Network error occurred',
-        variant: 'destructive',
-      });
+      const message = String(err?.message || '').toLowerCase();
+      if (message.includes('not unclaimed') || message.includes('already claimed')) {
+        toast({
+          title: 'No Longer Available',
+          description: 'Some selected orders are no longer available for claim.',
+        });
+        try { await refreshOrders(); } catch {}
+      } else {
+        toast({
+          title: 'Bulk Claim Failed',
+          description: err.message || 'Network error occurred',
+          variant: 'destructive',
+        });
+      }
     }
   }
 
@@ -1237,7 +1300,7 @@ export function VendorDashboard() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                       <Input
-                        placeholder="Search product names..."
+                        placeholder="Search by order id, product, SKU, customer..."
                         value={getCurrentTabFilters().searchTerm}
                         onChange={(e) => updateCurrentTabFilter('searchTerm', e.target.value)}
                         className="pl-10"

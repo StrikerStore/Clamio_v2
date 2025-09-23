@@ -61,6 +61,7 @@ class ExcelDatabase {
       await this.createSettlementsTable();
       await this.createTransactionsTable();
       await this.createOrdersTable();
+      await this.createClaimsTable();
       this.mysqlInitialized = true;
     } catch (error) {
       console.error('❌ MySQL connection failed:', error.message);
@@ -112,12 +113,29 @@ class ExcelDatabase {
           name VARCHAR(500) NOT NULL,
           image VARCHAR(500),
           altText TEXT,
-          totalImages INTEGER DEFAULT 0
+          totalImages INTEGER DEFAULT 0,
+          sku_id VARCHAR(100)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createTableQuery);
       console.log('✅ Products table created/verified');
+
+      // Add sku_id column if it doesn't exist (for existing tables)
+      try {
+        await this.mysqlConnection.execute(`
+          ALTER TABLE products 
+          ADD COLUMN sku_id VARCHAR(100)
+        `);
+        console.log('✅ Added sku_id column to products table');
+      } catch (error) {
+        // Column might already exist, check if it's the expected error
+        if (error.code === 'ER_DUP_FIELDNAME') {
+          console.log('ℹ️ sku_id column already exists in products table');
+        } else {
+          console.error('❌ Error adding sku_id column to products table:', error.message);
+        }
+      }
     } catch (error) {
       console.error('❌ Error creating products table:', error.message);
     }
@@ -317,16 +335,63 @@ class ExcelDatabase {
           order_id VARCHAR(100) UNIQUE NOT NULL,
           label_url VARCHAR(1000) NOT NULL,
           awb VARCHAR(100),
+          carrier_id VARCHAR(100),
+          carrier_name VARCHAR(255),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_order_id (order_id)
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createLabelsTableQuery);
       console.log('✅ Labels table created/verified');
+
+      // Add carrier fields if they don't exist (for existing tables)
+      try {
+        await this.mysqlConnection.execute(`
+          ALTER TABLE labels 
+          ADD COLUMN carrier_id VARCHAR(100),
+          ADD COLUMN carrier_name VARCHAR(255)
+        `);
+        console.log('✅ Added carrier fields to labels table');
+      } catch (error) {
+        // Columns might already exist, check if it's the expected error
+        if (error.code === 'ER_DUP_FIELDNAME') {
+          console.log('ℹ️ Carrier fields already exist in labels table');
+        } else {
+          console.error('❌ Error adding carrier fields to labels table:', error.message);
+        }
+      }
     } catch (error) {
       console.error('❌ Error creating labels table:', error.message);
+    }
+  }
+
+  /**
+   * Create claims table for tracking claim history
+   */
+  async createClaimsTable() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      const createClaimsTableQuery = `
+        CREATE TABLE IF NOT EXISTS claims (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          order_id VARCHAR(100) NOT NULL,
+          unique_id INT NOT NULL,
+          claimed_by VARCHAR(50) NOT NULL,
+          claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          claimed_status VARCHAR(50) DEFAULT 'active',
+          product_code VARCHAR(100),
+          clone_status VARCHAR(50) DEFAULT 'not_cloned',
+          cloned_order_id VARCHAR(100),
+          is_cloned_row BOOLEAN DEFAULT FALSE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+      
+      await this.mysqlConnection.execute(createClaimsTableQuery);
+      console.log('✅ Claims table created/verified');
+    } catch (error) {
+      console.error('❌ Error creating claims table:', error.message);
     }
   }
 
