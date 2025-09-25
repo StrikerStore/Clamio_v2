@@ -383,7 +383,6 @@ class ShipwayService {
             label_downloaded: row.label_downloaded || '',
             handover_at: row.handover_at || '',
             customer_name: row.customer_name || '',
-            product_image: row.product_image || '',
             priority_carrier: row.priority_carrier || '',
             pincode: row.pincode || ''
           });
@@ -503,7 +502,6 @@ class ShipwayService {
          handover_at: existingClaim ? existingClaim.handover_at : '',
          // Preserve custom columns or use empty defaults for new orders
          customer_name: existingClaim ? existingClaim.customer_name : '',
-         product_image: existingClaim ? existingClaim.product_image : '',
          // Add priority_carrier column (empty for new orders, preserve existing)
          priority_carrier: existingClaim ? existingClaim.priority_carrier : ''
         };
@@ -546,7 +544,7 @@ class ShipwayService {
         type: 'excel-write-with-new-columns', 
         rows: flatOrders.length, 
         preservedClaims: existingClaimData.size,
-        newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image', 'priority_carrier', 'pincode']
+        newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode']
       });
 
       // Automatically enhance orders with customer names and product images
@@ -880,7 +878,6 @@ class ShipwayService {
           handover_at: existingClaim ? existingClaim.handover_at : '',
           // Preserve custom columns or use empty defaults for new orders
           customer_name: existingClaim ? existingClaim.customer_name : '',
-          product_image: existingClaim ? existingClaim.product_image : '',
           // Add priority_carrier column (empty for new orders, preserve existing)
           priority_carrier: existingClaim ? existingClaim.priority_carrier : ''
         };
@@ -960,7 +957,7 @@ class ShipwayService {
           type: 'mysql-write-with-new-columns', 
           rows: flatOrders.length, 
           preservedClaims: existingClaimData.size,
-          newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image', 'priority_carrier', 'pincode', 'is_in_new_order']
+          newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode', 'is_in_new_order']
         });
 
         // Automatically enhance orders with customer names and product images

@@ -203,6 +203,10 @@ export function VendorDashboard() {
   const [selectedSettlementForView, setSelectedSettlementForView] = useState<any>(null)
   const [showViewRequestDialog, setShowViewRequestDialog] = useState(false)
   const [selectedImageProduct, setSelectedImageProduct] = useState<{url: string, title: string} | null>(null)
+  
+  // Loading states for label downloads
+  const [labelDownloadLoading, setLabelDownloadLoading] = useState<{[key: string]: boolean}>({})
+  const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false)
 
   useEffect(() => {
     async function fetchAddress() {
@@ -812,6 +816,9 @@ export function VendorDashboard() {
   }
 
   const handleDownloadLabel = async (orderId: string, format: string) => {
+    // Set loading state for this specific order
+    setLabelDownloadLoading(prev => ({ ...prev, [orderId]: true }));
+    
     try {
       console.log('🔵 FRONTEND: Starting download label process');
       console.log('  - order_id:', orderId);
@@ -893,6 +900,9 @@ export function VendorDashboard() {
         description: 'An error occurred while generating the label',
         variant: 'destructive',
       });
+    } finally {
+      // Clear loading state for this specific order
+      setLabelDownloadLoading(prev => ({ ...prev, [orderId]: false }));
     }
   }
 
@@ -912,6 +922,9 @@ export function VendorDashboard() {
       })
       return
     }
+
+    // Set bulk download loading state
+    setBulkDownloadLoading(true);
 
     try {
       toast({
@@ -964,6 +977,9 @@ export function VendorDashboard() {
         description: error instanceof Error ? error.message : 'An error occurred while downloading labels',
         variant: 'destructive',
       })
+    } finally {
+      // Clear bulk download loading state
+      setBulkDownloadLoading(false);
     }
   }
 
@@ -1300,11 +1316,20 @@ export function VendorDashboard() {
                       </Select>
                       <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
-                        disabled={selectedMyOrders.length === 0}
+                        disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
                         className="h-10 whitespace-nowrap px-6 text-sm min-w-fit"
                       >
-                        <Download className="w-4 h-4 mr-2" />
-                        Download ({selectedMyOrders.length})
+                        {bulkDownloadLoading ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 mr-2" />
+                            Download ({selectedMyOrders.length})
+                          </>
+                        )}
                       </Button>
                     </div>
                   )}
@@ -1540,10 +1565,20 @@ export function VendorDashboard() {
                                     size="sm"
                                     variant="outline"
                                     onClick={() => handleDownloadLabel(order.order_id, "single")}
+                                    disabled={labelDownloadLoading[order.order_id] || bulkDownloadLoading}
                                     className="text-xs px-2 py-1 h-8"
                                   >
-                                    <Download className="w-3 h-3 mr-1" />
-                                    Label
+                                    {labelDownloadLoading[order.order_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-1"></div>
+                                        Loading...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Download className="w-3 h-3 mr-1" />
+                                        Label
+                                      </>
+                                    )}
                                   </Button>
                                   <Button 
                                     size="sm" 

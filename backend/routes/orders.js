@@ -194,16 +194,8 @@ router.post('/claim', async (req, res) => {
       last_claimed_at: now
     };
     
-    // Automatically assign priority carrier for claimed order (using updated order object)
-    try {
-      console.log('🚚 ASSIGNING PRIORITY CARRIER...');
-      const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(updatedOrder);
-      updatedOrder.priority_carrier = carrierResult.data.carrier_id;
-      console.log(`✅ Carrier assigned: ${carrierResult.data.carrier_id} (${carrierResult.data.carrier_name})`);
-    } catch (carrierError) {
-      console.log(`⚠️ Carrier assignment failed: ${carrierError.message}`);
-      updatedOrder.priority_carrier = ''; // Leave empty if assignment fails
-    }
+    // Carrier assignment moved to label download process
+    console.log('ℹ️ Carrier assignment will happen during label download');
     
     // Now save everything to MySQL in one go
     console.log('💾 SAVING TO MYSQL');
@@ -212,8 +204,7 @@ router.post('/claim', async (req, res) => {
       claimed_by: updatedOrder.claimed_by,
       claimed_at: updatedOrder.claimed_at,
       last_claimed_by: updatedOrder.last_claimed_by,
-      last_claimed_at: updatedOrder.last_claimed_at,
-      priority_carrier: updatedOrder.priority_carrier
+      last_claimed_at: updatedOrder.last_claimed_at
     });
     
     if (!finalUpdatedOrder) {
@@ -319,16 +310,8 @@ router.post('/bulk-claim', async (req, res) => {
         last_claimed_at: now
       };
       
-      // Automatically assign priority carrier for claimed order (using updated order object)
-      try {
-        console.log(`🚚 ASSIGNING PRIORITY CARRIER for order ${order.order_id}...`);
-        const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(updatedOrder);
-        updatedOrder.priority_carrier = carrierResult.data.carrier_id;
-        console.log(`✅ Carrier assigned: ${carrierResult.data.carrier_id} (${carrierResult.data.carrier_name})`);
-      } catch (carrierError) {
-        console.log(`⚠️ Carrier assignment failed for order ${order.order_id}: ${carrierError.message}`);
-        updatedOrder.priority_carrier = ''; // Leave empty if assignment fails
-      }
+      // Carrier assignment moved to label download process
+      console.log(`ℹ️ Carrier assignment for order ${order.order_id} will happen during label download`);
       
       // Now save everything to MySQL in one go
       const finalUpdatedOrder = await database.updateOrder(unique_id, {
@@ -336,8 +319,7 @@ router.post('/bulk-claim', async (req, res) => {
         claimed_by: updatedOrder.claimed_by,
         claimed_at: updatedOrder.claimed_at,
         last_claimed_by: updatedOrder.last_claimed_by,
-        last_claimed_at: updatedOrder.last_claimed_at,
-        priority_carrier: updatedOrder.priority_carrier
+        last_claimed_at: updatedOrder.last_claimed_at
       });
       
       if (finalUpdatedOrder) {
@@ -1208,6 +1190,13 @@ router.post('/download-label', async (req, res) => {
     
     console.log('🔍 No downloaded label found, proceeding with label generation...');
 
+    // Debug: Log product counts and details
+    console.log(`📊 Product Analysis for ${order_id}:`);
+    console.log(`  - Total products in order: ${orderProducts.length}`);
+    console.log(`  - Products claimed by vendor: ${claimedProducts.length}`);
+    console.log(`  - All products:`, orderProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
+    console.log(`  - Claimed products:`, claimedProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
+
     // Updated logic: Only 2 conditions (removed underscore check)
     if (orderProducts.length === claimedProducts.length) {
       // Condition 1: Direct download - all products claimed by vendor
@@ -1218,14 +1207,32 @@ router.post('/download-label', async (req, res) => {
       // Store label in cache after successful generation
       if (labelResponse.success && labelResponse.data.shipping_url) {
         try {
-          await database.upsertLabel({
+          const labelDataToStore = {
             order_id: order_id,
             label_url: labelResponse.data.shipping_url,
-            awb: labelResponse.data.awb
-          });
-          console.log(`✅ Stored label URL in cache for direct download order ${order_id}`);
+            awb: labelResponse.data.awb,
+            carrier_id: labelResponse.data.carrier_id,
+            carrier_name: labelResponse.data.carrier_name,
+            priority_carrier: labelResponse.data.carrier_id
+          };
+          
+          console.log(`📦 Storing label data for direct download:`, labelDataToStore);
+          
+          await database.upsertLabel(labelDataToStore);
+          console.log(`✅ Stored label and carrier info for direct download order ${order_id}`);
+          console.log(`  - Carrier: ${labelResponse.data.carrier_id} (${labelResponse.data.carrier_name})`);
+          
+          // ✅ Mark label as downloaded in claims table for all claimed products
+          for (const product of claimedProducts) {
+            await database.updateOrder(product.unique_id, {
+              label_downloaded: 1  // Mark as downloaded after successful label generation
+            });
+            console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
+          }
+          
         } catch (cacheError) {
           console.log(`⚠️ Failed to cache label URL: ${cacheError.message}`);
+          console.log(`  - Error details:`, cacheError);
         }
       }
       
@@ -1277,6 +1284,48 @@ async function generateLabelForOrder(orderId, products, vendor) {
       throw new Error(`Original order not found in raw_shipway_orders.json for order ID: ${originalOrderId}`);
     }
 
+    // STEP 1: Assign carrier for the current order_id (original or clone)
+    console.log(`🚚 ASSIGNING PRIORITY CARRIER for order ${orderId}...`);
+    let assignedCarrier = null;
+    try {
+      // Get the first product to determine payment type and status
+      const firstProduct = products[0];
+      
+      // Create a complete order object for carrier assignment
+      const tempOrder = {
+        order_id: orderId,
+        pincode: originalOrder.s_zipcode,
+        payment_type: firstProduct.payment_type,
+        status: 'claimed',  // Required for carrier assignment
+        claimed_by: vendor.warehouseId  // Required for carrier assignment
+      };
+      
+      console.log(`  - Order details for carrier assignment:`, {
+        order_id: tempOrder.order_id,
+        pincode: tempOrder.pincode,
+        payment_type: tempOrder.payment_type,
+        status: tempOrder.status,
+        claimed_by: tempOrder.claimed_by
+      });
+      
+      console.log(`  - Products for carrier assignment:`, products.map(p => ({
+        unique_id: p.unique_id,
+        product_code: p.product_code,
+        payment_type: p.payment_type
+      })));
+      
+      const carrierServiceabilityService = require('../services/carrierServiceabilityService');
+      const carrierResult = await carrierServiceabilityService.assignPriorityCarrierToOrderInMemory(tempOrder);
+      assignedCarrier = {
+        carrier_id: carrierResult.data.carrier_id,
+        carrier_name: carrierResult.data.carrier_name
+      };
+      console.log(`✅ Carrier assigned for ${orderId}: ${assignedCarrier.carrier_id} (${assignedCarrier.carrier_name})`);
+    } catch (carrierError) {
+      console.log(`⚠️ Carrier assignment failed for ${orderId}: ${carrierError.message}`);
+      assignedCarrier = { carrier_id: '', carrier_name: '' };
+    }
+
     // Prepare request body for PUSH Order with Label Generation API
     const requestBody = prepareShipwayRequestBody(orderId, products, originalOrder, vendor, true); // true for label generation
     
@@ -1318,7 +1367,9 @@ async function generateLabelForOrder(orderId, products, vendor) {
       data: {
         shipping_url: shipping_url,
         awb: awb,
-        order_id: orderId
+        order_id: orderId,
+        carrier_id: assignedCarrier.carrier_id,
+        carrier_name: assignedCarrier.carrier_name
       }
     };
     
@@ -1713,19 +1764,26 @@ async function updateLocalDatabaseAfterClone(inputData) {
   console.log(`  - Setting label_downloaded = 0 (not downloaded yet)`);
   
     for (const product of claimedProducts) {
+      // Update orders table: set order_id to clone ID
       await database.updateOrder(product.unique_id, {
-      order_id: cloneOrderId,           // ✅ Set to clone order ID
-      clone_status: 'cloned',           // ✅ Mark as cloned
-      cloned_order_id: originalOrderId, // ✅ Store original order ID (not clone ID)
-      label_downloaded: 0               // ✅ Initially 0 (not downloaded)
-    });
-    
-    console.log(`  ✅ Updated product ${product.unique_id} after clone creation:`);
-    console.log(`     - order_id: ${cloneOrderId}`);
-    console.log(`     - clone_status: cloned`);
-    console.log(`     - cloned_order_id: ${originalOrderId}`);
-    console.log(`     - label_downloaded: 0`);
-  }
+        order_id: cloneOrderId  // ✅ Update orders table with clone ID
+      });
+      
+      // Update claims table: set claim-specific fields
+      await database.updateOrder(product.unique_id, {
+        order_id: cloneOrderId,           // ✅ Set to clone order ID
+        clone_status: 'cloned',           // ✅ Mark as cloned
+        cloned_order_id: originalOrderId, // ✅ Store original order ID (not clone ID)
+        label_downloaded: 0               // ✅ Initially 0 (not downloaded)
+      });
+      
+      console.log(`  ✅ Updated product ${product.unique_id} after clone creation:`);
+      console.log(`     - orders.order_id: ${cloneOrderId}`);
+      console.log(`     - claims.order_id: ${cloneOrderId}`);
+      console.log(`     - clone_status: cloned`);
+      console.log(`     - cloned_order_id: ${originalOrderId}`);
+      console.log(`     - label_downloaded: 0`);
+    }
   
   console.log('✅ Local database updated after clone creation');
   return { success: true, updatedProducts: claimedProducts.length };
@@ -1771,15 +1829,23 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
     console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
   }
   
-  // Store label URL in labels table (one entry per order_id, no duplicates)
+  // Store label URL and carrier info in labels table (one entry per order_id, no duplicates)
   if (labelResponse.data.shipping_url) {
-    await database.upsertLabel({
+    const labelDataToStore = {
       order_id: cloneOrderId,
       label_url: labelResponse.data.shipping_url,
-      awb: labelResponse.data.awb
-    });
+      awb: labelResponse.data.awb,
+      carrier_id: labelResponse.data.carrier_id,
+      carrier_name: labelResponse.data.carrier_name,
+      priority_carrier: labelResponse.data.carrier_id
+    };
     
-    console.log(`  ✅ Stored label URL in labels table for order ${cloneOrderId}`);
+    console.log(`📦 Storing label data for clone order:`, labelDataToStore);
+    
+    await database.upsertLabel(labelDataToStore);
+    
+    console.log(`  ✅ Stored label and carrier info in labels table for order ${cloneOrderId}`);
+    console.log(`  - Carrier: ${labelResponse.data.carrier_id} (${labelResponse.data.carrier_name})`);
   } else {
     console.log(`  ⚠️ No shipping URL found in label response, skipping labels table storage`);
   }
@@ -2034,16 +2100,82 @@ router.post('/bulk-download-labels', async (req, res) => {
           continue;
         }
 
+        // ✅ OPTIMIZATION: Check if label already downloaded
+        const firstClaimedProduct = claimedProducts[0];
+        if (firstClaimedProduct.label_downloaded === 1) {
+          console.log(`⚡ BULK: Label already downloaded for ${orderId}, fetching from cache...`);
+          
+          // Get existing label from labels table
+          const existingLabel = await database.getLabelByOrderId(orderId);
+          if (existingLabel && existingLabel.label_url) {
+            console.log(`✅ BULK: Found cached label for ${orderId}`);
+            results.push({
+              order_id: orderId,
+              shipping_url: existingLabel.label_url,
+              awb: existingLabel.awb || 'N/A'
+            });
+            continue; // Skip to next order
+          } else {
+            console.log(`⚠️ BULK: label_downloaded=1 but no cached label found for ${orderId}, generating new one...`);
+          }
+        }
+
         let labelResponse;
         if (isCloneOrder) {
           // Already a clone order - direct download
+          console.log(`📋 BULK: Processing clone order ${orderId}`);
           labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor);
+          
+          // Store label and carrier info for clone order
+          if (labelResponse.success && labelResponse.data.shipping_url) {
+            await database.upsertLabel({
+              order_id: orderId,
+              label_url: labelResponse.data.shipping_url,
+              awb: labelResponse.data.awb,
+              carrier_id: labelResponse.data.carrier_id,
+              carrier_name: labelResponse.data.carrier_name,
+              priority_carrier: labelResponse.data.carrier_id
+            });
+            console.log(`✅ BULK: Stored label data for clone order ${orderId}`);
+            
+            // ✅ Mark label as downloaded in claims table for all claimed products
+            for (const product of claimedProducts) {
+              await database.updateOrder(product.unique_id, {
+                label_downloaded: 1  // Mark as downloaded after successful label generation
+              });
+              console.log(`  ✅ BULK: Marked product ${product.unique_id} label as downloaded`);
+            }
+          }
         } else if (orderProducts.length === claimedProducts.length) {
           // Direct download - all products claimed by vendor
+          console.log(`📋 BULK: Processing direct download for ${orderId}`);
           labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor);
+          
+          // Store label and carrier info for direct download
+          if (labelResponse.success && labelResponse.data.shipping_url) {
+            await database.upsertLabel({
+              order_id: orderId,
+              label_url: labelResponse.data.shipping_url,
+              awb: labelResponse.data.awb,
+              carrier_id: labelResponse.data.carrier_id,
+              carrier_name: labelResponse.data.carrier_name,
+              priority_carrier: labelResponse.data.carrier_id
+            });
+            console.log(`✅ BULK: Stored label data for direct download ${orderId}`);
+            
+            // ✅ Mark label as downloaded in claims table for all claimed products
+            for (const product of claimedProducts) {
+              await database.updateOrder(product.unique_id, {
+                label_downloaded: 1  // Mark as downloaded after successful label generation
+              });
+              console.log(`  ✅ BULK: Marked product ${product.unique_id} label as downloaded`);
+            }
+          }
         } else if (claimedProducts.length > 0) {
           // Clone required - some products claimed by vendor
+          console.log(`📋 BULK: Processing clone creation for ${orderId}`);
           labelResponse = await handleOrderCloning(orderId, claimedProducts, orderProducts, vendor);
+          // Note: handleOrderCloning already stores labels via markLabelAsDownloaded
         } else {
           errors.push({
             order_id: orderId,
