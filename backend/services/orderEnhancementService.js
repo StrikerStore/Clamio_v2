@@ -54,8 +54,7 @@ class OrderEnhancementService {
       return {
         success: true,
         message: 'Orders enhanced successfully',
-        customerNamesAdded,
-        productImagesAdded: 0
+        customerNamesAdded
       };
 
     } catch (error) {

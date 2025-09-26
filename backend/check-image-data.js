@@ -1,15 +1,19 @@
-const XLSX = require('xlsx');
-const path = require('path');
-const fs = require('fs'); // Added missing import for fs
+const database = require('./config/database');
 
-console.log('🔍 Checking image data in orders and products...\n');
+console.log('🔍 Checking image data in MySQL database...\n');
 
-try {
-  // Check orders data
-  const ordersPath = path.join(__dirname, 'data/orders.xlsx');
-  if (fs.existsSync(ordersPath)) {
-    const orders = XLSX.readFile(ordersPath);
-    const ordersData = XLSX.utils.sheet_to_json(orders.Sheets[orders.SheetNames[0]]);
+async function checkImageData() {
+  try {
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      console.log('❌ MySQL connection not available');
+      return;
+    }
+    
+    // Check orders data (with product images from JOIN)
+    const ordersData = await database.getAllOrders();
     
     console.log('📦 ORDERS DATA:');
     console.log(`  Total orders: ${ordersData.length}`);
@@ -19,19 +23,13 @@ try {
     // Show sample orders
     console.log('\n  Sample orders:');
     ordersData.slice(0, 5).forEach((order, i) => {
-      console.log(`    ${i+1}. ${order.product_name || order.product} -> Image: ${order.product_image || 'MISSING'}`);
+      console.log(`    ${i+1}. ${order.product_name} -> Image: ${order.product_image || 'MISSING'}`);
     });
-  } else {
-    console.log('❌ Orders file not found');
-  }
-  
-  console.log('\n' + '='.repeat(50) + '\n');
-  
-  // Check products data
-  const productsPath = path.join(__dirname, 'data/products.xlsx');
-  if (fs.existsSync(productsPath)) {
-    const products = XLSX.readFile(productsPath);
-    const productsData = XLSX.utils.sheet_to_json(products.Sheets[products.SheetNames[0]]);
+    
+    console.log('\n' + '='.repeat(50) + '\n');
+    
+    // Check products data
+    const productsData = await database.getAllProducts();
     
     console.log('🖼️  PRODUCTS DATA:');
     console.log(`  Total products: ${productsData.length}`);
@@ -48,10 +46,14 @@ try {
     productsData.filter(p => !p.image || p.image === '/placeholder.svg').slice(0, 5).forEach((product, i) => {
       console.log(`    ${i+1}. ${product.name} -> ${product.image || 'MISSING'}`);
     });
-  } else {
-    console.log('❌ Products file not found');
+    
+    console.log('\n💡 Product images are now fetched directly from products table via JOIN');
+    console.log('💡 No need to store product_image in orders table anymore');
+    
+  } catch (error) {
+    console.error('❌ Error:', error.message);
   }
-  
-} catch (error) {
-  console.error('❌ Error:', error.message);
 }
+
+// Run the check
+checkImageData();

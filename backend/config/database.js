@@ -1887,6 +1887,46 @@ class ExcelDatabase {
   }
 
   /**
+   * Remove size information from product name for matching
+   * @param {string} productName - Product name with size
+   * @returns {string} Product name without size
+   */
+  removeSizeFromProductName(productName) {
+    if (!productName) return '';
+    
+    let cleanName = productName.trim();
+    
+    // Check if it's a kids product
+    if (cleanName.toLowerCase().includes('kids')) {
+      // For kids products, only remove numeric size patterns like 24-26, 16-18, 20-22
+      cleanName = cleanName.replace(/ - [0-9]+-[0-9]+$/i, '');
+    } else {
+      // For regular products, remove standard size patterns
+      const sizePatterns = [
+        / - (XS|S|M|L|XL|2XL|3XL|4XL|5XL)$/i,
+        / - (XXXL|XXL)$/i,
+        / - (Small|Medium|Large|Extra Large)$/i,
+        / - (\d{4}-\d{4})$/i, // Year patterns like 2025-26
+        /^(XS|S|M|L|XL|2XL|3XL|4XL|5XL) - /i,
+        /^(Small|Medium|Large|Extra Large) - /i,
+        / - (XS|S|M|L|XL|2XL|3XL|4XL|5XL)(?= - |$)/gi,
+        / - (Small|Medium|Large|Extra Large)(?= - |$)/gi,
+      ];
+      
+      for (const pattern of sizePatterns) {
+        cleanName = cleanName.replace(pattern, '');
+      }
+    }
+    
+    // Clean up any double spaces or trailing dashes
+    cleanName = cleanName.replace(/\s*-\s*$/, ''); // Remove trailing dash
+    cleanName = cleanName.replace(/\s+/g, ' '); // Replace multiple spaces with single space
+    cleanName = cleanName.trim();
+    
+    return cleanName;
+  }
+
+  /**
    * Get order by unique_id from MySQL
    * @param {string} unique_id - Order unique ID
    * @returns {Object|null} Order data or null if not found
@@ -1917,7 +1957,14 @@ class ExcelDatabase {
           l.handover_at,
           l.priority_carrier
         FROM orders o
-        LEFT JOIN products p ON o.product_name = p.name
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE o.unique_id = ?
@@ -1961,7 +2008,14 @@ class ExcelDatabase {
           l.handover_at,
           l.priority_carrier
         FROM orders o
-        LEFT JOIN products p ON o.product_name = p.name
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE o.order_id = ? 
@@ -2005,7 +2059,14 @@ class ExcelDatabase {
           l.handover_at,
           l.priority_carrier
         FROM orders o
-        LEFT JOIN products p ON o.product_name = p.name
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1) 
@@ -2050,7 +2111,14 @@ class ExcelDatabase {
           l.handover_at,
           l.priority_carrier
         FROM orders o
-        LEFT JOIN products p ON o.product_name = p.name
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE c.claimed_by = ? AND (o.is_in_new_order = 1 OR c.label_downloaded = 1) 
@@ -2096,7 +2164,14 @@ class ExcelDatabase {
           l.handover_at,
           l.priority_carrier
         FROM orders o
-        LEFT JOIN products p ON o.product_name = p.name
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE c.claimed_by = ? 
@@ -2301,10 +2376,20 @@ class ExcelDatabase {
 
     try {
       const [rows] = await this.mysqlConnection.execute(
-        `SELECT o.*, p.image as product_image FROM orders o
-         LEFT JOIN products p ON o.product_name = p.name
+        `SELECT o.*, p.image as product_image
+         FROM orders o
+         LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
+         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
          WHERE (o.order_id LIKE ? OR o.customer_name LIKE ? OR o.product_name LIKE ? 
          OR o.product_code LIKE ? OR o.pincode LIKE ?)
+         AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
          ORDER BY o.order_date DESC, o.order_id`,
         [
           `%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`,

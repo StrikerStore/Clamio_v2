@@ -758,7 +758,6 @@ class ShipwayService {
           label_downloaded: row.label_downloaded || false,
           handover_at: row.handover_at || '',
           customer_name: row.customer_name || '',
-          product_image: row.product_image || '',
           priority_carrier: row.priority_carrier || '',
           pincode: row.pincode || ''
         });
