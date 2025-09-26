@@ -1,6 +1,5 @@
 require('dotenv').config();
 const axios = require('axios');
-const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
 const database = require('../config/database');
@@ -268,7 +267,6 @@ class CarrierServiceabilityService {
         return {
           success: true,
           message: 'No claimed orders found. No carrier assignment needed.',
-          filePath: this.ordersExcelPath,
           orderCount: orders.length,
           summary: {
             totalOrders: orders.length,

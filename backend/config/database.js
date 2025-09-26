@@ -1,17 +1,13 @@
-const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
 const mysql = require('mysql2/promise');
 
 /**
- * Excel Database Configuration and Utilities
- * Handles all database operations using Excel files and MySQL
+ * Database Configuration and Utilities
+ * Handles all database operations using MySQL
  */
-class ExcelDatabase {
+class Database {
   constructor() {
-    this.dbPath = process.env.DB_FILE_PATH || './data/users.xlsx';
-    this.ensureDataDirectory();
-    this.initializeDatabase();
     this.mysqlConnection = null;
     this.mysqlInitialized = false;
     this.initializeMySQL();
@@ -65,9 +61,10 @@ class ExcelDatabase {
       this.mysqlInitialized = true;
     } catch (error) {
       console.error('❌ MySQL connection failed:', error.message);
-      // Continue with Excel-only mode if MySQL fails
+      // MySQL connection failed - application will not function without database
       this.mysqlConnection = null;
       this.mysqlInitialized = true; // Mark as initialized even if failed
+      throw new Error(`Database initialization failed: ${error.message}`);
     }
   }
 
@@ -442,24 +439,6 @@ class ExcelDatabase {
     }
   }
 
-  /**
-   * Ensure the data directory exists
-   */
-  ensureDataDirectory() {
-    const dir = path.dirname(this.dbPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  }
-
-  /**
-   * Initialize the database with default structure if it doesn't exist
-   * Note: Users are now handled by MySQL, this is kept for other Excel files
-   */
-  initializeDatabase() {
-    // Users initialization moved to MySQL
-    // This method is kept for potential other Excel file initialization
-  }
 
   // Excel methods removed - users now use MySQL only
 
@@ -2518,4 +2497,4 @@ class ExcelDatabase {
   }
 }
 
-module.exports = new ExcelDatabase(); 
+module.exports = new Database(); 

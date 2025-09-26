@@ -220,3 +220,4 @@ migrateUsersFromExcelToMySQL().then(() => {
   console.error('💥 Migration script crashed:', error);
   process.exit(1);
 });
+
