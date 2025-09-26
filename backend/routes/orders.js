@@ -592,23 +592,21 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
       };
     });
 
-    // Persist fixes back to Excel if necessary
+    // Persist fixes back to MySQL if necessary
     if (rowsNeedingFix.length > 0) {
-      const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
-      rowsNeedingFix.forEach((idx) => {
-        const o = orders[idx];
-        o.status = 'unclaimed';
-        o.claimed_by = '';
-        o.claimed_at = '';
-        const rowNum = idx + 2; // account for header
-        header.forEach((col, i) => {
-          ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
-            t: 's',
-            v: o[col] || ''
-          };
-        });
-      });
-      XLSX.writeFile(ordersWb, ordersPath);
+      const database = require('../config/database');
+      for (const idx of rowsNeedingFix) {
+        const order = orders[idx];
+        try {
+          await database.updateOrder(order.unique_id, {
+            status: 'unclaimed',
+            claimed_by: '',
+            claimed_at: null
+          });
+        } catch (error) {
+          console.error(`❌ Failed to update order ${order.unique_id}:`, error.message);
+        }
+      }
       console.log(`🧹 Cleaned ${rowsNeedingFix.length} orders claimed by missing/inactive vendors`);
     }
     
@@ -733,7 +731,7 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
  * @desc    Admin assigns multiple orders to a vendor
  * @access  Admin/Superadmin only
  */
-router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
   const { unique_ids, vendor_warehouse_id } = req.body || {};
 
   console.log('🔵 ADMIN BULK ASSIGN REQUEST START');
@@ -745,47 +743,42 @@ router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmi
   }
 
   try {
-    // Load users.xlsx to verify vendor exists
-    const usersPath = path.join(__dirname, '../data/users.xlsx');
-    const usersWb = XLSX.readFile(usersPath);
-    const usersWs = usersWb.Sheets[usersWb.SheetNames[0]];
-    const users = XLSX.utils.sheet_to_json(usersWs, { defval: '' });
-    const vendor = users.find(u => u.warehouseId === vendor_warehouse_id && u.role === 'vendor');
-    if (!vendor) {
+    const database = require('../config/database');
+    
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+
+    // Verify vendor exists in MySQL
+    const vendor = await database.getUserByWarehouseId(vendor_warehouse_id);
+    if (!vendor || vendor.role !== 'vendor') {
       return res.status(400).json({ success: false, message: 'Vendor not found or invalid warehouse ID' });
     }
 
-    // Load orders.xlsx
-    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
-    const ordersWb = XLSX.readFile(ordersPath);
-    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
-    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
-
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     let updatedCount = 0;
-    unique_ids.forEach((uid) => {
-      const idx = orders.findIndex(o => String(o.unique_id) === String(uid));
-      if (idx !== -1) {
-        const order = orders[idx];
-        order.status = 'claimed';
-        order.claimed_by = vendor_warehouse_id;
-        order.claimed_at = now;
-        order.last_claimed_by = vendor_warehouse_id;
-        order.last_claimed_at = now;
-
-        const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
-        const rowNum = idx + 2;
-        header.forEach((col, i) => {
-          ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
-            t: 's',
-            v: order[col] || ''
-          };
+    
+    // Update each order in MySQL
+    for (const uid of unique_ids) {
+      try {
+        const result = await database.updateOrder(uid, {
+          status: 'claimed',
+          claimed_by: vendor_warehouse_id,
+          claimed_at: now,
+          last_claimed_by: vendor_warehouse_id,
+          last_claimed_at: now
         });
-        updatedCount += 1;
+        
+        if (result.success) {
+          updatedCount += 1;
+        }
+      } catch (error) {
+        console.error(`❌ Failed to update order ${uid}:`, error.message);
       }
-    });
-
-    XLSX.writeFile(ordersWb, ordersPath);
+    }
 
     return res.json({
       success: true,
@@ -803,7 +796,7 @@ router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmi
  * @desc    Admin unassigns multiple orders
  * @access  Admin/Superadmin only
  */
-router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
+router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
   const { unique_ids } = req.body || {};
 
   console.log('🔵 ADMIN BULK UNASSIGN REQUEST START');
@@ -814,34 +807,37 @@ router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperad
   }
 
   try {
-    const ordersPath = path.join(__dirname, '../data/orders.xlsx');
-    const ordersWb = XLSX.readFile(ordersPath);
-    const ordersWs = ordersWb.Sheets[ordersWb.SheetNames[0]];
-    const orders = XLSX.utils.sheet_to_json(ordersWs, { defval: '' });
+    const database = require('../config/database');
+    
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
 
     let updatedCount = 0;
-    unique_ids.forEach((uid) => {
-      const idx = orders.findIndex(o => String(o.unique_id) === String(uid));
-      if (idx !== -1) {
-        const order = orders[idx];
-        if (order.status !== 'unclaimed') {
-          order.status = 'unclaimed';
-          order.claimed_by = '';
-          order.claimed_at = '';
-          const header = XLSX.utils.sheet_to_json(ordersWs, { header: 1 })[0];
-          const rowNum = idx + 2;
-          header.forEach((col, i) => {
-            ordersWs[XLSX.utils.encode_cell({ r: rowNum - 1, c: i })] = {
-              t: 's',
-              v: order[col] || ''
-            };
+    
+    // Update each order in MySQL
+    for (const uid of unique_ids) {
+      try {
+        // First check if order exists and is claimed
+        const order = await database.getOrderByUniqueId(uid);
+        if (order && order.status !== 'unclaimed') {
+          const result = await database.updateOrder(uid, {
+            status: 'unclaimed',
+            claimed_by: '',
+            claimed_at: null
           });
-          updatedCount += 1;
+          
+          if (result.success) {
+            updatedCount += 1;
+          }
         }
+      } catch (error) {
+        console.error(`❌ Failed to update order ${uid}:`, error.message);
       }
-    });
-
-    XLSX.writeFile(ordersWb, ordersPath);
+    }
 
     return res.json({ success: true, message: `Unassigned ${updatedCount} orders`, data: { updated: updatedCount } });
   } catch (error) {
