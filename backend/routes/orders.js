@@ -457,6 +457,7 @@ router.get('/grouped', async (req, res) => {
           order_date: order.order_date || order.created_at,
           customer_name: order.customer_name || order.customer,
           claimed_at: order.claimed_at,
+          label_downloaded: order.label_downloaded, // Add label_downloaded field
           total_value: 0,
           total_products: 0,
           products: []
@@ -1941,6 +1942,75 @@ function prepareShipwayRequestBody(orderId, products, originalOrder, vendor, gen
 }
 
 /**
+ * Call Shipway Create Manifest API
+ */
+async function callShipwayCreateManifestAPI(orderIds) {
+  try {
+    console.log('🔄 Calling Shipway Create Manifest API');
+    console.log('  - Order IDs:', Array.isArray(orderIds) ? orderIds : [orderIds]);
+    
+    // Get basic auth credentials from environment
+    const username = process.env.SHIPWAY_USERNAME;
+    const password = process.env.SHIPWAY_PASSWORD;
+    const basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
+    
+    console.log('🔍 Debug: Environment variables check');
+    console.log('  - SHIPWAY_USERNAME:', username ? 'SET' : 'NOT SET');
+    console.log('  - SHIPWAY_PASSWORD:', password ? 'SET' : 'NOT SET');
+    console.log('  - SHIPWAY_BASIC_AUTH_HEADER:', basicAuthHeader ? 'SET' : 'NOT SET');
+    
+    let authHeader;
+    if (basicAuthHeader) {
+      authHeader = basicAuthHeader;
+      console.log('✅ Using SHIPWAY_BASIC_AUTH_HEADER');
+    } else if (username && password) {
+      authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+      console.log('✅ Using SHIPWAY_USERNAME and SHIPWAY_PASSWORD');
+    } else {
+      console.log('❌ No Shipway credentials found');
+      throw new Error('Shipway credentials not configured');
+    }
+    
+    const requestBody = {
+      order_ids: Array.isArray(orderIds) ? orderIds : [orderIds]
+    };
+    
+    console.log('📤 Request body:', JSON.stringify(requestBody, null, 2));
+    
+    const response = await fetch('https://app.shipway.com/api/Createmanifest/', {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+    
+    const data = await response.json();
+    
+    console.log('📥 Response status:', response.status);
+    console.log('📥 Response data:', JSON.stringify(data, null, 2));
+    
+    if (!response.ok) {
+      throw new Error(`Shipway Create Manifest API error: ${data.message || response.statusText}`);
+    }
+    
+    console.log('✅ Shipway Create Manifest API call successful');
+    return {
+      success: true,
+      data: data
+    };
+    
+  } catch (error) {
+    console.error('❌ Shipway Create Manifest API call failed:', error);
+    return {
+      success: false,
+      message: error.message
+    };
+  }
+}
+
+/**
  * Call Shipway PUSH Order API
  */
 async function callShipwayPushOrderAPI(requestBody, generateLabel = false) {
@@ -2384,6 +2454,337 @@ async function generateCombinedLabelsPDF(labels) {
     throw error;
   }
 }
+
+/**
+ * @route   POST /api/orders/mark-ready
+ * @desc    Mark order as ready for handover by calling Shipway manifest API
+ * @access  Vendor (token required)
+ */
+router.post('/mark-ready', async (req, res) => {
+  const { order_id } = req.body;
+  const token = req.headers['authorization'];
+  
+  console.log('🔵 MARK READY REQUEST START');
+  console.log('  - order_id:', order_id);
+  console.log('  - token received:', token ? 'YES' : 'NO');
+  
+  if (!order_id || !token) {
+    console.log('❌ MARK READY FAILED: Missing required fields');
+    return res.status(400).json({ 
+      success: false, 
+      message: 'order_id and Authorization token required' 
+    });
+  }
+
+  try {
+    // Load users from MySQL to get vendor info
+    const database = require('../config/database');
+    
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      console.log('❌ MySQL connection not available');
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+    
+    const vendor = await database.getUserByToken(token);
+    
+    if (!vendor || vendor.active_session !== 'TRUE') {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+
+    console.log('✅ VENDOR FOUND:');
+    console.log('  - Email:', vendor.email);
+    console.log('  - Warehouse ID:', vendor.warehouseId);
+
+    // Get orders from MySQL to verify the order belongs to this vendor
+    const orders = await database.getAllOrders();
+    const orderProducts = orders.filter(order => order.order_id === order_id);
+    const claimedProducts = orderProducts.filter(order => 
+      order.claimed_by === vendor.warehouseId && order.status === 'claimed'
+    );
+
+    if (claimedProducts.length === 0) {
+      console.log('❌ No products claimed by this vendor for order:', order_id);
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No products claimed by this vendor for this order' 
+      });
+    }
+
+    // Check if label is downloaded for all claimed products
+    const productsWithoutLabel = claimedProducts.filter(product => product.label_downloaded !== 1);
+    if (productsWithoutLabel.length > 0) {
+      console.log(`❌ Label not downloaded for order: ${order_id}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: `Label is not yet downloaded for order id - ${order_id}` 
+      });
+    }
+
+    console.log('✅ Order verification passed');
+    console.log('  - Total products in order:', orderProducts.length);
+    console.log('  - Products claimed by vendor:', claimedProducts.length);
+
+    // Call Shipway Create Manifest API
+    console.log('🔄 Calling Shipway Create Manifest API...');
+    const manifestResponse = await callShipwayCreateManifestAPI(order_id);
+    
+    if (!manifestResponse.success) {
+      console.log('❌ Shipway manifest API failed:', manifestResponse.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create manifest: ' + manifestResponse.message
+      });
+    }
+
+    console.log('✅ Shipway manifest API successful');
+
+    // Set is_manifest = 1 in labels table first
+    console.log('🔄 Setting is_manifest = 1 in labels table...');
+    const labelData = {
+      order_id: order_id,
+      is_manifest: 1
+    };
+    
+    await database.upsertLabel(labelData);
+    console.log(`  ✅ Set is_manifest = 1 for order ${order_id}`);
+
+    // Update order status to ready_for_handover after setting is_manifest
+    console.log('🔄 Updating order status to ready_for_handover...');
+    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    
+    for (const product of claimedProducts) {
+      await database.updateOrder(product.unique_id, {
+        status: 'ready_for_handover'
+      });
+      console.log(`  ✅ Updated product ${product.unique_id} status to ready_for_handover`);
+    }
+
+    console.log('🟢 MARK READY SUCCESS');
+    console.log(`  - Order ${order_id} marked as ready for handover`);
+    console.log(`  - Manifest created successfully`);
+    console.log(`  - is_manifest flag set to 1`);
+
+    return res.json({
+      success: true,
+      message: 'Order marked as ready for handover successfully',
+      data: {
+        order_id: order_id,
+        status: 'ready_for_handover',
+        manifest_created: true,
+        is_manifest: 1
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ MARK READY ERROR:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to mark order as ready', 
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/bulk-mark-ready
+ * @desc    Mark multiple orders as ready for handover by calling Shipway manifest API
+ * @access  Vendor (token required)
+ */
+router.post('/bulk-mark-ready', async (req, res) => {
+  const { order_ids } = req.body;
+  const token = req.headers['authorization'];
+  
+  console.log('🔵 BULK MARK READY REQUEST START');
+  console.log('  - order_ids:', order_ids);
+  console.log('  - token received:', token ? 'YES' : 'NO');
+  
+  if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
+    console.log('❌ BULK MARK READY FAILED: Missing required fields');
+    return res.status(400).json({ 
+      success: false, 
+      message: 'order_ids array and Authorization token required' 
+    });
+  }
+
+  try {
+    // Load users from MySQL to get vendor info
+    const database = require('../config/database');
+    
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      console.log('❌ MySQL connection not available');
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+    
+    const vendor = await database.getUserByToken(token);
+    
+    if (!vendor || vendor.active_session !== 'TRUE') {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+
+    console.log('✅ VENDOR FOUND:');
+    console.log('  - Email:', vendor.email);
+    console.log('  - Warehouse ID:', vendor.warehouseId);
+
+    // Get orders from MySQL to verify all orders belong to this vendor
+    const orders = await database.getAllOrders();
+    const successfulOrders = [];
+    const failedOrders = [];
+    const validOrderIds = [];
+
+    // First, validate all orders
+    for (const order_id of order_ids) {
+      try {
+        console.log(`🔍 Validating order: ${order_id}`);
+        
+        const orderProducts = orders.filter(order => order.order_id === order_id);
+        const claimedProducts = orderProducts.filter(order => 
+          order.claimed_by === vendor.warehouseId && order.status === 'claimed'
+        );
+
+        if (claimedProducts.length === 0) {
+          console.log(`❌ No products claimed by this vendor for order: ${order_id}`);
+          failedOrders.push({
+            order_id: order_id,
+            reason: 'No products claimed by this vendor for this order'
+          });
+          continue;
+        }
+
+        // Check if label is downloaded for all claimed products
+        const productsWithoutLabel = claimedProducts.filter(product => product.label_downloaded !== 1);
+        if (productsWithoutLabel.length > 0) {
+          console.log(`❌ Label not downloaded for order: ${order_id}`);
+          failedOrders.push({
+            order_id: order_id,
+            reason: `Label is not yet downloaded for order id - ${order_id}`
+          });
+          continue;
+        }
+
+        console.log(`✅ Order validation passed for ${order_id}`);
+        validOrderIds.push(order_id);
+
+      } catch (error) {
+        console.error(`❌ Error validating order ${order_id}:`, error);
+        failedOrders.push({
+          order_id: order_id,
+          reason: error.message
+        });
+      }
+    }
+
+    // If we have valid orders, call the bulk manifest API
+    if (validOrderIds.length > 0) {
+      console.log(`🔄 Calling Shipway Create Manifest API for ${validOrderIds.length} orders...`);
+      console.log(`  - Valid order IDs: ${validOrderIds.join(', ')}`);
+      
+      const manifestResponse = await callShipwayCreateManifestAPI(validOrderIds);
+      
+      if (!manifestResponse.success) {
+        console.log(`❌ Shipway bulk manifest API failed:`, manifestResponse.message);
+        // Add all valid orders to failed list
+        validOrderIds.forEach(order_id => {
+          failedOrders.push({
+            order_id: order_id,
+            reason: 'Failed to create manifest: ' + manifestResponse.message
+          });
+        });
+      } else {
+        console.log(`✅ Shipway bulk manifest API successful for ${validOrderIds.length} orders`);
+
+        // Process each valid order for database updates
+        for (const order_id of validOrderIds) {
+          try {
+            const orderProducts = orders.filter(order => order.order_id === order_id);
+            const claimedProducts = orderProducts.filter(order => 
+              order.claimed_by === vendor.warehouseId && order.status === 'claimed'
+            );
+
+            // Set is_manifest = 1 in labels table first
+            console.log(`🔄 Setting is_manifest = 1 in labels table for ${order_id}...`);
+            const labelData = {
+              order_id: order_id,
+              is_manifest: 1
+            };
+            
+            await database.upsertLabel(labelData);
+            console.log(`  ✅ Set is_manifest = 1 for order ${order_id}`);
+
+            // Update order status to ready_for_handover after setting is_manifest
+            console.log(`🔄 Updating order status to ready_for_handover for ${order_id}...`);
+            
+            for (const product of claimedProducts) {
+              await database.updateOrder(product.unique_id, {
+                status: 'ready_for_handover'
+              });
+              console.log(`  ✅ Updated product ${product.unique_id} status to ready_for_handover`);
+            }
+
+            successfulOrders.push({
+              order_id: order_id,
+              status: 'ready_for_handover',
+              manifest_created: true,
+              is_manifest: 1
+            });
+
+          } catch (error) {
+            console.error(`❌ Error updating order ${order_id}:`, error);
+            failedOrders.push({
+              order_id: order_id,
+              reason: error.message
+            });
+          }
+        }
+      }
+    }
+
+    console.log('🟢 BULK MARK READY COMPLETE');
+    console.log(`  - Successful orders: ${successfulOrders.length}`);
+    console.log(`  - Failed orders: ${failedOrders.length}`);
+
+    if (successfulOrders.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No orders could be marked as ready',
+        data: {
+          successful_orders: successfulOrders,
+          failed_orders: failedOrders,
+          total_requested: order_ids.length,
+          total_successful: successfulOrders.length,
+          total_failed: failedOrders.length
+        }
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Successfully marked ${successfulOrders.length} out of ${order_ids.length} orders as ready for handover`,
+      data: {
+        successful_orders: successfulOrders,
+        failed_orders: failedOrders,
+        total_requested: order_ids.length,
+        total_successful: successfulOrders.length,
+        total_failed: failedOrders.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ BULK MARK READY ERROR:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to mark orders as ready', 
+      error: error.message 
+    });
+  }
+});
 
 /**
  * @route   POST /api/orders/refresh

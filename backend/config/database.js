@@ -318,15 +318,34 @@ class Database {
           carrier_name VARCHAR(255),
           handover_at TIMESTAMP NULL,
           priority_carrier VARCHAR(50),
+          is_manifest TINYINT(1) DEFAULT 0,
           INDEX idx_order_id (order_id),
           INDEX idx_awb (awb),
           INDEX idx_carrier_id (carrier_id),
-          INDEX idx_priority_carrier (priority_carrier)
+          INDEX idx_priority_carrier (priority_carrier),
+          INDEX idx_is_manifest (is_manifest)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createLabelsTableQuery);
       console.log('✅ Fresh labels table created with clean structure');
+      
+      // Add is_manifest column if it doesn't exist (for existing tables)
+      try {
+        await this.mysqlConnection.execute(`
+          ALTER TABLE labels 
+          ADD COLUMN is_manifest TINYINT(1) DEFAULT 0,
+          ADD INDEX idx_is_manifest (is_manifest)
+        `);
+        console.log('✅ Added is_manifest column to labels table');
+      } catch (error) {
+        // Column might already exist, check if it's the expected error
+        if (error.code === 'ER_DUP_FIELDNAME') {
+          console.log('ℹ️ is_manifest column already exists in labels table');
+        } else {
+          console.error('❌ Error adding is_manifest column to labels table:', error.message);
+        }
+      }
       
       // Migrate existing labels data from orders table
       await this.migrateLabelsData();
@@ -1934,7 +1953,8 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier
+          l.priority_carrier,
+          l.is_manifest
         FROM orders o
         LEFT JOIN products p ON TRIM(
           CASE 
@@ -1985,7 +2005,8 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier
+          l.priority_carrier,
+          l.is_manifest
         FROM orders o
         LEFT JOIN products p ON TRIM(
           CASE 
@@ -2036,7 +2057,8 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier
+          l.priority_carrier,
+          l.is_manifest
         FROM orders o
         LEFT JOIN products p ON TRIM(
           CASE 
@@ -2088,7 +2110,8 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier
+          l.priority_carrier,
+          l.is_manifest
         FROM orders o
         LEFT JOIN products p ON TRIM(
           CASE 
@@ -2141,7 +2164,8 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier
+          l.priority_carrier,
+          l.is_manifest
         FROM orders o
         LEFT JOIN products p ON TRIM(
           CASE 
@@ -2156,6 +2180,7 @@ class Database {
         WHERE c.claimed_by = ? 
         AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
         AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
+        AND (l.is_manifest IS NULL OR l.is_manifest = 0)
         ORDER BY o.order_date DESC, o.order_id
       `, [warehouseId]);
       
@@ -2439,23 +2464,54 @@ class Database {
     }
 
     try {
+      // Handle partial updates by only updating provided fields
+      const updateFields = [];
+      const updateValues = [];
+      
+      // Build dynamic update clause based on provided fields
+      if (labelData.hasOwnProperty('label_url')) {
+        updateFields.push('label_url = ?');
+        updateValues.push(labelData.label_url);
+      }
+      if (labelData.hasOwnProperty('awb')) {
+        updateFields.push('awb = ?');
+        updateValues.push(labelData.awb || null);
+      }
+      if (labelData.hasOwnProperty('carrier_id')) {
+        updateFields.push('carrier_id = ?');
+        updateValues.push(labelData.carrier_id || null);
+      }
+      if (labelData.hasOwnProperty('carrier_name')) {
+        updateFields.push('carrier_name = ?');
+        updateValues.push(labelData.carrier_name || null);
+      }
+      if (labelData.hasOwnProperty('priority_carrier')) {
+        updateFields.push('priority_carrier = ?');
+        updateValues.push(labelData.priority_carrier || null);
+      }
+      if (labelData.hasOwnProperty('is_manifest')) {
+        updateFields.push('is_manifest = ?');
+        updateValues.push(labelData.is_manifest || 0);
+      }
+      
+      // Always add updated_at
+      updateFields.push('updated_at = CURRENT_TIMESTAMP');
+      
+      const updateClause = updateFields.join(', ');
+      
       const [result] = await this.mysqlConnection.execute(
-        `INSERT INTO labels (order_id, label_url, awb, carrier_id, carrier_name, priority_carrier) 
-         VALUES (?, ?, ?, ?, ?, ?) 
-         ON DUPLICATE KEY UPDATE 
-         label_url = VALUES(label_url), 
-         awb = VALUES(awb),
-         carrier_id = VALUES(carrier_id),
-         carrier_name = VALUES(carrier_name),
-         priority_carrier = VALUES(priority_carrier),
-         updated_at = CURRENT_TIMESTAMP`,
+        `INSERT INTO labels (order_id, label_url, awb, carrier_id, carrier_name, priority_carrier, is_manifest) 
+         VALUES (?, ?, ?, ?, ?, ?, ?) 
+         ON DUPLICATE KEY UPDATE ${updateClause}`,
         [
           labelData.order_id,
-          labelData.label_url,
+          labelData.label_url || null,
           labelData.awb || null,
           labelData.carrier_id || null,
           labelData.carrier_name || null,
-          labelData.priority_carrier || null
+          labelData.priority_carrier || null,
+          labelData.is_manifest || 0,
+          ...updateValues
         ]
       );
 

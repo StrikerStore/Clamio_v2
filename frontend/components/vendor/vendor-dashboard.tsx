@@ -172,6 +172,7 @@ export function VendorDashboard() {
   const [upiId, setUpiId] = useState("")
   const [selectedMyOrders, setSelectedMyOrders] = useState<string[]>([])
   const [selectedUnclaimedOrders, setSelectedUnclaimedOrders] = useState<string[]>([])
+  const [bulkMarkReadyLoading, setBulkMarkReadyLoading] = useState(false)
   const [vendorAddress, setVendorAddress] = useState<null | {
     warehouseId: string
     address: string
@@ -320,53 +321,53 @@ export function VendorDashboard() {
     }
   };
 
-  useEffect(() => {
-    async function fetchOrders() {
-      setOrdersLoading(true);
-      setOrdersError("");
-      try {
-        const response = await apiClient.getOrders();
-        if (response.success && response.data && Array.isArray(response.data.orders)) {
-          setOrders(response.data.orders);
-        } else if (response.success && response.data && response.data.orders) {
-          setOrders([response.data.orders]);
-        } else {
-          setOrders([]);
-          setOrdersError("No orders found");
-        }
-        
-        // Get initial last updated timestamp
-        const lastUpdatedResponse = await apiClient.getOrdersLastUpdated();
-        if (lastUpdatedResponse.success && lastUpdatedResponse.data) {
-          setLastUpdated(lastUpdatedResponse.data.lastUpdated);
-        }
-      } catch (err: any) {
-        setOrdersError(err.message || "Failed to fetch orders");
+  const fetchOrders = async () => {
+    setOrdersLoading(true);
+    setOrdersError("");
+    try {
+      const response = await apiClient.getOrders();
+      if (response.success && response.data && Array.isArray(response.data.orders)) {
+        setOrders(response.data.orders);
+      } else if (response.success && response.data && response.data.orders) {
+        setOrders([response.data.orders]);
+      } else {
         setOrders([]);
-      } finally {
-        setOrdersLoading(false);
+        setOrdersError("No orders found");
       }
+      
+      // Get initial last updated timestamp
+      const lastUpdatedResponse = await apiClient.getOrdersLastUpdated();
+      if (lastUpdatedResponse.success && lastUpdatedResponse.data) {
+        setLastUpdated(lastUpdatedResponse.data.lastUpdated);
+      }
+    } catch (err: any) {
+      setOrdersError(err.message || "Failed to fetch orders");
+      setOrders([]);
+    } finally {
+      setOrdersLoading(false);
     }
+  }
 
-    async function fetchGroupedOrders() {
-      setGroupedOrdersLoading(true);
-      setGroupedOrdersError("");
-      try {
-        const response = await apiClient.getGroupedOrders();
-        if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
-          setGroupedOrders(response.data.groupedOrders);
-        } else {
-          setGroupedOrders([]);
-          setGroupedOrdersError("No grouped orders found");
-        }
-      } catch (err: any) {
-        setGroupedOrdersError(err.message || "Failed to fetch grouped orders");
+  const fetchGroupedOrders = async () => {
+    setGroupedOrdersLoading(true);
+    setGroupedOrdersError("");
+    try {
+      const response = await apiClient.getGroupedOrders();
+      if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
+        setGroupedOrders(response.data.groupedOrders);
+      } else {
         setGroupedOrders([]);
-      } finally {
-        setGroupedOrdersLoading(false);
+        setGroupedOrdersError("No grouped orders found");
       }
+    } catch (err: any) {
+      setGroupedOrdersError(err.message || "Failed to fetch grouped orders");
+      setGroupedOrders([]);
+    } finally {
+      setGroupedOrdersLoading(false);
     }
+  }
 
+  useEffect(() => {
     fetchOrders();
     fetchGroupedOrders();
   }, []);
@@ -465,11 +466,104 @@ export function VendorDashboard() {
     }
   }
 
-  const handleMarkReady = (orderId: string) => {
-    toast({
-      title: "Order Marked Ready",
-      description: `Order ${orderId} is now ready for handover`,
-    })
+  const handleMarkReady = async (orderId: string) => {
+    try {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${API_BASE_URL}/orders/mark-ready`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': user?.token || '',
+        },
+        body: JSON.stringify({ order_id: orderId }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: "Order Marked Ready",
+          description: `Order ${orderId} is now ready for handover`,
+        });
+        // Refresh orders to show updated status
+        fetchGroupedOrders();
+      } else {
+        toast({
+          title: "Error",
+          description: data.message || "Failed to mark order as ready",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error marking order as ready:', error);
+      toast({
+        title: "Error",
+        description: "Network error occurred",
+        variant: "destructive",
+      });
+    }
+  }
+
+  const handleBulkMarkReady = async () => {
+    if (selectedMyOrders.length === 0) {
+      toast({
+        title: "No Orders Selected",
+        description: "Please select orders to mark as ready",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setBulkMarkReadyLoading(true);
+    try {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${API_BASE_URL}/orders/bulk-mark-ready`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': user?.token || '',
+        },
+        body: JSON.stringify({ order_ids: selectedMyOrders }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: "Orders Marked Ready",
+          description: `Successfully marked ${data.data.total_successful} out of ${data.data.total_requested} orders as ready for handover`,
+        });
+        
+        // Show details if some orders failed
+        if (data.data.total_failed > 0) {
+          toast({
+            title: "Some Orders Failed",
+            description: `${data.data.total_failed} orders could not be marked as ready. Check console for details.`,
+            variant: "destructive",
+          });
+          console.log('Failed orders:', data.data.failed_orders);
+        }
+        
+        // Clear selection and refresh orders
+        setSelectedMyOrders([]);
+        fetchGroupedOrders();
+      } else {
+        toast({
+          title: "Error",
+          description: data.message || "Failed to mark orders as ready",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error marking orders as ready:', error);
+      toast({
+        title: "Error",
+        description: "Network error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setBulkMarkReadyLoading(false);
+    }
   }
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -534,7 +628,7 @@ export function VendorDashboard() {
       urgent: "bg-red-100 text-red-800",
     }
 
-    return <Badge className={colors[priority as keyof typeof colors]}>{priority.toUpperCase()}</Badge>
+    return <Badge className={colors[priority as keyof typeof colors] || colors.low}>{priority?.toUpperCase() || 'N/A'}</Badge>
   }
 
   // Helper functions to get current tab's filters
@@ -601,9 +695,11 @@ export function VendorDashboard() {
         baseOrders = orders.filter(order => order.status === 'unclaimed');
         break;
       case "handover":
-        // Show orders ready for handover by current vendor
+        // Show orders ready for handover by current vendor with is_manifest = 1
         baseOrders = orders.filter(order => 
-          order.status === 'ready_for_handover' && order.claimed_by === currentVendorId
+          order.status === 'ready_for_handover' && 
+          order.claimed_by === currentVendorId &&
+          order.is_manifest === 1
         );
         break;
       default:
@@ -1193,7 +1289,7 @@ export function VendorDashboard() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Handover</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {orders.filter((o) => o.status === "ready_for_handover" && o.claimed_by === user?.warehouseId).length}
+                    {orders.filter((o) => o.status === "ready_for_handover" && o.claimed_by === user?.warehouseId && o.is_manifest === 1).length}
                   </p>
                 </div>
               </div>
@@ -1267,7 +1363,7 @@ export function VendorDashboard() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                       <Input
-                        placeholder="Search by order id, product, SKU, customer..."
+                        placeholder="Search"
                         value={getCurrentTabFilters().searchTerm}
                         onChange={(e) => updateCurrentTabFilter('searchTerm', e.target.value)}
                         className="pl-10"
@@ -1328,6 +1424,37 @@ export function VendorDashboard() {
                           <>
                             <Download className="w-4 h-4 mr-2" />
                             Download ({selectedMyOrders.length})
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        onClick={() => handleBulkMarkReady()}
+                        disabled={
+                          selectedMyOrders.length === 0 || 
+                          bulkMarkReadyLoading ||
+                          getFilteredOrdersForTab("my-orders")
+                            .filter(order => selectedMyOrders.includes(order.order_id))
+                            .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
+                        }
+                        variant="outline"
+                        className="h-10 whitespace-nowrap px-6 text-sm min-w-fit"
+                        title={
+                          getFilteredOrdersForTab("my-orders")
+                            .filter(order => selectedMyOrders.includes(order.order_id))
+                            .some(order => order.label_downloaded !== 1)
+                            ? "All selected orders must have labels downloaded first"
+                            : "Mark selected orders as ready for handover"
+                        }
+                      >
+                        {bulkMarkReadyLoading ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Mark Ready ({selectedMyOrders.length})
                           </>
                         )}
                       </Button>
@@ -1583,7 +1710,9 @@ export function VendorDashboard() {
                                   <Button 
                                     size="sm" 
                                     onClick={() => handleMarkReady(order.order_id)}
+                                    disabled={!order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false}
                                     className="text-xs px-2 py-1 h-8"
+                                    title={!order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false ? "Label must be downloaded first" : "Mark order as ready for handover"}
                                   >
                                     Ready
                                   </Button>
@@ -1612,19 +1741,15 @@ export function VendorDashboard() {
                         <TableRow>
                           <TableHead>Image</TableHead>
                           <TableHead>Order ID</TableHead>
-                          <TableHead>Customer</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead>Value</TableHead>
+                          <TableHead>Order Date</TableHead>
+                          <TableHead>Product Name</TableHead>
                           <TableHead>Status</TableHead>
-                          <TableHead>Priority</TableHead>
-                          <TableHead>Handover Date</TableHead>
-                          <TableHead>Pickup Date</TableHead>
                           <TableHead>Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {getFilteredOrdersForTab("handover").map((order) => (
-                          <TableRow key={order.id}>
+                          <TableRow key={order.order_id}>
                             <TableCell>
                               <TooltipProvider>
                                 <Tooltip>
@@ -1645,14 +1770,21 @@ export function VendorDashboard() {
                                 </Tooltip>
                               </TooltipProvider>
                             </TableCell>
-                            <TableCell className="font-medium">{order.id}</TableCell>
-                            <TableCell>{order.customer}</TableCell>
-                            <TableCell>{order.product}</TableCell>
-                            <TableCell>{order.value}</TableCell>
+                            <TableCell className="font-medium">{order.order_id}</TableCell>
+                            <TableCell>
+                              {order.order_date ? (
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-medium">
+                                    {new Date(order.order_date).toLocaleDateString()}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {new Date(order.order_date).toLocaleTimeString()}
+                                  </span>
+                                </div>
+                              ) : "N/A"}
+                            </TableCell>
+                            <TableCell>{order.product_name || order.product}</TableCell>
                             <TableCell>{getStatusBadge(order.status)}</TableCell>
-                            <TableCell>{getPriorityBadge(order.priority)}</TableCell>
-                            <TableCell>{order.handoverDate || "N/A"}</TableCell>
-                            <TableCell>{order.pickupDate || "N/A"}</TableCell>
                             <TableCell>
                               <Badge variant="outline">Ready for Pickup</Badge>
                             </TableCell>
