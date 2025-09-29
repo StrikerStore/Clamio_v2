@@ -2,7 +2,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const orderEnhancementService = require('./orderEnhancementService');
-// const XLSX = require('xlsx'); // Removed - no longer using Excel
+
 
 /**
  * Shipway API Service
@@ -350,53 +350,10 @@ class ShipwayService {
       throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
     }
 
-    // Ensure data directory exists
-    const dataDir = path.dirname(ordersExcelPath);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
 
-    // Read existing Excel data (if file exists)
-    let existingRows = [];
+    // Initialize variables for MySQL data processing
     let existingClaimData = new Map(); // Map to store claim data by order_id|product_code
     let maxUniqueId = 0;
-    
-    if (fs.existsSync(ordersExcelPath)) {
-      try {
-        const workbook = XLSX.readFile(ordersExcelPath);
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        existingRows = XLSX.utils.sheet_to_json(worksheet);
-        
-        // Build map of existing claim data
-        existingRows.forEach(row => {
-          const key = `${row.order_id}|${row.product_code}`;
-          existingClaimData.set(key, {
-            unique_id: row.unique_id,
-            status: row.status || 'unclaimed',
-            claimed_by: row.claimed_by || '',
-            claimed_at: row.claimed_at || '',
-            last_claimed_by: row.last_claimed_by || '',
-            last_claimed_at: row.last_claimed_at || '',
-            clone_status: row.clone_status || 'not_cloned',
-            cloned_order_id: row.cloned_order_id || '',
-            is_cloned_row: row.is_cloned_row || '',
-            label_downloaded: row.label_downloaded || '',
-            handover_at: row.handover_at || '',
-            customer_name: row.customer_name || '',
-            product_image: row.product_image || '',
-            priority_carrier: row.priority_carrier || '',
-            pincode: row.pincode || ''
-          });
-          
-          // Track max unique_id for new rows
-          if (row.unique_id && row.unique_id > maxUniqueId) {
-            maxUniqueId = row.unique_id;
-          }
-        });
-      } catch (e) {
-        this.logApiActivity({ type: 'excel-read-error', error: e.message });
-      }
-    }
 
     // Flatten Shipway orders to one row per product, preserving existing claim data
     const flatOrders = [];
@@ -503,7 +460,6 @@ class ShipwayService {
          handover_at: existingClaim ? existingClaim.handover_at : '',
          // Preserve custom columns or use empty defaults for new orders
          customer_name: existingClaim ? existingClaim.customer_name : '',
-         product_image: existingClaim ? existingClaim.product_image : '',
          // Add priority_carrier column (empty for new orders, preserve existing)
          priority_carrier: existingClaim ? existingClaim.priority_carrier : ''
         };
@@ -546,7 +502,7 @@ class ShipwayService {
         type: 'excel-write-with-new-columns', 
         rows: flatOrders.length, 
         preservedClaims: existingClaimData.size,
-        newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image', 'priority_carrier', 'pincode']
+        newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode']
       });
 
       // Automatically enhance orders with customer names and product images
@@ -760,7 +716,6 @@ class ShipwayService {
           label_downloaded: row.label_downloaded || false,
           handover_at: row.handover_at || '',
           customer_name: row.customer_name || '',
-          product_image: row.product_image || '',
           priority_carrier: row.priority_carrier || '',
           pincode: row.pincode || ''
         });
@@ -880,7 +835,6 @@ class ShipwayService {
           handover_at: existingClaim ? existingClaim.handover_at : '',
           // Preserve custom columns or use empty defaults for new orders
           customer_name: existingClaim ? existingClaim.customer_name : '',
-          product_image: existingClaim ? existingClaim.product_image : '',
           // Add priority_carrier column (empty for new orders, preserve existing)
           priority_carrier: existingClaim ? existingClaim.priority_carrier : ''
         };
@@ -960,7 +914,7 @@ class ShipwayService {
           type: 'mysql-write-with-new-columns', 
           rows: flatOrders.length, 
           preservedClaims: existingClaimData.size,
-          newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image', 'priority_carrier', 'pincode', 'is_in_new_order']
+          newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode', 'is_in_new_order']
         });
 
         // Automatically enhance orders with customer names and product images

@@ -165,3 +165,4 @@ migrateSettlementsExcelToMySQL().then(() => {
   console.error('💥 Settlements migration script crashed:', error);
   process.exit(1);
 });
+

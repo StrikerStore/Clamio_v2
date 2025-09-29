@@ -3,7 +3,6 @@ const { hashPassword } = require('../middleware/auth');
 const shipwayService = require('../services/shipwayService');
 const fs = require('fs');
 const path = require('path');
-const XLSX = require('xlsx');
 
 /**
  * User Management Controller
