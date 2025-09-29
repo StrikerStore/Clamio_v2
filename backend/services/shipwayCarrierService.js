@@ -1,5 +1,4 @@
 const axios = require('axios');
-const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
 const database = require('../config/database');

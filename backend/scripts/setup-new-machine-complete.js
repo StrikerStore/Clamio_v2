@@ -171,7 +171,6 @@ class NewMachineSetup {
           unique_id VARCHAR(100) UNIQUE,
           order_id VARCHAR(100),
           customer_name VARCHAR(255),
-          product_image VARCHAR(500),
           order_date DATETIME,
           product_name VARCHAR(500),
           product_code VARCHAR(100),

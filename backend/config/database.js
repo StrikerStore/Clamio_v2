@@ -1,17 +1,13 @@
-const XLSX = require('xlsx');
 const path = require('path');
 const fs = require('fs');
 const mysql = require('mysql2/promise');
 
 /**
- * Excel Database Configuration and Utilities
- * Handles all database operations using Excel files and MySQL
+ * Database Configuration and Utilities
+ * Handles all database operations using MySQL
  */
-class ExcelDatabase {
+class Database {
   constructor() {
-    this.dbPath = process.env.DB_FILE_PATH || './data/users.xlsx';
-    this.ensureDataDirectory();
-    this.initializeDatabase();
     this.mysqlConnection = null;
     this.mysqlInitialized = false;
     this.initializeMySQL();
@@ -65,9 +61,10 @@ class ExcelDatabase {
       this.mysqlInitialized = true;
     } catch (error) {
       console.error('❌ MySQL connection failed:', error.message);
-      // Continue with Excel-only mode if MySQL fails
+      // MySQL connection failed - application will not function without database
       this.mysqlConnection = null;
       this.mysqlInitialized = true; // Mark as initialized even if failed
+      throw new Error(`Database initialization failed: ${error.message}`);
     }
   }
 
@@ -259,13 +256,17 @@ class ExcelDatabase {
     if (!this.mysqlConnection) return;
 
     try {
+      // Drop existing orders table to recreate with clean structure
+      console.log('🔄 Dropping existing orders table and creating fresh one...');
+      await this.mysqlConnection.execute('DROP TABLE IF EXISTS orders');
+      console.log('✅ Old orders table dropped');
+
       const createTableQuery = `
-        CREATE TABLE IF NOT EXISTS orders (
+        CREATE TABLE orders (
           id VARCHAR(50) PRIMARY KEY,
           unique_id VARCHAR(100) UNIQUE,
           order_id VARCHAR(100),
           customer_name VARCHAR(255),
-          product_image VARCHAR(500),
           order_date DATETIME,
           product_name VARCHAR(500),
           product_code VARCHAR(100),
@@ -277,45 +278,16 @@ class ExcelDatabase {
           order_total_split DECIMAL(10,2),
           collectable_amount DECIMAL(10,2),
           pincode VARCHAR(20),
-          status VARCHAR(50),
-          claimed_by VARCHAR(50),
-          claimed_at TIMESTAMP NULL,
-          last_claimed_by VARCHAR(50),
-          last_claimed_at TIMESTAMP NULL,
-          clone_status VARCHAR(50),
-          cloned_order_id VARCHAR(100),
-          is_cloned_row BOOLEAN DEFAULT FALSE,
-          label_downloaded BOOLEAN DEFAULT FALSE,
-          handover_at TIMESTAMP NULL,
-          priority_carrier VARCHAR(50),
+          is_in_new_order BOOLEAN DEFAULT 1,
           INDEX idx_unique_id (unique_id),
           INDEX idx_order_id (order_id),
-          INDEX idx_claimed_by (claimed_by),
-          INDEX idx_status (status),
-          INDEX idx_warehouse (claimed_by, status),
           INDEX idx_pincode (pincode),
           INDEX idx_order_date (order_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ Orders table created/verified');
-
-      // Add is_in_new_order column if it doesn't exist
-      try {
-        await this.mysqlConnection.execute(`
-          ALTER TABLE orders 
-          ADD COLUMN is_in_new_order BOOLEAN DEFAULT 1
-        `);
-        console.log('✅ Added is_in_new_order column to orders table');
-      } catch (error) {
-        // Column might already exist, check if it's the expected error
-        if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ is_in_new_order column already exists');
-        } else {
-          console.error('❌ Error adding is_in_new_order column:', error.message);
-        }
-      }
+      console.log('✅ Fresh orders table created with clean structure');
 
       // Create labels table for caching label URLs
       await this.createLabelsTable();
@@ -329,40 +301,73 @@ class ExcelDatabase {
    */
   async createLabelsTable() {
     try {
+      // Drop existing labels table to recreate with clean structure
+      console.log('🔄 Dropping existing labels table and creating fresh one...');
+      await this.mysqlConnection.execute('DROP TABLE IF EXISTS labels');
+      console.log('✅ Old labels table dropped');
+
       const createLabelsTableQuery = `
-        CREATE TABLE IF NOT EXISTS labels (
+        CREATE TABLE labels (
           id INT AUTO_INCREMENT PRIMARY KEY,
           order_id VARCHAR(100) UNIQUE NOT NULL,
-          label_url VARCHAR(1000) NOT NULL,
+          label_url VARCHAR(1000),
           awb VARCHAR(100),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           carrier_id VARCHAR(100),
           carrier_name VARCHAR(255),
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+          handover_at TIMESTAMP NULL,
+          priority_carrier VARCHAR(50),
+          is_manifest TINYINT(1) DEFAULT 0,
+          INDEX idx_order_id (order_id),
+          INDEX idx_awb (awb),
+          INDEX idx_carrier_id (carrier_id),
+          INDEX idx_priority_carrier (priority_carrier),
+          INDEX idx_is_manifest (is_manifest)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createLabelsTableQuery);
-      console.log('✅ Labels table created/verified');
-
-      // Add carrier fields if they don't exist (for existing tables)
+      console.log('✅ Fresh labels table created with clean structure');
+      
+      // Add is_manifest column if it doesn't exist (for existing tables)
       try {
         await this.mysqlConnection.execute(`
           ALTER TABLE labels 
-          ADD COLUMN carrier_id VARCHAR(100),
-          ADD COLUMN carrier_name VARCHAR(255)
+          ADD COLUMN is_manifest TINYINT(1) DEFAULT 0,
+          ADD INDEX idx_is_manifest (is_manifest)
         `);
-        console.log('✅ Added carrier fields to labels table');
+        console.log('✅ Added is_manifest column to labels table');
       } catch (error) {
-        // Columns might already exist, check if it's the expected error
+        // Column might already exist, check if it's the expected error
         if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ Carrier fields already exist in labels table');
+          console.log('ℹ️ is_manifest column already exists in labels table');
         } else {
-          console.error('❌ Error adding carrier fields to labels table:', error.message);
+          console.error('❌ Error adding is_manifest column to labels table:', error.message);
         }
       }
-    } catch (error) {
+      
+      // Migrate existing labels data from orders table
+      await this.migrateLabelsData();
+      } catch (error) {
       console.error('❌ Error creating labels table:', error.message);
+    }
+  }
+
+  /**
+   * Migrate labels data from orders table to labels table
+   */
+  async migrateLabelsData() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      console.log('🔄 Migrating labels data from orders table...');
+
+      // Skip migration since labels table will be populated during label download process
+      console.log('ℹ️ Labels table will be populated during label download process - no migration needed');
+
+    } catch (error) {
+      console.error('❌ Error migrating labels data:', error.message);
     }
   }
 
@@ -373,46 +378,86 @@ class ExcelDatabase {
     if (!this.mysqlConnection) return;
 
     try {
+      // First check if claims table exists and has the correct structure
+      const [tables] = await this.mysqlConnection.execute(`
+        SELECT COUNT(*) as count FROM information_schema.tables 
+        WHERE table_schema = DATABASE() AND table_name = 'claims'
+      `);
+      
+      const tableExists = tables[0].count > 0;
+      
+      if (tableExists) {
+        // Check if the table has the correct structure (check for 'status' column)
+        const [columns] = await this.mysqlConnection.execute(`
+          SELECT COUNT(*) as count FROM information_schema.columns 
+          WHERE table_schema = DATABASE() AND table_name = 'claims' AND column_name = 'status'
+        `);
+        
+        const hasCorrectStructure = columns[0].count > 0;
+        
+        if (!hasCorrectStructure) {
+          console.log('🔄 Claims table exists but has old structure, recreating...');
+          // Drop the old table
+          await this.mysqlConnection.execute('DROP TABLE claims');
+        }
+      }
+
       const createClaimsTableQuery = `
         CREATE TABLE IF NOT EXISTS claims (
           id INT AUTO_INCREMENT PRIMARY KEY,
+          order_unique_id VARCHAR(100) NOT NULL UNIQUE,
           order_id VARCHAR(100) NOT NULL,
-          unique_id INT NOT NULL,
-          claimed_by VARCHAR(50) NOT NULL,
-          claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          claimed_status VARCHAR(50) DEFAULT 'active',
-          product_code VARCHAR(100),
+          status VARCHAR(50) DEFAULT 'unclaimed',
+          claimed_by VARCHAR(50),
+          claimed_at TIMESTAMP NULL,
+          last_claimed_by VARCHAR(50),
+          last_claimed_at TIMESTAMP NULL,
           clone_status VARCHAR(50) DEFAULT 'not_cloned',
           cloned_order_id VARCHAR(100),
-          is_cloned_row BOOLEAN DEFAULT FALSE
+          is_cloned_row BOOLEAN DEFAULT FALSE,
+          label_downloaded BOOLEAN DEFAULT FALSE,
+          INDEX idx_order_unique_id (order_unique_id),
+          INDEX idx_order_id (order_id),
+          INDEX idx_claimed_by (claimed_by),
+          INDEX idx_status (status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createClaimsTableQuery);
       console.log('✅ Claims table created/verified');
+      
+      // Migrate existing claims data from orders table if claims table is empty
+      await this.migrateClaimsData();
     } catch (error) {
       console.error('❌ Error creating claims table:', error.message);
     }
   }
 
   /**
-   * Ensure the data directory exists
+   * Migrate claims data from orders table to claims table
    */
-  ensureDataDirectory() {
-    const dir = path.dirname(this.dbPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+  async migrateClaimsData() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if claims table is empty
+      const [claimsCount] = await this.mysqlConnection.execute('SELECT COUNT(*) as count FROM claims');
+      
+      if (claimsCount[0].count > 0) {
+        console.log('✅ Claims table already has data, skipping migration');
+        return;
+      }
+
+      console.log('🔄 Migrating claims data from orders table...');
+
+      // Skip migration since claims table will be populated as orders are claimed
+      console.log('ℹ️ Claims table will be populated as orders are claimed - no migration needed');
+
+    } catch (error) {
+      console.error('❌ Error migrating claims data:', error.message);
     }
   }
 
-  /**
-   * Initialize the database with default structure if it doesn't exist
-   * Note: Users are now handled by MySQL, this is kept for other Excel files
-   */
-  initializeDatabase() {
-    // Users initialization moved to MySQL
-    // This method is kept for potential other Excel file initialization
-  }
 
   // Excel methods removed - users now use MySQL only
 
@@ -1754,21 +1799,31 @@ class ExcelDatabase {
     }
 
     try {
-      const [result] = await this.mysqlConnection.execute(
+      // Use INSERT ... ON DUPLICATE KEY UPDATE for orders table
+      await this.mysqlConnection.execute(
         `INSERT INTO orders (
-          id, unique_id, order_id, customer_name, product_image, order_date,
+          id, unique_id, order_id, customer_name, order_date,
           product_name, product_code, selling_price, order_total, payment_type,
           prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
-          pincode, status, claimed_by, claimed_at, last_claimed_by, last_claimed_at,
-          clone_status, cloned_order_id, is_cloned_row, label_downloaded,
-          handover_at, priority_carrier, is_in_new_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          pincode, is_in_new_order
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          order_date = VALUES(order_date),
+          product_name = VALUES(product_name),
+          selling_price = VALUES(selling_price),
+          order_total = VALUES(order_total),
+          payment_type = VALUES(payment_type),
+          prepaid_amount = VALUES(prepaid_amount),
+          order_total_ratio = VALUES(order_total_ratio),
+          order_total_split = VALUES(order_total_split),
+          collectable_amount = VALUES(collectable_amount),
+          pincode = VALUES(pincode),
+          is_in_new_order = VALUES(is_in_new_order)`,
         [
           orderData.id || null,
           orderData.unique_id || null,
           orderData.order_id || null,
           orderData.customer_name || null,
-          orderData.product_image || null,
           orderData.order_date || null,
           orderData.product_name || null,
           orderData.product_code || null,
@@ -1780,6 +1835,21 @@ class ExcelDatabase {
           orderData.order_total_split || null,
           orderData.collectable_amount || null,
           orderData.pincode || null,
+          orderData.is_in_new_order !== undefined ? orderData.is_in_new_order : true
+        ]
+      );
+
+      // Use INSERT ... ON DUPLICATE KEY UPDATE for claims table
+      await this.mysqlConnection.execute(
+        `INSERT INTO claims (
+          order_unique_id, order_id, status, claimed_by, claimed_at, last_claimed_by, 
+          last_claimed_at, clone_status, cloned_order_id, is_cloned_row, label_downloaded
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          order_id = VALUES(order_id)`,
+        [
+          orderData.unique_id || null,
+          orderData.order_id || null,
           orderData.status || 'unclaimed',
           orderData.claimed_by || null,
           orderData.claimed_at || null,
@@ -1788,10 +1858,22 @@ class ExcelDatabase {
           orderData.clone_status || 'not_cloned',
           orderData.cloned_order_id || null,
           orderData.is_cloned_row || false,
-          orderData.label_downloaded || false,
+          orderData.label_downloaded || false
+        ]
+      );
+
+      // Use INSERT ... ON DUPLICATE KEY UPDATE for labels table
+      await this.mysqlConnection.execute(
+        `INSERT INTO labels (
+          order_id, handover_at, priority_carrier
+        ) VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          handover_at = VALUES(handover_at),
+          priority_carrier = VALUES(priority_carrier)`,
+        [
+          orderData.order_id || null,
           orderData.handover_at || null,
-          orderData.priority_carrier || null,
-          orderData.is_in_new_order !== undefined ? orderData.is_in_new_order : true
+          orderData.priority_carrier || null
         ]
       );
 
@@ -1800,6 +1882,46 @@ class ExcelDatabase {
       console.error('Error creating order:', error);
       throw new Error('Failed to create order');
     }
+  }
+
+  /**
+   * Remove size information from product name for matching
+   * @param {string} productName - Product name with size
+   * @returns {string} Product name without size
+   */
+  removeSizeFromProductName(productName) {
+    if (!productName) return '';
+    
+    let cleanName = productName.trim();
+    
+    // Check if it's a kids product
+    if (cleanName.toLowerCase().includes('kids')) {
+      // For kids products, only remove numeric size patterns like 24-26, 16-18, 20-22
+      cleanName = cleanName.replace(/ - [0-9]+-[0-9]+$/i, '');
+    } else {
+      // For regular products, remove standard size patterns
+      const sizePatterns = [
+        / - (XS|S|M|L|XL|2XL|3XL|4XL|5XL)$/i,
+        / - (XXXL|XXL)$/i,
+        / - (Small|Medium|Large|Extra Large)$/i,
+        / - (\d{4}-\d{4})$/i, // Year patterns like 2025-26
+        /^(XS|S|M|L|XL|2XL|3XL|4XL|5XL) - /i,
+        /^(Small|Medium|Large|Extra Large) - /i,
+        / - (XS|S|M|L|XL|2XL|3XL|4XL|5XL)(?= - |$)/gi,
+        / - (Small|Medium|Large|Extra Large)(?= - |$)/gi,
+      ];
+      
+      for (const pattern of sizePatterns) {
+        cleanName = cleanName.replace(pattern, '');
+      }
+    }
+    
+    // Clean up any double spaces or trailing dashes
+    cleanName = cleanName.replace(/\s*-\s*$/, ''); // Remove trailing dash
+    cleanName = cleanName.replace(/\s+/g, ' '); // Replace multiple spaces with single space
+    cleanName = cleanName.trim();
+    
+    return cleanName;
   }
 
   /**
@@ -1813,10 +1935,40 @@ class ExcelDatabase {
     }
 
     try {
-      const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM orders WHERE unique_id = ?',
-        [unique_id]
-      );
+      const [rows] = await this.mysqlConnection.execute(`
+        SELECT 
+          o.*,
+          p.image as product_image,
+          c.status,
+          c.claimed_by,
+          c.claimed_at,
+          c.last_claimed_by,
+          c.last_claimed_at,
+          c.clone_status,
+          c.cloned_order_id,
+          c.is_cloned_row,
+          c.label_downloaded,
+          l.label_url,
+          l.awb,
+          l.carrier_id,
+          l.carrier_name,
+          l.handover_at,
+          l.priority_carrier,
+          l.is_manifest
+        FROM orders o
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+        LEFT JOIN labels l ON o.order_id = l.order_id
+        WHERE o.unique_id = ?
+      `, [unique_id]);
+      
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
       console.error('Error getting order by unique_id:', error);
@@ -1835,10 +1987,41 @@ class ExcelDatabase {
     }
 
     try {
-      const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM orders WHERE order_id = ? ORDER BY product_name',
-        [order_id]
-      );
+      const [rows] = await this.mysqlConnection.execute(`
+        SELECT 
+          o.*,
+          p.image as product_image,
+          c.status,
+          c.claimed_by,
+          c.claimed_at,
+          c.last_claimed_by,
+          c.last_claimed_at,
+          c.clone_status,
+          c.cloned_order_id,
+          c.is_cloned_row,
+          c.label_downloaded,
+          l.label_url,
+          l.awb,
+          l.carrier_id,
+          l.carrier_name,
+          l.handover_at,
+          l.priority_carrier,
+          l.is_manifest
+        FROM orders o
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+        LEFT JOIN labels l ON o.order_id = l.order_id
+        WHERE o.order_id = ? 
+        ORDER BY o.product_name
+      `, [order_id]);
+      
       return rows;
     } catch (error) {
       console.error('Error getting orders by order_id:', error);
@@ -1856,9 +2039,41 @@ class ExcelDatabase {
     }
 
     try {
-      const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM orders WHERE (is_in_new_order = 1 OR label_downloaded = 1) ORDER BY order_date DESC, order_id, product_name'
-      );
+      const [rows] = await this.mysqlConnection.execute(`
+        SELECT 
+          o.*,
+          p.image as product_image,
+          c.status,
+          c.claimed_by,
+          c.claimed_at,
+          c.last_claimed_by,
+          c.last_claimed_at,
+          c.clone_status,
+          c.cloned_order_id,
+          c.is_cloned_row,
+          c.label_downloaded,
+          l.label_url,
+          l.awb,
+          l.carrier_id,
+          l.carrier_name,
+          l.handover_at,
+          l.priority_carrier,
+          l.is_manifest
+        FROM orders o
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+        LEFT JOIN labels l ON o.order_id = l.order_id
+        WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1) 
+        ORDER BY o.order_date DESC, o.order_id, o.product_name
+      `);
+      
       return rows;
     } catch (error) {
       console.error('Error getting all orders:', error);
@@ -1877,10 +2092,41 @@ class ExcelDatabase {
     }
 
     try {
-      const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM orders WHERE claimed_by = ? AND (is_in_new_order = 1 OR label_downloaded = 1) ORDER BY claimed_at DESC',
-        [warehouseId]
-      );
+      const [rows] = await this.mysqlConnection.execute(`
+        SELECT 
+          o.*,
+          p.image as product_image,
+          c.status,
+          c.claimed_by,
+          c.claimed_at,
+          c.last_claimed_by,
+          c.last_claimed_at,
+          c.clone_status,
+          c.cloned_order_id,
+          c.is_cloned_row,
+          c.label_downloaded,
+          l.label_url,
+          l.awb,
+          l.carrier_id,
+          l.carrier_name,
+          l.handover_at,
+          l.priority_carrier,
+          l.is_manifest
+        FROM orders o
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+        LEFT JOIN labels l ON o.order_id = l.order_id
+        WHERE c.claimed_by = ? AND (o.is_in_new_order = 1 OR c.label_downloaded = 1) 
+        ORDER BY c.claimed_at DESC
+      `, [warehouseId]);
+      
       return rows;
     } catch (error) {
       console.error('Error getting orders by vendor:', error);
@@ -1900,14 +2146,44 @@ class ExcelDatabase {
     }
 
     try {
-      const [rows] = await this.mysqlConnection.execute(
-        `SELECT * FROM orders 
-        WHERE claimed_by = ? 
-        AND (status = 'claimed' OR status = 'ready_for_handover')
-        AND (is_in_new_order = 1 OR label_downloaded = 1)
-        ORDER BY order_date DESC, order_id`,
-        [warehouseId]
-      );
+      const [rows] = await this.mysqlConnection.execute(`
+        SELECT 
+          o.*,
+          p.image as product_image,
+          c.status,
+          c.claimed_by,
+          c.claimed_at,
+          c.last_claimed_by,
+          c.last_claimed_at,
+          c.clone_status,
+          c.cloned_order_id,
+          c.is_cloned_row,
+          c.label_downloaded,
+          l.label_url,
+          l.awb,
+          l.carrier_id,
+          l.carrier_name,
+          l.handover_at,
+          l.priority_carrier,
+          l.is_manifest
+        FROM orders o
+        LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+        LEFT JOIN labels l ON o.order_id = l.order_id
+        WHERE c.claimed_by = ? 
+        AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
+        AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
+        AND (l.is_manifest IS NULL OR l.is_manifest = 0)
+        ORDER BY o.order_date DESC, o.order_id
+      `, [warehouseId]);
+      
       return rows;
     } catch (error) {
       console.error('Error getting vendor orders:', error);
@@ -1927,40 +2203,113 @@ class ExcelDatabase {
     }
 
     try {
-      const fields = [];
-      const values = [];
+      // Separate fields for orders, claims, and labels tables
+      const orderFields = [];
+      const orderValues = [];
+      const claimFields = [];
+      const claimValues = [];
+      const labelFields = [];
+      const labelValues = [];
 
-      // Handle all possible order fields
-      const allowedFields = [
-        'order_id', 'customer_name', 'product_image', 'order_date',
+      // Orders table fields
+      const allowedOrderFields = [
+        'order_id', 'customer_name', 'order_date',
         'product_name', 'product_code', 'selling_price', 'order_total',
         'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split',
-        'collectable_amount', 'pincode', 'status', 'claimed_by', 'claimed_at',
-        'last_claimed_by', 'last_claimed_at', 'clone_status', 'cloned_order_id',
-        'is_cloned_row', 'label_downloaded', 'handover_at', 'priority_carrier',
-        'is_in_new_order'
+        'collectable_amount', 'pincode', 'is_in_new_order'
       ];
 
-      allowedFields.forEach(field => {
+      // Claims table fields
+      const allowedClaimFields = [
+        'order_id', 'status', 'claimed_by', 'claimed_at', 'last_claimed_by', 'last_claimed_at',
+        'clone_status', 'cloned_order_id', 'is_cloned_row', 'label_downloaded'
+      ];
+
+      // Labels table fields
+      const allowedLabelFields = [
+        'label_url', 'awb', 'carrier_name', 'handover_at', 'priority_carrier'
+      ];
+
+      // Separate the fields
+      allowedOrderFields.forEach(field => {
         if (updateData[field] !== undefined) {
-          fields.push(`${field} = ?`);
-          values.push(updateData[field]);
+          orderFields.push(`${field} = ?`);
+          orderValues.push(updateData[field]);
         }
       });
 
-      if (fields.length === 0) {
-        throw new Error('No fields to update');
+      allowedClaimFields.forEach(field => {
+        if (updateData[field] !== undefined) {
+          claimFields.push(`${field} = ?`);
+          claimValues.push(updateData[field]);
+        }
+      });
+
+      allowedLabelFields.forEach(field => {
+        if (updateData[field] !== undefined) {
+          labelFields.push(`${field} = ?`);
+          labelValues.push(updateData[field]);
+        }
+      });
+
+      // Update orders table if there are order fields to update
+      if (orderFields.length > 0) {
+        orderValues.push(unique_id);
+        const [orderResult] = await this.mysqlConnection.execute(
+          `UPDATE orders SET ${orderFields.join(', ')} WHERE unique_id = ?`,
+          orderValues
+        );
+        
+        if (orderResult.affectedRows === 0) {
+        return null;
+        }
       }
 
-      values.push(unique_id);
+      // Update claims table if there are claim fields to update
+      if (claimFields.length > 0) {
+        // First, ensure a claim record exists for this unique_id
+        await this.mysqlConnection.execute(`
+          INSERT INTO claims (order_unique_id, order_id) 
+          SELECT o.unique_id, o.order_id FROM orders o WHERE o.unique_id = ?
+          ON DUPLICATE KEY UPDATE order_unique_id = VALUES(order_unique_id)
+        `, [unique_id]);
 
-      const [result] = await this.mysqlConnection.execute(
-        `UPDATE orders SET ${fields.join(', ')} WHERE unique_id = ?`,
-        values
-      );
+        claimValues.push(unique_id);
+        await this.mysqlConnection.execute(
+          `UPDATE claims SET ${claimFields.join(', ')} WHERE order_unique_id = ?`,
+          claimValues
+        );
+      }
 
-      if (result.affectedRows === 0) {
-        return null;
+      // Update labels table if there are label fields to update
+      if (labelFields.length > 0) {
+        // First, get the order_id for this unique_id
+        const [orderRows] = await this.mysqlConnection.execute(
+          'SELECT order_id FROM orders WHERE unique_id = ?',
+          [unique_id]
+        );
+
+        if (orderRows.length > 0) {
+          const orderId = orderRows[0].order_id;
+
+          // Ensure a label record exists for this order_id
+          await this.mysqlConnection.execute(`
+            INSERT INTO labels (order_id) 
+            VALUES (?)
+            ON DUPLICATE KEY UPDATE order_id = VALUES(order_id)
+          `, [orderId]);
+
+          labelValues.push(orderId);
+          await this.mysqlConnection.execute(
+            `UPDATE labels SET ${labelFields.join(', ')} WHERE order_id = ?`,
+            labelValues
+          );
+        }
+      }
+
+      // If no fields to update at all
+      if (orderFields.length === 0 && claimFields.length === 0 && labelFields.length === 0) {
+        throw new Error('No fields to update');
       }
 
       return await this.getOrderByUniqueId(unique_id);
@@ -2031,11 +2380,21 @@ class ExcelDatabase {
 
     try {
       const [rows] = await this.mysqlConnection.execute(
-        `SELECT * FROM orders 
-         WHERE (order_id LIKE ? OR customer_name LIKE ? OR product_name LIKE ? 
-         OR product_code LIKE ? OR pincode LIKE ?)
-         AND (is_in_new_order = 1 OR label_downloaded = 1)
-         ORDER BY order_date DESC, order_id`,
+        `SELECT o.*, p.image as product_image
+         FROM orders o
+         LEFT JOIN products p ON TRIM(
+          CASE 
+            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
+              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
+            ELSE 
+              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
+          END
+        ) = p.name
+         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+         WHERE (o.order_id LIKE ? OR o.customer_name LIKE ? OR o.product_name LIKE ? 
+         OR o.product_code LIKE ? OR o.pincode LIKE ?)
+         AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
+         ORDER BY o.order_date DESC, o.order_id`,
         [
           `%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`,
           `%${searchTerm}%`, `%${searchTerm}%`
@@ -2105,17 +2464,54 @@ class ExcelDatabase {
     }
 
     try {
+      // Handle partial updates by only updating provided fields
+      const updateFields = [];
+      const updateValues = [];
+      
+      // Build dynamic update clause based on provided fields
+      if (labelData.hasOwnProperty('label_url')) {
+        updateFields.push('label_url = ?');
+        updateValues.push(labelData.label_url);
+      }
+      if (labelData.hasOwnProperty('awb')) {
+        updateFields.push('awb = ?');
+        updateValues.push(labelData.awb || null);
+      }
+      if (labelData.hasOwnProperty('carrier_id')) {
+        updateFields.push('carrier_id = ?');
+        updateValues.push(labelData.carrier_id || null);
+      }
+      if (labelData.hasOwnProperty('carrier_name')) {
+        updateFields.push('carrier_name = ?');
+        updateValues.push(labelData.carrier_name || null);
+      }
+      if (labelData.hasOwnProperty('priority_carrier')) {
+        updateFields.push('priority_carrier = ?');
+        updateValues.push(labelData.priority_carrier || null);
+      }
+      if (labelData.hasOwnProperty('is_manifest')) {
+        updateFields.push('is_manifest = ?');
+        updateValues.push(labelData.is_manifest || 0);
+      }
+      
+      // Always add updated_at
+      updateFields.push('updated_at = CURRENT_TIMESTAMP');
+      
+      const updateClause = updateFields.join(', ');
+      
       const [result] = await this.mysqlConnection.execute(
-        `INSERT INTO labels (order_id, label_url, awb) 
-         VALUES (?, ?, ?) 
-         ON DUPLICATE KEY UPDATE 
-         label_url = VALUES(label_url), 
-         awb = VALUES(awb),
-         updated_at = CURRENT_TIMESTAMP`,
+        `INSERT INTO labels (order_id, label_url, awb, carrier_id, carrier_name, priority_carrier, is_manifest) 
+         VALUES (?, ?, ?, ?, ?, ?, ?) 
+         ON DUPLICATE KEY UPDATE ${updateClause}`,
         [
           labelData.order_id,
-          labelData.label_url,
-          labelData.awb || null
+          labelData.label_url || null,
+          labelData.awb || null,
+          labelData.carrier_id || null,
+          labelData.carrier_name || null,
+          labelData.priority_carrier || null,
+          labelData.is_manifest || 0,
+          ...updateValues
         ]
       );
 
@@ -2157,4 +2553,4 @@ class ExcelDatabase {
   }
 }
 
-module.exports = new ExcelDatabase(); 
+module.exports = new Database(); 
