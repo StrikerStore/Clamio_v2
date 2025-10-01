@@ -19,12 +19,49 @@ class Database {
   async initializeMySQL() {
     try {
       // Get database configuration from environment variables
-      const dbConfig = {
-        host: process.env.DB_HOST,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME
+      // Support both standard DB_* and MYSQL_* variable formats, plus URL parsing
+      let dbConfig = {
+        host: process.env.DB_HOST || process.env.MYSQL_HOST || process.env.MYSQLHOST,
+        user: process.env.DB_USER || process.env.MYSQL_USER || process.env.MYSQLUSER,
+        password: process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || process.env.MYSQLPASSWORD,
+        database: process.env.DB_NAME || process.env.MYSQL_DATABASE || process.env.MYSQLDATABASE,
+        port: process.env.DB_PORT || process.env.MYSQL_PORT || process.env.MYSQLPORT || 3306
       };
+
+      // If MYSQL_URL is provided, parse it and override individual settings
+      if (process.env.MYSQL_URL) {
+        try {
+          const url = new URL(process.env.MYSQL_URL);
+          dbConfig.host = url.hostname;
+          dbConfig.port = url.port || 3306;
+          dbConfig.user = url.username;
+          dbConfig.password = url.password;
+          dbConfig.database = url.pathname.substring(1); // Remove leading slash
+          console.log('✅ Parsed database configuration from MYSQL_URL');
+          console.log('🔍 Connection details:', {
+            host: dbConfig.host,
+            port: dbConfig.port,
+            user: dbConfig.user,
+            database: dbConfig.database,
+            hasPassword: !!dbConfig.password
+          });
+        } catch (error) {
+          console.error('❌ Error parsing MYSQL_URL:', error.message);
+          throw new Error('Invalid MYSQL_URL format');
+        }
+      }
+
+      // Log connection details for debugging
+      const sslConfig = process.env.NODE_ENV === 'production' || process.env.DB_HOST?.includes('railway') || process.env.DB_HOST?.includes('rlwy') ? { rejectUnauthorized: false } : false;
+      console.log('🔍 Attempting to connect with:', {
+        host: dbConfig.host,
+        port: dbConfig.port,
+        user: dbConfig.user,
+        database: dbConfig.database,
+        hasPassword: !!dbConfig.password,
+        ssl: sslConfig,
+        isRailway: dbConfig.host?.includes('railway') || dbConfig.host?.includes('rlwy')
+      });
 
       // Validate required environment variables
       if (!dbConfig.host || !dbConfig.user || !dbConfig.password || !dbConfig.database) {
@@ -35,7 +72,12 @@ class Database {
       let connection = await mysql.createConnection({
         host: dbConfig.host,
         user: dbConfig.user,
-        password: dbConfig.password
+        password: dbConfig.password,
+        port: dbConfig.port,
+        ssl: process.env.NODE_ENV === 'production' || process.env.DB_HOST?.includes('railway') || process.env.DB_HOST?.includes('rlwy') ? { rejectUnauthorized: false } : false,
+        connectTimeout: 60000,
+        acquireTimeout: 60000,
+        timeout: 60000
       });
 
       // Create database if it doesn't exist
@@ -47,7 +89,12 @@ class Database {
         host: dbConfig.host,
         user: dbConfig.user,
         password: dbConfig.password,
-        database: dbConfig.database
+        database: dbConfig.database,
+        port: dbConfig.port,
+        ssl: process.env.NODE_ENV === 'production' || process.env.DB_HOST?.includes('railway') || process.env.DB_HOST?.includes('rlwy') ? { rejectUnauthorized: false } : false,
+        connectTimeout: 60000,
+        acquireTimeout: 60000,
+        timeout: 60000
       });
       
       console.log('✅ MySQL connection established');
