@@ -1,4 +1,16 @@
-import { LoginForm } from "@/components/auth/login-form"
+"use client"
+
+import dynamic from "next/dynamic"
+import { ClientOnly } from "@/components/auth/client-only"
+
+const LoginForm = dynamic(() => import("@/components/auth/login-form").then(mod => ({ default: mod.LoginForm })), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-96 bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
+      <div className="text-gray-500">Loading...</div>
+    </div>
+  )
+})
 
 export default function LoginPage() {
   return (
@@ -18,7 +30,9 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-gray-900">Stiker Store - Claimio</h1>
           <p className="text-gray-600 mt-2">Sign in to manage your orders</p>
         </div>
-        <LoginForm />
+        <ClientOnly>
+          <LoginForm />
+        </ClientOnly>
       </div>
     </div>
   )

@@ -4,6 +4,7 @@ import type React from "react"
 import { createContext, useContext, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { apiClient } from "@/lib/api"
+import { useClientOnly } from "@/hooks/use-client-only"
 
 interface User {
   id: string
@@ -32,9 +33,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authHeader, setAuthHeader] = useState<string | null>(null)
   const [vendorToken, setVendorToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const isClient = useClientOnly()
   const router = useRouter()
 
   useEffect(() => {
+    if (!isClient) return
+
     // Check for stored auth data on mount
     const storedAuthHeader = localStorage.getItem("authHeader")
     const storedVendorToken = localStorage.getItem("vendorToken")
@@ -54,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
     setLoading(false)
-  }, [])
+  }, [isClient])
 
   const login = async (email: string, password: string) => {
     try {
@@ -120,6 +124,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error("Logout error:", error)
     }
+  }
+
+  // Prevent hydration mismatch by not rendering until client-side
+  if (!isClient) {
+    return (
+      <AuthContext.Provider value={{ user: null, login, logout, loading: true, authHeader: null, vendorToken: null }}>
+        {children}
+      </AuthContext.Provider>
+    )
   }
 
   return (

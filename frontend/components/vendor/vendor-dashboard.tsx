@@ -296,6 +296,20 @@ export function VendorDashboard() {
       console.log('🔄 Refreshing orders data...');
       const response = await apiClient.getOrders();
       if (response.success && response.data && Array.isArray(response.data.orders)) {
+        console.log('📊 Raw orders data:', response.data.orders.length, 'orders');
+        // Check for duplicates in raw data
+        const uniqueIds = new Set();
+        const duplicates = [];
+        response.data.orders.forEach((order, index) => {
+          if (uniqueIds.has(order.unique_id)) {
+            duplicates.push({ index, unique_id: order.unique_id, order });
+          } else {
+            uniqueIds.add(order.unique_id);
+          }
+        });
+        if (duplicates.length > 0) {
+          console.warn('🚨 Duplicate unique_ids found in raw API data:', duplicates);
+        }
         setOrders(response.data.orders);
         console.log('✅ Orders refreshed successfully');
       } else if (response.success && response.data && response.data.orders) {
@@ -523,6 +537,45 @@ export function VendorDashboard() {
     }
   }
 
+
+  const handleMarkReady = async (orderId: string) => {
+    try {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${API_BASE_URL}/orders/mark-ready`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': user?.token || '',
+        },
+        body: JSON.stringify({ order_id: orderId }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: "Order Marked Ready",
+          description: `Order ${orderId} is now ready for handover`,
+        });
+        // Refresh orders to show updated status
+        fetchGroupedOrders();
+      } else {
+        toast({
+          title: "Error",
+          description: data.message || "Failed to mark order as ready",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error marking order as ready:', error);
+      toast({
+        title: "Error",
+        description: "Network error occurred",
+        variant: "destructive",
+      });
+    }
+  }
+
   const handleBulkMarkReady = async () => {
     if (selectedMyOrders.length === 0) {
       toast({
@@ -696,6 +749,30 @@ export function VendorDashboard() {
     });
   };
 
+  // Helper function to ensure unique orders and log duplicates
+  const ensureUniqueOrders = (orders: any[], keyField: string = 'unique_id') => {
+    const seen = new Set();
+    const uniqueOrders = [];
+    const duplicates = [];
+    
+    for (const order of orders) {
+      const key = order[keyField];
+      if (seen.has(key)) {
+        duplicates.push({ key, order });
+        console.warn(`Duplicate ${keyField} found:`, key, order);
+      } else {
+        seen.add(key);
+        uniqueOrders.push(order);
+      }
+    }
+    
+    if (duplicates.length > 0) {
+      console.warn(`Found ${duplicates.length} duplicate orders with ${keyField}:`, duplicates);
+    }
+    
+    return uniqueOrders;
+  };
+
   // Filter orders based on active tab and search/date filters
   const getFilteredOrdersForTab = (tab: string) => {
     if (tab === "my-orders") {
@@ -788,7 +865,8 @@ export function VendorDashboard() {
       });
     }
     
-    return baseOrders;
+    // Ensure unique orders before returning
+    return ensureUniqueOrders(baseOrders, 'unique_id');
   }
 
   // Filter grouped orders for My Orders tab
@@ -857,7 +935,8 @@ export function VendorDashboard() {
       });
     }
     
-    return baseOrders;
+    // Ensure unique orders before returning
+    return ensureUniqueOrders(baseOrders, 'order_id');
   }
 
   const handleClaimRevenue = async () => {
@@ -1548,8 +1627,8 @@ export function VendorDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {getFilteredOrdersForTab("all-orders").map((order) => (
-                          <TableRow key={order.unique_id}>
+                        {getFilteredOrdersForTab("all-orders").map((order, index) => (
+                          <TableRow key={`${order.unique_id}-${index}`}>
                             <TableCell>
                               <input
                                 type="checkbox"
@@ -1655,8 +1734,8 @@ export function VendorDashboard() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {getFilteredOrdersForTab("my-orders").map((order) => (
-                            <TableRow key={order.order_id} className="group">
+                          {getFilteredOrdersForTab("my-orders").map((order, index) => (
+                            <TableRow key={`${order.order_id}-${index}`} className="group">
                               <TableCell>
                                 <input
                                   type="checkbox"
@@ -1797,8 +1876,10 @@ export function VendorDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {getFilteredOrdersForTab("handover").map((order) => (
-                          <TableRow key={order.order_id}>
+
+                        {getFilteredOrdersForTab("handover").map((order, index) => (
+                          <TableRow key={`${order.order_id}-${index}`}>
+
                             <TableCell>
                               <TooltipProvider>
                                 <Tooltip>
