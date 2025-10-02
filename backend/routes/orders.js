@@ -2853,4 +2853,409 @@ router.post('/refresh', async (req, res) => {
   }
 });
 
+/**
+ * @route   POST /api/orders/reverse
+ * @desc    Reverse an order (unclaim it) - handles both cases with and without label download
+ * @access  Vendor (token required)
+ */
+router.post('/reverse', async (req, res) => {
+  const { unique_id } = req.body;
+  let token = req.headers['authorization'];
+  
+  // Handle case where token might be an object
+  if (typeof token === 'object' && token !== null) {
+    console.log('⚠️  Token received as object, attempting to extract string value');
+    console.log('  - Object keys:', Object.keys(token));
+    console.log('  - Object values:', Object.values(token));
+    
+    // Try to extract the actual token string
+    if (token.token) {
+      token = token.token;
+    } else if (token.authorization) {
+      token = token.authorization;
+    } else if (Object.values(token).length === 1) {
+      token = Object.values(token)[0];
+    } else {
+      console.log('❌ Cannot extract token from object');
+      token = null;
+    }
+  }
+  
+  console.log('🔵 REVERSE REQUEST START');
+  console.log('  - unique_id:', unique_id);
+  console.log('  - token received:', token ? 'YES' : 'NO');
+  console.log('  - token value:', token ? token.substring(0, 8) + '...' : 'null');
+
+  if (!unique_id) {
+    console.log('❌ REVERSE FAILED: Missing unique_id');
+    return res.status(400).json({ success: false, message: 'unique_id is required' });
+  }
+
+  if (!token) {
+    console.log('❌ REVERSE FAILED: Missing token');
+    return res.status(400).json({ success: false, message: 'Authorization token required' });
+  }
+
+  try {
+    // Load users from MySQL to get vendor info
+    const database = require('../config/database');
+    
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      console.log('❌ MySQL connection not available');
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+    
+    const vendor = await database.getUserByToken(token);
+    
+    if (!vendor || vendor.active_session !== 'TRUE') {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+
+    console.log('✅ VENDOR FOUND:');
+    console.log('  - Email:', vendor.email);
+    console.log('  - Warehouse ID:', vendor.warehouseId);
+
+    // Get the order details
+    const order = await database.getOrderByUniqueId(unique_id);
+    
+    if (!order) {
+      console.log('❌ ORDER NOT FOUND:', unique_id);
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    // Check if the order is claimed by this vendor
+    if (order.claimed_by !== vendor.warehouseId) {
+      console.log('❌ ORDER NOT CLAIMED BY THIS VENDOR');
+      console.log('  - Order claimed by:', order.claimed_by);
+      console.log('  - Current vendor:', vendor.warehouseId);
+      return res.status(403).json({ success: false, message: 'You can only reverse orders claimed by you' });
+    }
+
+    console.log('✅ ORDER FOUND AND CLAIMED BY VENDOR');
+    console.log('  - Order ID:', order.order_id);
+    console.log('  - Status:', order.status);
+    console.log('  - Label Downloaded:', order.label_downloaded);
+
+    // Check label_downloaded status
+    const isLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === true || order.label_downloaded === '1';
+    
+    if (isLabelDownloaded) {
+      console.log('🔄 CASE 2: Label downloaded - calling Shipway cancel API');
+      
+      // Get AWB number from labels table
+      const label = await database.getLabelByOrderId(order.order_id);
+      
+      if (!label || !label.awb) {
+        console.log('❌ AWB NOT FOUND for order:', order.order_id);
+        return res.status(400).json({ 
+          success: false, 
+          message: 'AWB number not found for this order. Cannot cancel shipment.' 
+        });
+      }
+
+      console.log('✅ AWB FOUND:', label.awb);
+
+      // Call Shipway cancel API
+      const shipwayService = require('../services/shipwayService');
+      
+      try {
+        const cancelResult = await shipwayService.cancelShipment([label.awb]);
+        console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+      } catch (cancelError) {
+        console.log('❌ SHIPWAY CANCEL FAILED:', cancelError.message);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to cancel shipment. Please try after sometime.',
+          error: 'shipway_cancel_failed'
+        });
+      }
+
+      // Clear label data after successful cancellation
+      await database.mysqlConnection.execute(
+        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL WHERE order_id = ?',
+        [order.order_id]
+      );
+      console.log('✅ LABEL DATA CLEARED');
+    } else {
+      console.log('🔄 CASE 1: No label downloaded - simple reverse');
+    }
+
+    // Clear claim information (both cases)
+    await database.mysqlConnection.execute(
+      `UPDATE claims SET 
+        claimed_by = NULL, 
+        claimed_at = NULL, 
+        last_claimed_by = NULL, 
+        last_claimed_at = NULL, 
+        status = 'unclaimed',
+        label_downloaded = 0
+      WHERE order_unique_id = ?`,
+      [unique_id]
+    );
+
+    console.log('✅ CLAIM DATA CLEARED');
+
+    // Get updated order for response
+    const updatedOrder = await database.getOrderByUniqueId(unique_id);
+
+    const successMessage = isLabelDownloaded 
+      ? 'Shipment cancelled and order reversed successfully'
+      : 'Order reversed successfully';
+
+    console.log('✅ REVERSE SUCCESS:', successMessage);
+
+    return res.json({
+      success: true,
+      message: successMessage,
+      data: {
+        unique_id: unique_id,
+        order_id: order.order_id,
+        status: 'unclaimed',
+        label_downloaded: false,
+        reversed_at: new Date().toISOString(),
+        case: isLabelDownloaded ? 'with_label_cancellation' : 'simple_reverse'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ REVERSE ERROR:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to reverse order', 
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/reverse-grouped
+ * @desc    Reverse a grouped order (multiple products with same order_id) - handles both cases with and without label download
+ * @access  Vendor (token required)
+ */
+router.post('/reverse-grouped', async (req, res) => {
+  const { order_id, unique_ids } = req.body;
+  let token = req.headers['authorization'];
+  
+  // Handle case where token might be an object
+  if (typeof token === 'object' && token !== null) {
+    console.log('⚠️  Token received as object, attempting to extract string value');
+    console.log('  - Object keys:', Object.keys(token));
+    console.log('  - Object values:', Object.values(token));
+    
+    // Try to extract the actual token string
+    if (token.token) {
+      token = token.token;
+    } else if (token.authorization) {
+      token = token.authorization;
+    } else if (Object.values(token).length === 1) {
+      token = Object.values(token)[0];
+    } else {
+      console.log('❌ Cannot extract token from object');
+      token = null;
+    }
+  }
+  
+  console.log('🔵 REVERSE GROUPED REQUEST START');
+  console.log('  - order_id:', order_id);
+  console.log('  - unique_ids:', unique_ids);
+  console.log('  - token received:', token ? 'YES' : 'NO');
+  console.log('  - token value:', token ? token.substring(0, 8) + '...' : 'null');
+
+  if (!order_id) {
+    console.log('❌ REVERSE GROUPED FAILED: Missing order_id');
+    return res.status(400).json({ success: false, message: 'order_id is required' });
+  }
+
+  if (!unique_ids || !Array.isArray(unique_ids) || unique_ids.length === 0) {
+    console.log('❌ REVERSE GROUPED FAILED: Missing or invalid unique_ids');
+    return res.status(400).json({ success: false, message: 'unique_ids array is required' });
+  }
+
+  if (!token) {
+    console.log('❌ REVERSE GROUPED FAILED: Missing token');
+    return res.status(400).json({ success: false, message: 'Authorization token required' });
+  }
+
+  try {
+    // Load users from MySQL to get vendor info
+    const database = require('../config/database');
+    
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      console.log('❌ MySQL connection not available');
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+    
+    const vendor = await database.getUserByToken(token);
+    
+    if (!vendor || vendor.active_session !== 'TRUE') {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+
+    console.log('✅ VENDOR FOUND:');
+    console.log('  - Email:', vendor.email);
+    console.log('  - Warehouse ID:', vendor.warehouseId);
+
+    // Verify all unique_ids belong to the same order_id and filter only those claimed by this vendor
+    const orderChecks = await Promise.all(
+      unique_ids.map(async (unique_id) => {
+        const order = await database.getOrderByUniqueId(unique_id);
+        if (!order) {
+          return { unique_id, error: 'Order not found', valid: false };
+        }
+        if (order.order_id !== order_id) {
+          return { unique_id, error: 'Order ID mismatch', valid: false };
+        }
+        if (order.claimed_by !== vendor.warehouseId) {
+          return { unique_id, error: 'Not claimed by this vendor', valid: false, claimed_by: order.claimed_by };
+        }
+        return { unique_id, order, valid: true };
+      })
+    );
+
+    // Separate valid and invalid orders
+    const validOrders = orderChecks.filter(check => check.valid);
+    const invalidOrders = orderChecks.filter(check => !check.valid);
+
+    // Check if we have any valid orders to process
+    if (validOrders.length === 0) {
+      console.log('❌ NO VALID ORDERS FOUND FOR THIS VENDOR');
+      return res.status(400).json({
+        success: false,
+        message: 'No orders found that are claimed by you',
+        errors: invalidOrders
+      });
+    }
+
+    // Log any orders that belong to other vendors (for transparency)
+    const otherVendorOrders = invalidOrders.filter(check => check.claimed_by && check.claimed_by !== vendor.warehouseId);
+    if (otherVendorOrders.length > 0) {
+      console.log('ℹ️ ORDERS CLAIMED BY OTHER VENDORS (will be skipped):', otherVendorOrders.map(o => ({ unique_id: o.unique_id, claimed_by: o.claimed_by })));
+    }
+
+    // Get the first valid order to check label_downloaded status
+    const firstValidOrder = validOrders[0]?.order;
+    const validUniqueIds = validOrders.map(check => check.unique_id);
+
+    console.log('✅ VALID ORDERS IDENTIFIED');
+    console.log('  - Order ID:', firstValidOrder.order_id);
+    console.log('  - Valid unique_ids:', validUniqueIds);
+    console.log('  - Label Downloaded:', firstValidOrder.label_downloaded);
+    console.log('  - Total products to process:', validUniqueIds.length);
+
+    // Check label_downloaded status (all products in the group should have the same status)
+    const isLabelDownloaded = firstValidOrder.label_downloaded === 1 || firstValidOrder.label_downloaded === true || firstValidOrder.label_downloaded === '1';
+    
+    if (isLabelDownloaded) {
+      console.log('🔄 CASE 2: Label downloaded - calling Shipway cancel API');
+      
+      // Get AWB number from labels table (only one AWB for the entire order_id)
+      const label = await database.getLabelByOrderId(order_id);
+      
+      if (!label || !label.awb) {
+        console.log('❌ AWB NOT FOUND for order:', order_id);
+        return res.status(400).json({ 
+          success: false, 
+          message: 'AWB number not found for this order. Cannot cancel shipment.' 
+        });
+      }
+
+      console.log('✅ AWB FOUND:', label.awb);
+
+      // Call Shipway cancel API (only once for the entire order)
+      const shipwayService = require('../services/shipwayService');
+      
+      try {
+        const cancelResult = await shipwayService.cancelShipment([label.awb]);
+        console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+      } catch (cancelError) {
+        console.log('❌ SHIPWAY CANCEL FAILED:', cancelError.message);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to cancel shipment. Please try after sometime.',
+          error: 'shipway_cancel_failed'
+        });
+      }
+
+      // Clear label data after successful cancellation (only once for the entire order)
+      await database.mysqlConnection.execute(
+        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL WHERE order_id = ?',
+        [order_id]
+      );
+      console.log('✅ LABEL DATA CLEARED');
+    } else {
+      console.log('🔄 CASE 1: No label downloaded - simple reverse');
+    }
+
+    // Clear claim information for ONLY the vendor's products
+    console.log('🔄 CLEARING CLAIM DATA FOR VENDOR\'S PRODUCTS');
+    const clearResults = await Promise.all(
+      validUniqueIds.map(async (unique_id) => {
+        try {
+          await database.mysqlConnection.execute(
+            `UPDATE claims SET 
+              claimed_by = NULL, 
+              claimed_at = NULL, 
+              last_claimed_by = NULL, 
+              last_claimed_at = NULL, 
+              status = 'unclaimed',
+              label_downloaded = 0
+            WHERE order_unique_id = ?`,
+            [unique_id]
+          );
+          return { unique_id, success: true };
+        } catch (error) {
+          console.log('❌ FAILED TO CLEAR CLAIM DATA FOR:', unique_id, error.message);
+          return { unique_id, success: false, error: error.message };
+        }
+      })
+    );
+
+    const failedClears = clearResults.filter(result => !result.success);
+    if (failedClears.length > 0) {
+      console.log('⚠️ SOME CLAIM DATA CLEARING FAILED:', failedClears);
+    }
+
+    console.log('✅ CLAIM DATA CLEARED FOR VENDOR\'S PRODUCTS');
+
+    const successMessage = isLabelDownloaded 
+      ? `Shipment cancelled and ${validUniqueIds.length} products reversed successfully`
+      : `${validUniqueIds.length} products reversed successfully`;
+
+    console.log('✅ REVERSE GROUPED SUCCESS:', successMessage);
+
+    return res.json({
+      success: true,
+      message: successMessage,
+      data: {
+        order_id: order_id,
+        unique_ids: validUniqueIds, // Only the vendor's products
+        status: 'unclaimed',
+        label_downloaded: false,
+        reversed_at: new Date().toISOString(),
+        case: isLabelDownloaded ? 'with_label_cancellation' : 'simple_reverse',
+        products_processed: validUniqueIds.length,
+        failed_clears: failedClears.length,
+        skipped_products: otherVendorOrders.length, // Products claimed by other vendors
+        total_requested: unique_ids.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ REVERSE GROUPED ERROR:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to reverse grouped order', 
+      error: error.message 
+    });
+  }
+});
+
 module.exports = router; 

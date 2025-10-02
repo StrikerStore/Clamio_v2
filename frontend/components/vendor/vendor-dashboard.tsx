@@ -208,6 +208,9 @@ export function VendorDashboard() {
   // Loading states for label downloads
   const [labelDownloadLoading, setLabelDownloadLoading] = useState<{[key: string]: boolean}>({})
   const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false)
+  
+  // Loading states for reverse operations
+  const [reverseLoading, setReverseLoading] = useState<{[key: string]: boolean}>({})
 
   useEffect(() => {
     async function fetchAddress() {
@@ -944,11 +947,119 @@ export function VendorDashboard() {
     setShowViewRequestDialog(true);
   };
 
-  const handleRequestReverse = (orderId: string) => {
-    toast({
-      title: "Reverse Requested",
-      description: `Order ${orderId} has been moved back to available orders`,
-    })
+  const handleRequestReverse = async (orderId: string, uniqueIds?: string[]) => {
+    console.log('🔵 FRONTEND: Starting reverse process');
+    console.log('  - orderId:', orderId);
+    console.log('  - uniqueIds:', uniqueIds);
+    
+    // Set loading state for this order
+    setReverseLoading(prev => ({ ...prev, [orderId]: true }));
+    
+    try {
+      // If uniqueIds are provided (for grouped orders), use the grouped reverse endpoint
+      if (uniqueIds && uniqueIds.length > 0) {
+        console.log('🔄 FRONTEND: Reversing grouped order with shared AWB');
+        console.log('  - Order ID:', orderId);
+        console.log('  - Product count:', uniqueIds.length);
+        
+        try {
+          console.log('📤 FRONTEND: Calling apiClient.reverseGroupedOrder...');
+          const response = await apiClient.reverseGroupedOrder(orderId, uniqueIds);
+          
+          console.log('📥 FRONTEND: Grouped reverse response received');
+          console.log('  - success:', response.success);
+          console.log('  - message:', response.message);
+          console.log('  - data:', response.data);
+          
+          if (response.success && response.data) {
+            console.log('✅ FRONTEND: Grouped reverse successful');
+            console.log('  - Products processed:', response.data.products_processed);
+            console.log('  - Skipped products:', response.data.skipped_products);
+            console.log('  - Total requested:', response.data.total_requested);
+            
+            // Show success message with details about skipped products
+            let description = response.message || `Successfully reversed ${response.data.products_processed} products in order ${orderId}`;
+            
+            if (response.data.skipped_products > 0) {
+              description += ` (${response.data.skipped_products} products were claimed by other vendors and were not affected)`;
+            }
+            
+            toast({
+              title: 'Order Reversed',
+              description: description,
+              variant: response.data.skipped_products > 0 ? 'default' : 'default'
+            });
+          } else {
+            console.log('❌ FRONTEND: Grouped reverse failed');
+            console.log('  - Error message:', response.message);
+            toast({
+              title: 'Reverse Failed',
+              description: response.message || 'Could not reverse grouped order',
+              variant: 'destructive',
+            });
+          }
+        } catch (err: any) {
+          console.log('💥 FRONTEND: Exception in grouped reverse:', err.message);
+          toast({
+            title: 'Reverse Failed',
+            description: err.message || 'Failed to reverse grouped order',
+            variant: 'destructive',
+          });
+        }
+        
+      } else {
+        // Single order reverse (fallback)
+        console.log('📤 FRONTEND: Calling apiClient.reverseOrder for single order...');
+        const response = await apiClient.reverseOrder(orderId);
+        
+        console.log('📥 FRONTEND: Reverse response received');
+        console.log('  - success:', response.success);
+        console.log('  - message:', response.message);
+        console.log('  - data:', response.data);
+        
+        if (response.success && response.data) {
+          console.log('✅ FRONTEND: Reverse successful, updating UI');
+          
+          // Show success message
+          toast({
+            title: 'Order Reversed',
+            description: response.message || `Order ${orderId} has been reversed successfully`,
+          });
+        } else {
+          console.log('❌ FRONTEND: Reverse failed');
+          console.log('  - Error message:', response.message);
+          toast({
+            title: 'Reverse Failed',
+            description: response.message || 'Could not reverse order',
+            variant: 'destructive',
+          });
+        }
+      }
+      
+      // Refresh orders to ensure tabs are updated correctly
+      console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
+      try {
+        await refreshOrders();
+        console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
+      } catch (refreshError) {
+        console.log('⚠️ FRONTEND: Failed to refresh orders, but reverse was successful');
+      }
+      
+    } catch (err: any) {
+      console.log('💥 FRONTEND: Exception occurred');
+      console.log('  - Error:', err);
+      console.log('  - Error message:', err.message);
+      console.log('  - Error stack:', err.stack);
+      
+      toast({
+        title: 'Reverse Failed',
+        description: err.message || 'Network error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      // Clear loading state
+      setReverseLoading(prev => ({ ...prev, [orderId]: false }));
+    }
   }
 
   const handleDownloadLabel = async (orderId: string, format: string) => {
@@ -1759,10 +1870,18 @@ export function VendorDashboard() {
                                   <Button 
                                     size="sm" 
                                     variant="destructive" 
-                                    onClick={() => handleRequestReverse(order.order_id)}
+                                    onClick={() => handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id))}
+                                    disabled={reverseLoading[order.order_id]}
                                     className="text-xs px-2 py-1 h-8"
                                   >
-                                    Reverse
+                                    {reverseLoading[order.order_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                        Reversing...
+                                      </>
+                                    ) : (
+                                      'Reverse'
+                                    )}
                                   </Button>
                                 </div>
                               </TableCell>

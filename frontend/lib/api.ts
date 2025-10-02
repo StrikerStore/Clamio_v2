@@ -358,6 +358,66 @@ class ApiClient {
       },
     })
   }
+
+  async reverseOrder(unique_id: string): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: reverseOrder called');
+    console.log('  - unique_id:', unique_id);
+    
+    // Use vendor token for reverse endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/reverse');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ unique_id }));
+
+    return this.makeRequest('/orders/reverse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ unique_id }),
+    })
+  }
+
+  async reverseGroupedOrder(order_id: string, unique_ids: string[]): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: reverseGroupedOrder called');
+    console.log('  - order_id:', order_id);
+    console.log('  - unique_ids:', unique_ids);
+    
+    // Use vendor token for reverse grouped endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/reverse-grouped');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ order_id, unique_ids }));
+
+    return this.makeRequest('/orders/reverse-grouped', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ order_id, unique_ids }),
+    })
+  }
+
   // Settlement API methods
   
   // Vendor settlement methods

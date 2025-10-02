@@ -1058,6 +1058,108 @@ class ShipwayService {
       throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
     }
   }
+
+  /**
+   * Cancel shipment using Shipway API
+   * @param {Array} awbNumbers - Array of AWB numbers to cancel
+   * @returns {Object} Cancel result from Shipway API
+   */
+  async cancelShipment(awbNumbers) {
+    try {
+      if (!awbNumbers || !Array.isArray(awbNumbers) || awbNumbers.length === 0) {
+        throw new Error('AWB numbers array is required and cannot be empty');
+      }
+
+      if (!this.basicAuthHeader) {
+        throw new Error('Shipway API configuration error. Please contact administrator.');
+      }
+
+      const url = `${this.baseURL}/Cancel`;
+      const requestBody = {
+        awb_number: awbNumbers
+      };
+
+      this.logApiActivity({
+        type: 'shipway-cancel-request',
+        url,
+        awbNumbers,
+        headers: { Authorization: '***' },
+      });
+
+      const response = await axios.post(url, requestBody, {
+        headers: {
+          'Authorization': this.basicAuthHeader,
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000 // 10 second timeout
+      });
+
+      this.logApiActivity({
+        type: 'shipway-cancel-response',
+        status: response.status,
+        data: response.data,
+      });
+
+      // Check if response is successful
+      if (response.status !== 200) {
+        throw new Error(`Shipway API returned status ${response.status}`);
+      }
+
+      const data = response.data;
+
+      // Validate response structure
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid response format from Shipway API');
+      }
+
+      return {
+        success: true,
+        data: data,
+        awbNumbers: awbNumbers
+      };
+
+    } catch (error) {
+      this.logApiActivity({
+        type: 'shipway-cancel-error',
+        awbNumbers,
+        error: error.message,
+        stack: error.stack,
+      });
+      console.error('Error cancelling shipment for AWB numbers:', awbNumbers, 'from Shipway API:', error.message);
+      
+      // Handle specific error cases
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        throw new Error('Unable to connect to Shipway API. Please check your internet connection.');
+      }
+      
+      if (error.code === 'ETIMEDOUT') {
+        throw new Error('Request to Shipway API timed out. Please try again.');
+      }
+
+      if (error.response) {
+        // API returned an error response
+        const status = error.response.status;
+        if (status === 401) {
+          throw new Error('Invalid Shipway API credentials. Please check your configuration.');
+        } else if (status === 404) {
+          throw new Error('AWB numbers not found in Shipway system.');
+        } else if (status === 429) {
+          throw new Error('Rate limit exceeded. Please try again later.');
+        } else {
+          throw new Error(`Shipway API error: ${error.response.data?.message || `Status ${status}`}`);
+        }
+      }
+
+      // Re-throw the original error if it's already formatted
+      if (error.message.includes('Shipway API') || 
+          error.message.includes('Unable to connect') ||
+          error.message.includes('timed out')) {
+        throw error;
+      }
+
+      throw new Error('Failed to cancel shipment from Shipway API');
+    }
+  }
 }
 
 module.exports = new ShipwayService(); 
