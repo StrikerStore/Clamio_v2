@@ -460,25 +460,83 @@ export function VendorDashboard() {
       } else {
         console.log('❌ FRONTEND: Claim failed');
         console.log('  - Error message:', response.message);
-        toast({
-          title: 'Claim Failed',
-          description: response.message || 'Could not claim order',
-          variant: 'destructive',
-        });
+        const msg = (response.message || '').toLowerCase();
+        if (msg.includes('not unclaimed') || msg.includes('already claimed')) {
+          toast({
+            title: 'No Longer Available',
+            description: 'This order is no longer available for claim.',
+          });
+          // Refresh to reflect latest availability
+          try { await refreshOrders(); } catch {}
+        } else {
+          toast({
+            title: 'Claim Failed',
+            description: response.message || 'Could not claim order',
+            variant: 'destructive',
+          });
+        }
       }
-    } catch (err: any) {
+  } catch (err: any) {
       console.log('💥 FRONTEND: Exception occurred');
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
       console.log('  - Error stack:', err.stack);
       
+      const message = String(err?.message || '').toLowerCase();
+      if (message.includes('not unclaimed') || message.includes('already claimed')) {
+        toast({
+          title: 'No Longer Available',
+          description: 'This order is no longer available for claim.',
+        });
+        try { await refreshOrders(); } catch {}
+      } else {
+        toast({
+          title: 'Claim Failed',
+          description: err.message || 'Network error occurred',
+          variant: 'destructive',
+        });
+      }
+    }
+  }
+
+  const handleMarkReady = async (orderId: string) => {
+    try {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${API_BASE_URL}/orders/mark-ready`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': user?.token || '',
+        },
+        body: JSON.stringify({ order_id: orderId }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: "Order Marked Ready",
+          description: `Order ${orderId} is now ready for handover`,
+        });
+        // Refresh orders to show updated status
+        fetchGroupedOrders();
+      } else {
+        toast({
+          title: "Error",
+          description: data.message || "Failed to mark order as ready",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error marking order as ready:', error);
       toast({
-        title: 'Claim Failed',
-        description: err.message || 'Network error occurred',
-        variant: 'destructive',
+        title: "Error",
+        description: "Network error occurred",
+        variant: "destructive",
       });
     }
   }
+
 
   const handleMarkReady = async (orderId: string) => {
     try {
@@ -1143,47 +1201,77 @@ export function VendorDashboard() {
       if (response.success && response.data) {
         const { successful_claims, failed_claims, total_successful, total_failed } = response.data;
         
-        console.log('✅ FRONTEND: Bulk claim successful');
+        console.log('✅ FRONTEND: Bulk claim processed');
         console.log('  - Successful:', total_successful);
         console.log('  - Failed:', total_failed);
         
-        // Show success message
+        // Summary toast
         toast({
           title: "Bulk Claim Complete",
-          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `. ${total_failed} orders failed to claim.` : ''}`,
+          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `, ${total_failed} could not be claimed` : ''}.`,
         });
         
-        // Clear selected orders
-        setSelectedUnclaimedOrders([]);
+        // Friendly notice for items no longer available
+        if (Array.isArray(failed_claims) && failed_claims.length > 0) {
+          const alreadyClaimed = failed_claims.filter((f: any) => {
+            const reason = String(f?.reason || '').toLowerCase();
+            return reason.includes('not unclaimed') || reason.includes('already claimed');
+          });
+          if (alreadyClaimed.length > 0) {
+            toast({
+              title: 'Some Orders No Longer Available',
+              description: `${alreadyClaimed.length} order(s) are no longer available for claim.`,
+            });
+          }
+        }
         
-        // Refresh orders to update the UI
+        // Clear selection and refresh
+        setSelectedUnclaimedOrders([]);
         console.log('🔄 FRONTEND: Refreshing orders after bulk claim...');
         try {
           await refreshOrders();
           console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
         } catch (refreshError) {
-          console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim was successful');
+          console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim request completed');
         }
         
       } else {
         console.log('❌ FRONTEND: Bulk claim failed');
         console.log('  - Error message:', response.message);
-        toast({
-          title: 'Bulk Claim Failed',
-          description: response.message || 'Could not claim selected orders',
-          variant: 'destructive',
-        });
+        const msg = (response.message || '').toLowerCase();
+        if (msg.includes('not unclaimed') || msg.includes('already claimed')) {
+          toast({
+            title: 'No Longer Available',
+            description: 'Some selected orders are no longer available for claim.',
+          });
+          try { await refreshOrders(); } catch {}
+        } else {
+          toast({
+            title: 'Bulk Claim Failed',
+            description: response.message || 'Could not claim selected orders',
+            variant: 'destructive',
+          });
+        }
       }
     } catch (err: any) {
       console.log('💥 FRONTEND: Exception occurred during bulk claim');
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
       
-      toast({
-        title: 'Bulk Claim Failed',
-        description: err.message || 'Network error occurred',
-        variant: 'destructive',
-      });
+      const message = String(err?.message || '').toLowerCase();
+      if (message.includes('not unclaimed') || message.includes('already claimed')) {
+        toast({
+          title: 'No Longer Available',
+          description: 'Some selected orders are no longer available for claim.',
+        });
+        try { await refreshOrders(); } catch {}
+      } else {
+        toast({
+          title: 'Bulk Claim Failed',
+          description: err.message || 'Network error occurred',
+          variant: 'destructive',
+        });
+      }
     }
   }
 
@@ -1788,8 +1876,10 @@ export function VendorDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
+
                         {getFilteredOrdersForTab("handover").map((order, index) => (
                           <TableRow key={`${order.order_id}-${index}`}>
+
                             <TableCell>
                               <TooltipProvider>
                                 <Tooltip>
