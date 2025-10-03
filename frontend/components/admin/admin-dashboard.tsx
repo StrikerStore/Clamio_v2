@@ -274,6 +274,7 @@ export function AdminDashboard() {
   // Carrier state
   const [carriers, setCarriers] = useState<any[]>([])
   const [carriersLoading, setCarriersLoading] = useState(false)
+  const [movingCarrier, setMovingCarrier] = useState<string | null>(null)
   // Carrier edit dialog state
   const [carrierEditState, setCarrierEditState] = useState<{ open: boolean; carrierId: string | null; carrier_id: string; status: string }>({ open: false, carrierId: null, carrier_id: "", status: "active" })
 
@@ -775,6 +776,29 @@ export function AdminDashboard() {
       });
     } finally {
       setOrdersLoading(false);
+    }
+  };
+
+  const handleMoveCarrier = async (carrierId: string, direction: 'up' | 'down') => {
+    if (movingCarrier) {
+      return; // Prevent multiple simultaneous moves
+    }
+    
+    setMovingCarrier(carrierId);
+    try {
+      const res = await apiClient.moveCarrier(carrierId, direction);
+      if (!res.success) {
+        throw new Error(res.message);
+      }
+      await fetchCarriers();
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err?.message || 'Failed to move carrier',
+        variant: 'destructive'
+      });
+    } finally {
+      setMovingCarrier(null);
     }
   };
 
@@ -1847,8 +1871,12 @@ export function AdminDashboard() {
                                   <TableCell>{carrier.weight_in_kg ? `${carrier.weight_in_kg}kg` : 'N/A'}</TableCell>
                                   <TableCell>
                                     <div className="flex gap-1">
-                                      <Button size="sm" variant="outline" onClick={async () => { try { const res = await apiClient.moveCarrier(carrier.carrier_id, 'up'); if (!res.success) throw new Error(res.message); await fetchCarriers() } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to move carrier', variant: 'destructive' }) } }} title="Move Up">▲</Button>
-                                      <Button size="sm" variant="outline" onClick={async () => { try { const res = await apiClient.moveCarrier(carrier.carrier_id, 'down'); if (!res.success) throw new Error(res.message); await fetchCarriers() } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to move carrier', variant: 'destructive' }) } }} title="Move Down">▼</Button>
+                                      <Button size="sm" variant="outline" disabled={movingCarrier === carrier.carrier_id} onClick={() => handleMoveCarrier(carrier.carrier_id, 'up')} title="Move Up">
+                                        {movingCarrier === carrier.carrier_id ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : '▲'}
+                                      </Button>
+                                      <Button size="sm" variant="outline" disabled={movingCarrier === carrier.carrier_id} onClick={() => handleMoveCarrier(carrier.carrier_id, 'down')} title="Move Down">
+                                        {movingCarrier === carrier.carrier_id ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : '▼'}
+                                      </Button>
                                       <Button size="sm" variant="outline" onClick={() => { setCarrierEditState({ open: true, carrierId: carrier.carrier_id, carrier_id: carrier.carrier_id, status: carrier.status || 'active' }) }}><Edit className="w-3 h-3" /></Button>
                                       <Button size="sm" variant="destructive" onClick={async () => { try { const res = await apiClient.deleteCarrier(carrier.carrier_id); if (res.success) { toast({ title: 'Carrier Deleted', description: `Carrier ${carrier.carrier_id} removed` }); await fetchCarriers() } else { toast({ title: 'Error', description: res.message, variant: 'destructive' }) } } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to delete carrier', variant: 'destructive' }) } }}><Trash2 className="w-3 h-3" /></Button>
                                     </div>
@@ -1874,8 +1902,12 @@ export function AdminDashboard() {
                                   <span>Weight: {carrier.weight_in_kg ? `${carrier.weight_in_kg}kg` : 'N/A'}</span>
                                 </div>
                                 <div className="mt-2 flex gap-2">
-                                  <Button size="sm" variant="outline" onClick={async () => { try { const res = await apiClient.moveCarrier(carrier.carrier_id, 'up'); if (!res.success) throw new Error(res.message); await fetchCarriers() } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to move carrier', variant: 'destructive' }) } }} title="Move Up">▲</Button>
-                                  <Button size="sm" variant="outline" onClick={async () => { try { const res = await apiClient.moveCarrier(carrier.carrier_id, 'down'); if (!res.success) throw new Error(res.message); await fetchCarriers() } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to move carrier', variant: 'destructive' }) } }} title="Move Down">▼</Button>
+                                  <Button size="sm" variant="outline" disabled={movingCarrier === carrier.carrier_id} onClick={() => handleMoveCarrier(carrier.carrier_id, 'up')} title="Move Up">
+                                    {movingCarrier === carrier.carrier_id ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : '▲'}
+                                  </Button>
+                                  <Button size="sm" variant="outline" disabled={movingCarrier === carrier.carrier_id} onClick={() => handleMoveCarrier(carrier.carrier_id, 'down')} title="Move Down">
+                                    {movingCarrier === carrier.carrier_id ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : '▼'}
+                                  </Button>
                                   <Button size="sm" variant="outline" onClick={() => { setCarrierEditState({ open: true, carrierId: carrier.carrier_id, carrier_id: carrier.carrier_id, status: carrier.status || 'active' }) }}><Edit className="w-3 h-3" /></Button>
                                   <Button size="sm" variant="destructive" onClick={async () => { try { const res = await apiClient.deleteCarrier(carrier.carrier_id); if (res.success) { toast({ title: 'Carrier Deleted', description: `Carrier ${carrier.carrier_id} removed` }); await fetchCarriers() } else { toast({ title: 'Error', description: res.message, variant: 'destructive' }) } } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to delete carrier', variant: 'destructive' }) } }}><Trash2 className="w-3 h-3" /></Button>
                                 </div>

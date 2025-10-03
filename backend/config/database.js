@@ -621,6 +621,72 @@ class Database {
   }
 
   /**
+   * Swap carrier priorities atomically using a transaction
+   * @param {string} carrierId1 - First carrier ID
+   * @param {string} carrierId2 - Second carrier ID
+   * @param {number} priority1 - First carrier's priority
+   * @param {number} priority2 - Second carrier's priority
+   * @returns {Promise<void>}
+   */
+  async swapCarrierPriorities(carrierId1, carrierId2, priority1, priority2) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      await this.mysqlConnection.beginTransaction();
+
+      // Update both carriers in a single transaction
+      await this.mysqlConnection.execute(
+        'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
+        [priority2, carrierId1]
+      );
+
+      await this.mysqlConnection.execute(
+        'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
+        [priority1, carrierId2]
+      );
+
+      await this.mysqlConnection.commit();
+    } catch (error) {
+      await this.mysqlConnection.rollback();
+      console.error('Error swapping carrier priorities:', error);
+      throw new Error('Failed to swap carrier priorities');
+    }
+  }
+
+  /**
+   * Reorder carrier priorities sequentially (1, 2, 3, ...)
+   * @param {Array} carriers - Array of carriers in the desired order
+   * @returns {Promise<void>}
+   */
+  async reorderCarrierPriorities(carriers) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      await this.mysqlConnection.beginTransaction();
+
+      // Update priorities sequentially starting from 1
+      for (let i = 0; i < carriers.length; i++) {
+        const newPriority = i + 1;
+        await this.mysqlConnection.execute(
+          'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
+          [newPriority, carriers[i].carrier_id]
+        );
+      }
+
+      await this.mysqlConnection.commit();
+      console.log(`✅ Reordered ${carriers.length} carrier priorities sequentially`);
+    } catch (error) {
+      await this.mysqlConnection.rollback();
+      console.error('Error reordering carrier priorities:', error);
+      throw new Error('Failed to reorder carrier priorities');
+    }
+  }
+
+  /**
    * Delete carrier
    * @param {string} carrierId - Carrier ID
    * @returns {Promise<boolean>} True if deleted, false if not found
