@@ -1100,7 +1100,14 @@ export function VendorDashboard() {
           const url = window.URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
-          link.download = `label_${orderId}_${awb}.pdf`;
+          
+          // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
+          const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+          const vendorId = user?.warehouseId || 'unknown';
+          const vendorCity = vendorAddress?.city || 'unknown';
+          const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
+          
+          link.download = filename;
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);

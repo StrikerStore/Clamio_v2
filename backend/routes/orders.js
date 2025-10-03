@@ -2290,7 +2290,14 @@ router.post('/bulk-download-labels', async (req, res) => {
       
       // Set response headers for PDF download
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="bulk-labels-${Date.now()}.pdf"`);
+      
+      // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
+      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+      const vendorId = vendor.warehouseId || 'unknown';
+      const vendorCity = (vendor.city || 'unknown').toLowerCase();
+      const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
+      
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.setHeader('Content-Length', combinedPdfBuffer.length);
       
       // Send the PDF buffer
@@ -2386,7 +2393,14 @@ router.post('/download-pdf', async (req, res) => {
     
     // Set response headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="label.pdf"');
+    
+    // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
+    const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+    const vendorId = vendor.warehouseId || 'unknown';
+    const vendorCity = (vendor.city || 'unknown').toLowerCase();
+    const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', pdfBuffer.byteLength);
     
     // Send the PDF buffer
@@ -2976,7 +2990,7 @@ router.post('/reverse', async (req, res) => {
 
       // Clear label data after successful cancellation
       await database.mysqlConnection.execute(
-        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL WHERE order_id = ?',
+        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL WHERE order_id = ?',
         [order.order_id]
       );
       console.log('✅ LABEL DATA CLEARED');
@@ -3186,7 +3200,7 @@ router.post('/reverse-grouped', async (req, res) => {
 
       // Clear label data after successful cancellation (only once for the entire order)
       await database.mysqlConnection.execute(
-        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL WHERE order_id = ?',
+        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL WHERE order_id = ?',
         [order_id]
       );
       console.log('✅ LABEL DATA CLEARED');
@@ -3254,6 +3268,58 @@ router.post('/reverse-grouped', async (req, res) => {
       success: false, 
       message: 'Failed to reverse grouped order', 
       error: error.message 
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/auto-reverse-expired
+ * @desc    Automatically reverse orders that have been claimed for 24+ hours without label download
+ * @access  Admin/Superadmin only (or can be called by cron job)
+ */
+router.post('/auto-reverse-expired', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  console.log('🔄 AUTO-REVERSE EXPIRED ORDERS REQUEST START');
+  
+  try {
+    const autoReversalService = require('../services/autoReversalService');
+    const result = await autoReversalService.executeAutoReversal();
+    
+    if (result.success) {
+      return res.json(result);
+    } else {
+      return res.status(500).json(result);
+    }
+
+  } catch (error) {
+    console.error('❌ AUTO-REVERSE ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to auto-reverse expired orders',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   GET /api/orders/auto-reverse-stats
+ * @desc    Get auto-reversal service statistics
+ * @access  Admin/Superadmin only
+ */
+router.get('/auto-reverse-stats', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  try {
+    const autoReversalService = require('../services/autoReversalService');
+    const stats = autoReversalService.getStats();
+    
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('❌ GET AUTO-REVERSE STATS ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get auto-reversal statistics',
+      error: error.message
     });
   }
 });
