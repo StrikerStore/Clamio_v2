@@ -23,6 +23,10 @@ frontend/.env.local
 frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
+backend/data/raw_shipway_orders.json
+backend/env.example
+backend/uploads/payment-proofs/payment-proof-1753294317020-14169049.webp
+
 
 # Build outputs
 dist/
