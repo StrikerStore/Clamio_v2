@@ -204,6 +204,7 @@ export function VendorDashboard() {
   const [selectedSettlementForView, setSelectedSettlementForView] = useState<any>(null)
   const [showViewRequestDialog, setShowViewRequestDialog] = useState(false)
   const [selectedImageProduct, setSelectedImageProduct] = useState<{url: string, title: string} | null>(null)
+<<<<<<< HEAD
   
   // Loading states for label downloads
   const [labelDownloadLoading, setLabelDownloadLoading] = useState<{[key: string]: boolean}>({})
@@ -211,6 +212,8 @@ export function VendorDashboard() {
   
   // Loading states for reverse operations
   const [reverseLoading, setReverseLoading] = useState<{[key: string]: boolean}>({})
+=======
+>>>>>>> 05da4a81 ( dev sync)
 
   useEffect(() => {
     async function fetchAddress() {
@@ -299,6 +302,7 @@ export function VendorDashboard() {
       console.log('🔄 Refreshing orders data...');
       const response = await apiClient.getOrders();
       if (response.success && response.data && Array.isArray(response.data.orders)) {
+<<<<<<< HEAD
         console.log('📊 Raw orders data:', response.data.orders.length, 'orders');
         // Check for duplicates in raw data
         const uniqueIds = new Set();
@@ -312,6 +316,46 @@ export function VendorDashboard() {
         });
         if (duplicates.length > 0) {
           console.warn('🚨 Duplicate unique_ids found in raw API data:', duplicates);
+=======
+        setOrders(response.data.orders);
+        console.log('✅ Orders refreshed successfully');
+      } else if (response.success && response.data && response.data.orders) {
+        setOrders([response.data.orders]);
+        console.log('✅ Orders refreshed successfully');
+      } else {
+        setOrders([]);
+        setOrdersError("No orders found");
+      }
+
+      // Also refresh grouped orders for My Orders tab
+      console.log('🔄 Refreshing grouped orders data...');
+      const groupedResponse = await apiClient.getGroupedOrders();
+      if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+        setGroupedOrders(groupedResponse.data.groupedOrders);
+        console.log('✅ Grouped orders refreshed successfully');
+      } else {
+        console.log('⚠️ Failed to refresh grouped orders');
+      }
+    } catch (err: any) {
+      console.error("Error refreshing orders:", err);
+      setOrdersError(err.message || "Failed to refresh orders");
+    }
+  };
+
+  useEffect(() => {
+    async function fetchOrders() {
+      setOrdersLoading(true);
+      setOrdersError("");
+      try {
+        const response = await apiClient.getOrders();
+        if (response.success && response.data && Array.isArray(response.data.orders)) {
+          setOrders(response.data.orders);
+        } else if (response.success && response.data && response.data.orders) {
+          setOrders([response.data.orders]);
+        } else {
+          setOrders([]);
+          setOrdersError("No orders found");
+>>>>>>> 05da4a81 ( dev sync)
         }
         setOrders(response.data.orders);
         console.log('✅ Orders refreshed successfully');

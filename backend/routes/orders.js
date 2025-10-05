@@ -1187,6 +1187,7 @@ router.post('/download-label', async (req, res) => {
     
     console.log('🔍 No downloaded label found, proceeding with label generation...');
 
+<<<<<<< HEAD
     // Debug: Log product counts and details
     console.log(`📊 Product Analysis for ${order_id}:`);
     console.log(`  - Total products in order: ${orderProducts.length}`);
@@ -1194,6 +1195,8 @@ router.post('/download-label', async (req, res) => {
     console.log(`  - All products:`, orderProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
     console.log(`  - Claimed products:`, claimedProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
 
+=======
+>>>>>>> 05da4a81 ( dev sync)
     // Updated logic: Only 2 conditions (removed underscore check)
     if (orderProducts.length === claimedProducts.length) {
       // Condition 1: Direct download - all products claimed by vendor
@@ -1204,6 +1207,7 @@ router.post('/download-label', async (req, res) => {
       // Store label in cache after successful generation
       if (labelResponse.success && labelResponse.data.shipping_url) {
         try {
+<<<<<<< HEAD
           const labelDataToStore = {
             order_id: order_id,
             label_url: labelResponse.data.shipping_url,
@@ -1230,6 +1234,16 @@ router.post('/download-label', async (req, res) => {
         } catch (cacheError) {
           console.log(`⚠️ Failed to cache label URL: ${cacheError.message}`);
           console.log(`  - Error details:`, cacheError);
+=======
+          await database.upsertLabel({
+            order_id: order_id,
+            label_url: labelResponse.data.shipping_url,
+            awb: labelResponse.data.awb
+          });
+          console.log(`✅ Stored label URL in cache for direct download order ${order_id}`);
+        } catch (cacheError) {
+          console.log(`⚠️ Failed to cache label URL: ${cacheError.message}`);
+>>>>>>> 05da4a81 ( dev sync)
         }
       }
       
@@ -1763,6 +1777,7 @@ async function updateLocalDatabaseAfterClone(inputData) {
     for (const product of claimedProducts) {
       // Update orders table: set order_id to clone ID
       await database.updateOrder(product.unique_id, {
+<<<<<<< HEAD
         order_id: cloneOrderId  // ✅ Update orders table with clone ID
       });
       
@@ -1847,6 +1862,78 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
     console.log(`  ⚠️ No shipping URL found in label response, skipping labels table storage`);
   }
   
+=======
+      order_id: cloneOrderId,           // ✅ Set to clone order ID
+      clone_status: 'cloned',           // ✅ Mark as cloned
+      cloned_order_id: originalOrderId, // ✅ Store original order ID (not clone ID)
+      label_downloaded: 0               // ✅ Initially 0 (not downloaded)
+    });
+    
+    console.log(`  ✅ Updated product ${product.unique_id} after clone creation:`);
+    console.log(`     - order_id: ${cloneOrderId}`);
+    console.log(`     - clone_status: cloned`);
+    console.log(`     - cloned_order_id: ${originalOrderId}`);
+    console.log(`     - label_downloaded: 0`);
+  }
+  
+  console.log('✅ Local database updated after clone creation');
+  return { success: true, updatedProducts: claimedProducts.length };
+}
+
+// Step 6: Generate label for clone
+async function generateLabelForClone(inputData) {
+  const { cloneOrderId, claimedProducts, vendor } = inputData;
+  
+  console.log(`🔒 Generating label with consistent data:`);
+  console.log(`  - Clone ID: ${cloneOrderId}`);
+  console.log(`  - Products for label: ${claimedProducts.length}`);
+  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  
+  // Generate label for the clone order
+  const labelResponse = await generateLabelForOrder(cloneOrderId, claimedProducts, vendor);
+  
+  if (!labelResponse.success) {
+    throw new Error(`Failed to generate label for clone: ${labelResponse.message || 'Unknown error'}`);
+  }
+  
+  console.log('✅ Label generated successfully for clone order');
+  return labelResponse;
+}
+
+// Step 7: Mark label as downloaded and store in labels table
+async function markLabelAsDownloaded(inputData, labelResponse) {
+  const { claimedProducts, cloneOrderId } = inputData;
+  const database = require('../config/database');
+  
+  console.log(`🔒 Marking label as downloaded and storing in labels table:`);
+  console.log(`  - Clone Order ID: ${cloneOrderId}`);
+  console.log(`  - Products count: ${claimedProducts.length}`);
+  console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
+  console.log(`  - AWB: ${labelResponse.data.awb}`);
+  
+  // Update orders table: mark label as downloaded
+  for (const product of claimedProducts) {
+    await database.updateOrder(product.unique_id, {
+      label_downloaded: 1  // ✅ Mark as downloaded only after successful label generation
+    });
+    
+    console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
+  }
+  
+  // Store label URL in labels table (one entry per order_id, no duplicates)
+  if (labelResponse.data.shipping_url) {
+    await database.upsertLabel({
+      order_id: cloneOrderId,
+      label_url: labelResponse.data.shipping_url,
+      awb: labelResponse.data.awb
+    });
+    
+    console.log(`  ✅ Stored label URL in labels table for order ${cloneOrderId}`);
+  } else {
+    console.log(`  ⚠️ No shipping URL found in label response, skipping labels table storage`);
+  }
+  
+>>>>>>> 05da4a81 ( dev sync)
   console.log('✅ All product labels marked as downloaded and cached');
   return { success: true, markedProducts: claimedProducts.length };
 }
@@ -2393,6 +2480,7 @@ router.post('/download-pdf', async (req, res) => {
     
     // Set response headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
+<<<<<<< HEAD
     
     // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
     const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
@@ -2401,6 +2489,9 @@ router.post('/download-pdf', async (req, res) => {
     const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
     
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+=======
+    res.setHeader('Content-Disposition', 'attachment; filename="label.pdf"');
+>>>>>>> 05da4a81 ( dev sync)
     res.setHeader('Content-Length', pdfBuffer.byteLength);
     
     // Send the PDF buffer
