@@ -208,6 +208,9 @@ export function VendorDashboard() {
   // Loading states for label downloads
   const [labelDownloadLoading, setLabelDownloadLoading] = useState<{[key: string]: boolean}>({})
   const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false)
+  
+  // Loading states for reverse operations
+  const [reverseLoading, setReverseLoading] = useState<{[key: string]: boolean}>({})
 
   useEffect(() => {
     async function fetchAddress() {
@@ -460,83 +463,25 @@ export function VendorDashboard() {
       } else {
         console.log('❌ FRONTEND: Claim failed');
         console.log('  - Error message:', response.message);
-        const msg = (response.message || '').toLowerCase();
-        if (msg.includes('not unclaimed') || msg.includes('already claimed')) {
-          toast({
-            title: 'No Longer Available',
-            description: 'This order is no longer available for claim.',
-          });
-          // Refresh to reflect latest availability
-          try { await refreshOrders(); } catch {}
-        } else {
-          toast({
-            title: 'Claim Failed',
-            description: response.message || 'Could not claim order',
-            variant: 'destructive',
-          });
-        }
+        toast({
+          title: 'Claim Failed',
+          description: response.message || 'Could not claim order',
+          variant: 'destructive',
+        });
       }
-  } catch (err: any) {
+    } catch (err: any) {
       console.log('💥 FRONTEND: Exception occurred');
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
       console.log('  - Error stack:', err.stack);
       
-      const message = String(err?.message || '').toLowerCase();
-      if (message.includes('not unclaimed') || message.includes('already claimed')) {
-        toast({
-          title: 'No Longer Available',
-          description: 'This order is no longer available for claim.',
-        });
-        try { await refreshOrders(); } catch {}
-      } else {
-        toast({
-          title: 'Claim Failed',
-          description: err.message || 'Network error occurred',
-          variant: 'destructive',
-        });
-      }
-    }
-  }
-
-  const handleMarkReady = async (orderId: string) => {
-    try {
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-      const response = await fetch(`${API_BASE_URL}/orders/mark-ready`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': user?.token || '',
-        },
-        body: JSON.stringify({ order_id: orderId }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        toast({
-          title: "Order Marked Ready",
-          description: `Order ${orderId} is now ready for handover`,
-        });
-        // Refresh orders to show updated status
-        fetchGroupedOrders();
-      } else {
-        toast({
-          title: "Error",
-          description: data.message || "Failed to mark order as ready",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      console.error('Error marking order as ready:', error);
       toast({
-        title: "Error",
-        description: "Network error occurred",
-        variant: "destructive",
+        title: 'Claim Failed',
+        description: err.message || 'Network error occurred',
+        variant: 'destructive',
       });
     }
   }
-
 
   const handleMarkReady = async (orderId: string) => {
     try {
@@ -1002,11 +947,119 @@ export function VendorDashboard() {
     setShowViewRequestDialog(true);
   };
 
-  const handleRequestReverse = (orderId: string) => {
-    toast({
-      title: "Reverse Requested",
-      description: `Order ${orderId} has been moved back to available orders`,
-    })
+  const handleRequestReverse = async (orderId: string, uniqueIds?: string[]) => {
+    console.log('🔵 FRONTEND: Starting reverse process');
+    console.log('  - orderId:', orderId);
+    console.log('  - uniqueIds:', uniqueIds);
+    
+    // Set loading state for this order
+    setReverseLoading(prev => ({ ...prev, [orderId]: true }));
+    
+    try {
+      // If uniqueIds are provided (for grouped orders), use the grouped reverse endpoint
+      if (uniqueIds && uniqueIds.length > 0) {
+        console.log('🔄 FRONTEND: Reversing grouped order with shared AWB');
+        console.log('  - Order ID:', orderId);
+        console.log('  - Product count:', uniqueIds.length);
+        
+        try {
+          console.log('📤 FRONTEND: Calling apiClient.reverseGroupedOrder...');
+          const response = await apiClient.reverseGroupedOrder(orderId, uniqueIds);
+          
+          console.log('📥 FRONTEND: Grouped reverse response received');
+          console.log('  - success:', response.success);
+          console.log('  - message:', response.message);
+          console.log('  - data:', response.data);
+          
+          if (response.success && response.data) {
+            console.log('✅ FRONTEND: Grouped reverse successful');
+            console.log('  - Products processed:', response.data.products_processed);
+            console.log('  - Skipped products:', response.data.skipped_products);
+            console.log('  - Total requested:', response.data.total_requested);
+            
+            // Show success message with details about skipped products
+            let description = response.message || `Successfully reversed ${response.data.products_processed} products in order ${orderId}`;
+            
+            if (response.data.skipped_products > 0) {
+              description += ` (${response.data.skipped_products} products were claimed by other vendors and were not affected)`;
+            }
+            
+            toast({
+              title: 'Order Reversed',
+              description: description,
+              variant: response.data.skipped_products > 0 ? 'default' : 'default'
+            });
+          } else {
+            console.log('❌ FRONTEND: Grouped reverse failed');
+            console.log('  - Error message:', response.message);
+            toast({
+              title: 'Reverse Failed',
+              description: response.message || 'Could not reverse grouped order',
+              variant: 'destructive',
+            });
+          }
+        } catch (err: any) {
+          console.log('💥 FRONTEND: Exception in grouped reverse:', err.message);
+          toast({
+            title: 'Reverse Failed',
+            description: err.message || 'Failed to reverse grouped order',
+            variant: 'destructive',
+          });
+        }
+        
+      } else {
+        // Single order reverse (fallback)
+        console.log('📤 FRONTEND: Calling apiClient.reverseOrder for single order...');
+        const response = await apiClient.reverseOrder(orderId);
+        
+        console.log('📥 FRONTEND: Reverse response received');
+        console.log('  - success:', response.success);
+        console.log('  - message:', response.message);
+        console.log('  - data:', response.data);
+        
+        if (response.success && response.data) {
+          console.log('✅ FRONTEND: Reverse successful, updating UI');
+          
+          // Show success message
+          toast({
+            title: 'Order Reversed',
+            description: response.message || `Order ${orderId} has been reversed successfully`,
+          });
+        } else {
+          console.log('❌ FRONTEND: Reverse failed');
+          console.log('  - Error message:', response.message);
+          toast({
+            title: 'Reverse Failed',
+            description: response.message || 'Could not reverse order',
+            variant: 'destructive',
+          });
+        }
+      }
+      
+      // Refresh orders to ensure tabs are updated correctly
+      console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
+      try {
+        await refreshOrders();
+        console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
+      } catch (refreshError) {
+        console.log('⚠️ FRONTEND: Failed to refresh orders, but reverse was successful');
+      }
+      
+    } catch (err: any) {
+      console.log('💥 FRONTEND: Exception occurred');
+      console.log('  - Error:', err);
+      console.log('  - Error message:', err.message);
+      console.log('  - Error stack:', err.stack);
+      
+      toast({
+        title: 'Reverse Failed',
+        description: err.message || 'Network error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      // Clear loading state
+      setReverseLoading(prev => ({ ...prev, [orderId]: false }));
+    }
   }
 
   const handleDownloadLabel = async (orderId: string, format: string) => {
@@ -1025,56 +1078,98 @@ export function VendorDashboard() {
       console.log('🔍 FRONTEND: Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
       console.log('🔍 FRONTEND: Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
-      // Call the download label API
-      const response = await apiClient.downloadLabel(orderId);
+      // Call the download label API with format parameter
+      const response = await apiClient.downloadLabel(orderId, format);
       
       console.log('📥 FRONTEND: Download label response received');
       console.log('  - success:', response.success);
       console.log('  - data:', response.data);
       
       if (response.success && response.data) {
-        const { shipping_url, awb, original_order_id, clone_order_id } = response.data;
-        
-        console.log('✅ FRONTEND: Label generated successfully');
-        console.log('  - Shipping URL:', shipping_url);
-        console.log('  - AWB:', awb);
-        
-        // Download the label file
-        try {
-          const blob = await apiClient.downloadLabelFile(shipping_url);
+        // Check if response is a PDF blob (for A4 and four-in-one formats)
+        if (response.data.isPdf && response.data.blob) {
+          console.log('✅ FRONTEND: Formatted PDF label received');
           
-          // Create download link
-          const url = window.URL.createObjectURL(blob);
+          // Create download link for the PDF blob
+          const url = window.URL.createObjectURL(response.data.blob);
           const link = document.createElement('a');
           link.href = url;
-          link.download = `label_${orderId}_${awb}.pdf`;
+          
+          // Generate filename with format: {vendor_id}_{vendor_city}_{format}_{current_date}
+          const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+          const vendorId = user?.warehouseId || 'unknown';
+          const vendorCity = vendorAddress?.city || 'unknown';
+          const filename = `${vendorId}_${vendorCity}_${format}_${currentDate}.pdf`;
+          
+          link.download = filename;
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
           window.URL.revokeObjectURL(url);
           
-          console.log('✅ FRONTEND: Label file downloaded successfully');
+          console.log('✅ FRONTEND: Formatted PDF label downloaded successfully');
           
           // Show success message
-          const orderDisplayId = clone_order_id || original_order_id || orderId;
           toast({
             title: "Label Downloaded",
-            description: `${format} label for order ${orderDisplayId} downloaded successfully`,
+            description: `${format} label for order ${orderId} downloaded successfully`,
           });
           
           // Refresh orders to update the UI
           await refreshOrders();
           
-        } catch (downloadError) {
-          console.error('❌ FRONTEND: Label file download failed:', downloadError);
+        } else {
+          // Handle thermal format (JSON response with shipping_url)
+          const { shipping_url, awb, original_order_id, clone_order_id } = response.data;
           
-          // Fallback: open in new tab
-          window.open(shipping_url, '_blank');
+          console.log('✅ FRONTEND: Thermal label generated successfully');
+          console.log('  - Shipping URL:', shipping_url);
+          console.log('  - AWB:', awb);
           
-          toast({
-            title: "Label Generated",
-            description: `Label generated successfully. Opening in new tab.`,
-          });
+          // Download the label file
+          try {
+            const blob = await apiClient.downloadLabelFile(shipping_url);
+            
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            
+            // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
+            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+            const vendorId = user?.warehouseId || 'unknown';
+            const vendorCity = vendorAddress?.city || 'unknown';
+            const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
+            
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+            
+            console.log('✅ FRONTEND: Thermal label file downloaded successfully');
+            
+            // Show success message
+            const orderDisplayId = clone_order_id || original_order_id || orderId;
+            toast({
+              title: "Label Downloaded",
+              description: `${format} label for order ${orderDisplayId} downloaded successfully`,
+            });
+            
+            // Refresh orders to update the UI
+            await refreshOrders();
+            
+          } catch (downloadError) {
+            console.error('❌ FRONTEND: Thermal label file download failed:', downloadError);
+            
+            // Fallback: open in new tab
+            window.open(shipping_url, '_blank');
+            
+            toast({
+              title: "Label Generated",
+              description: `Label generated successfully. Opening in new tab.`,
+            });
+          }
         }
         
       } else {
@@ -1130,8 +1225,8 @@ export function VendorDashboard() {
       console.log('  - selected orders:', selectedOrders);
       console.log('  - tab:', tab);
 
-      // Call the bulk download labels API
-      const blob = await apiClient.bulkDownloadLabels(selectedOrders);
+      // Call the bulk download labels API with format parameter
+      const blob = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat);
       
       console.log('📥 FRONTEND: Bulk download labels response received');
       console.log('  - blob size:', blob.size);
@@ -1201,77 +1296,47 @@ export function VendorDashboard() {
       if (response.success && response.data) {
         const { successful_claims, failed_claims, total_successful, total_failed } = response.data;
         
-        console.log('✅ FRONTEND: Bulk claim processed');
+        console.log('✅ FRONTEND: Bulk claim successful');
         console.log('  - Successful:', total_successful);
         console.log('  - Failed:', total_failed);
         
-        // Summary toast
+        // Show success message
         toast({
           title: "Bulk Claim Complete",
-          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `, ${total_failed} could not be claimed` : ''}.`,
+          description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `. ${total_failed} orders failed to claim.` : ''}`,
         });
         
-        // Friendly notice for items no longer available
-        if (Array.isArray(failed_claims) && failed_claims.length > 0) {
-          const alreadyClaimed = failed_claims.filter((f: any) => {
-            const reason = String(f?.reason || '').toLowerCase();
-            return reason.includes('not unclaimed') || reason.includes('already claimed');
-          });
-          if (alreadyClaimed.length > 0) {
-            toast({
-              title: 'Some Orders No Longer Available',
-              description: `${alreadyClaimed.length} order(s) are no longer available for claim.`,
-            });
-          }
-        }
-        
-        // Clear selection and refresh
+        // Clear selected orders
         setSelectedUnclaimedOrders([]);
+        
+        // Refresh orders to update the UI
         console.log('🔄 FRONTEND: Refreshing orders after bulk claim...');
         try {
           await refreshOrders();
           console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
         } catch (refreshError) {
-          console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim request completed');
+          console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim was successful');
         }
         
       } else {
         console.log('❌ FRONTEND: Bulk claim failed');
         console.log('  - Error message:', response.message);
-        const msg = (response.message || '').toLowerCase();
-        if (msg.includes('not unclaimed') || msg.includes('already claimed')) {
-          toast({
-            title: 'No Longer Available',
-            description: 'Some selected orders are no longer available for claim.',
-          });
-          try { await refreshOrders(); } catch {}
-        } else {
-          toast({
-            title: 'Bulk Claim Failed',
-            description: response.message || 'Could not claim selected orders',
-            variant: 'destructive',
-          });
-        }
+        toast({
+          title: 'Bulk Claim Failed',
+          description: response.message || 'Could not claim selected orders',
+          variant: 'destructive',
+        });
       }
     } catch (err: any) {
       console.log('💥 FRONTEND: Exception occurred during bulk claim');
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
       
-      const message = String(err?.message || '').toLowerCase();
-      if (message.includes('not unclaimed') || message.includes('already claimed')) {
-        toast({
-          title: 'No Longer Available',
-          description: 'Some selected orders are no longer available for claim.',
-        });
-        try { await refreshOrders(); } catch {}
-      } else {
-        toast({
-          title: 'Bulk Claim Failed',
-          description: err.message || 'Network error occurred',
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Bulk Claim Failed',
+        description: err.message || 'Network error occurred',
+        variant: 'destructive',
+      });
     }
   }
 
@@ -1819,7 +1884,7 @@ export function VendorDashboard() {
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => handleDownloadLabel(order.order_id, "single")}
+                                    onClick={() => handleDownloadLabel(order.order_id, labelFormat)}
                                     disabled={labelDownloadLoading[order.order_id] || bulkDownloadLoading}
                                     className="text-xs px-2 py-1 h-8"
                                   >
@@ -1847,10 +1912,18 @@ export function VendorDashboard() {
                                   <Button 
                                     size="sm" 
                                     variant="destructive" 
-                                    onClick={() => handleRequestReverse(order.order_id)}
+                                    onClick={() => handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id))}
+                                    disabled={reverseLoading[order.order_id]}
                                     className="text-xs px-2 py-1 h-8"
                                   >
-                                    Reverse
+                                    {reverseLoading[order.order_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                        Reversing...
+                                      </>
+                                    ) : (
+                                      'Reverse'
+                                    )}
                                   </Button>
                                 </div>
                               </TableCell>
@@ -1876,10 +1949,8 @@ export function VendorDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-
                         {getFilteredOrdersForTab("handover").map((order, index) => (
                           <TableRow key={`${order.order_id}-${index}`}>
-
                             <TableCell>
                               <TooltipProvider>
                                 <Tooltip>

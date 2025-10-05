@@ -358,6 +358,66 @@ class ApiClient {
       },
     })
   }
+
+  async reverseOrder(unique_id: string): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: reverseOrder called');
+    console.log('  - unique_id:', unique_id);
+    
+    // Use vendor token for reverse endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/reverse');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ unique_id }));
+
+    return this.makeRequest('/orders/reverse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ unique_id }),
+    })
+  }
+
+  async reverseGroupedOrder(order_id: string, unique_ids: string[]): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: reverseGroupedOrder called');
+    console.log('  - order_id:', order_id);
+    console.log('  - unique_ids:', unique_ids);
+    
+    // Use vendor token for reverse grouped endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/reverse-grouped');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ order_id, unique_ids }));
+
+    return this.makeRequest('/orders/reverse-grouped', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ order_id, unique_ids }),
+    })
+  }
+
   // Settlement API methods
   
   // Vendor settlement methods
@@ -618,13 +678,14 @@ class ApiClient {
   }
 
   // Download label methods
-  async downloadLabel(orderId: string): Promise<ApiResponse> {
+  async downloadLabel(orderId: string, format: string = 'thermal'): Promise<ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
     console.log('🔍 DOWNLOAD LABEL API CLIENT DEBUG:');
     console.log('  - Order ID being sent:', orderId);
     console.log('  - Order ID type:', typeof orderId);
+    console.log('  - Format:', format);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
@@ -633,38 +694,50 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_id: orderId })
+      body: JSON.stringify({ order_id: orderId, format })
     }
 
     console.log('  - Request body:', JSON.stringify({ order_id: orderId }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/download-label`, config)
-      const data = await response.json()
 
       console.log('🔍 DOWNLOAD LABEL API RESPONSE DEBUG:');
       console.log('  - Status:', response.status);
       console.log('  - OK:', response.ok);
-      console.log('  - Data:', data);
+      console.log('  - Content-Type:', response.headers.get('content-type'));
 
       if (!response.ok) {
-        throw new Error(data.message || `HTTP error! status: ${response.status}`)
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
       }
 
-      return data
+      // Check if response is PDF (for A4 and four-in-one formats)
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/pdf')) {
+        console.log('📄 Received PDF response for formatted label');
+        const blob = await response.blob();
+        return { success: true, message: 'PDF label generated successfully', data: { blob, isPdf: true } };
+      } else {
+        // JSON response for thermal format
+        const data = await response.json();
+        console.log('📄 Received JSON response for thermal label');
+        return data;
+      }
     } catch (error) {
       console.error('Download label API request failed:', error)
       throw error
     }
   }
 
-  async bulkDownloadLabels(orderIds: string[]): Promise<Blob> {
+  async bulkDownloadLabels(orderIds: string[], format: string = 'thermal'): Promise<Blob> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
     console.log('🔍 BULK DOWNLOAD LABELS API CLIENT DEBUG:');
     console.log('  - Order IDs being sent:', orderIds);
     console.log('  - Order IDs count:', orderIds.length);
+    console.log('  - Format:', format);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
@@ -673,10 +746,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_ids: orderIds })
+      body: JSON.stringify({ order_ids: orderIds, format })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds }));
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)

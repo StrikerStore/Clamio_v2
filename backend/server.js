@@ -307,6 +307,40 @@ app.listen(PORT, async () => {
       console.error('[Carrier Sync] Startup sync failed:', err.message);
     }
   })();
+
+  // Start Auto-Reversal service
+  const autoReversalService = require('./services/autoReversalService');
+  
+  // Run auto-reversal once immediately on startup
+  console.log('🔄 Starting auto-reversal service...');
+  (async () => {
+    try {
+      // Wait a bit for database to be fully ready
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      const result = await autoReversalService.executeAutoReversal();
+      if (result.success) {
+        console.log(`[Auto-Reversal] Startup execution completed: ${result.data.auto_reversed} orders auto-reversed`);
+      } else {
+        console.log(`[Auto-Reversal] Startup execution: ${result.message}`);
+      }
+    } catch (err) {
+      console.error('[Auto-Reversal] Startup execution failed:', err.message);
+    }
+  })();
+
+  // Start Auto-Reversal cron job (every 2 hours)
+  cron.schedule('0 */2 * * *', async () => {
+    try {
+      const result = await autoReversalService.executeAutoReversal();
+      if (result.success) {
+        console.log(`[Auto-Reversal] Scheduled execution completed: ${result.data.auto_reversed} orders auto-reversed`);
+      } else {
+        console.log(`[Auto-Reversal] Scheduled execution: ${result.message}`);
+      }
+    } catch (err) {
+      console.error('[Auto-Reversal] Scheduled execution failed:', err.message);
+    }
+  });
 });
 
 module.exports = app; 

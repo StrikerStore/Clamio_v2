@@ -549,6 +549,8 @@ class ShipwayService {
   /**
    * Sync orders from Shipway API to MySQL database
    * Preserves existing claim data (status, claimed_by, etc.) when syncing new orders.
+   * Only adds new orders and updates existing orders when there are actual data changes.
+   * Prevents unnecessary overriding of existing order data.
    * Logs all API activity.
    * Stores raw API response in JSON file for reference.
    */
@@ -847,14 +849,18 @@ class ShipwayService {
     const existingKeySet = new Set(existingOrders.map(r => `${r.order_id}|${r.product_code}`));
     const newKeySet = new Set(flatOrders.map(r => `${r.order_id}|${r.product_code}`));
     let changed = false;
+    let newOrdersCount = 0;
+    let updatedOrdersCount = 0;
     
     // Check for new rows
     for (const row of flatOrders) {
       if (!existingKeySet.has(`${row.order_id}|${row.product_code}`)) {
         changed = true;
-        break;
+        newOrdersCount++;
       }
     }
+    
+    console.log(`📊 Sync Summary: ${newOrdersCount} new orders, ${existingOrders.length} existing orders`);
     
     // Note: We no longer check for removed rows to preserve historical data
     // Orders that are no longer in Shipway API will remain in our database
@@ -875,38 +881,71 @@ class ShipwayService {
         orderRow.is_in_new_order = true;
         
         if (existingKeySet.has(key)) {
-          // Update existing order (preserve claim data)
+          // Check if existing order needs update by comparing key fields
           const existingOrder = existingOrders.find(o => `${o.order_id}|${o.product_code}` === key);
           if (existingOrder) {
-            await database.updateOrder(existingOrder.unique_id, {
-              order_date: orderRow.order_date,
-              product_name: orderRow.product_name,
-              selling_price: orderRow.selling_price,
-              order_total: orderRow.order_total,
-              payment_type: orderRow.payment_type,
-              prepaid_amount: orderRow.prepaid_amount,
-              order_total_ratio: orderRow.order_total_ratio,
-              order_total_split: orderRow.order_total_split,
-              collectable_amount: orderRow.collectable_amount,
-              pincode: orderRow.pincode,
-              is_in_new_order: true
-            });
+            // Only update if there are actual changes to order data
+            const hasDataChanges = (
+              existingOrder.order_date !== orderRow.order_date ||
+              existingOrder.product_name !== orderRow.product_name ||
+              parseFloat(existingOrder.selling_price || 0) !== parseFloat(orderRow.selling_price || 0) ||
+              parseFloat(existingOrder.order_total || 0) !== parseFloat(orderRow.order_total || 0) ||
+              existingOrder.payment_type !== orderRow.payment_type ||
+              parseFloat(existingOrder.prepaid_amount || 0) !== parseFloat(orderRow.prepaid_amount || 0) ||
+              parseFloat(existingOrder.order_total_ratio || 0) !== parseFloat(orderRow.order_total_ratio || 0) ||
+              parseFloat(existingOrder.order_total_split || 0) !== parseFloat(orderRow.order_total_split || 0) ||
+              parseFloat(existingOrder.collectable_amount || 0) !== parseFloat(orderRow.collectable_amount || 0) ||
+              existingOrder.pincode !== orderRow.pincode
+            );
+            
+            if (hasDataChanges) {
+              // Only update if there are actual data changes
+              await database.updateOrder(existingOrder.unique_id, {
+                order_date: orderRow.order_date,
+                product_name: orderRow.product_name,
+                selling_price: orderRow.selling_price,
+                order_total: orderRow.order_total,
+                payment_type: orderRow.payment_type,
+                prepaid_amount: orderRow.prepaid_amount,
+                order_total_ratio: orderRow.order_total_ratio,
+                order_total_split: orderRow.order_total_split,
+                collectable_amount: orderRow.collectable_amount,
+                pincode: orderRow.pincode,
+                is_in_new_order: true
+              });
+              updatedOrdersCount++;
+              changed = true;
+              console.log(`🔄 Updated existing order: ${orderRow.order_id}|${orderRow.product_code}`);
+            } else {
+              // Just update the is_in_new_order flag without changing other data
+              await database.updateOrder(existingOrder.unique_id, {
+                is_in_new_order: true
+              });
+              console.log(`✅ Preserved existing order: ${orderRow.order_id}|${orderRow.product_code}`);
+            }
           }
         } else {
           // Insert new order
           await database.createOrder(orderRow);
-          changed = true; // Mark as changed for new orders
+          newOrdersCount++;
+          changed = true;
+          console.log(`➕ Added new order: ${orderRow.order_id}|${orderRow.product_code}`);
         }
       }
     
       
-      // Log the flag updates
+      // Log the sync results
       this.logApiActivity({ 
-        type: 'mysql-flags-updated', 
-        rows: flatOrders.length, 
+        type: 'mysql-sync-completed', 
+        totalOrders: flatOrders.length,
+        newOrders: newOrdersCount,
+        updatedOrders: updatedOrdersCount,
+        preservedOrders: flatOrders.length - newOrdersCount - updatedOrdersCount,
         preservedClaims: existingClaimData.size,
         flagsUpdated: true
       });
+      
+      console.log(`📊 Sync Results: ${newOrdersCount} new, ${updatedOrdersCount} updated, ${flatOrders.length - newOrdersCount - updatedOrdersCount} preserved`);
 
       // Only update other data if there were actual changes to orders
       if (changed || existingOrders.length === 0) {
@@ -1056,6 +1095,108 @@ class ShipwayService {
     } catch (error) {
       this.logApiActivity({ type: 'shipway-fetch-orders-error', error: error.message });
       throw new Error('Failed to fetch orders from Shipway API: ' + error.message);
+    }
+  }
+
+  /**
+   * Cancel shipment using Shipway API
+   * @param {Array} awbNumbers - Array of AWB numbers to cancel
+   * @returns {Object} Cancel result from Shipway API
+   */
+  async cancelShipment(awbNumbers) {
+    try {
+      if (!awbNumbers || !Array.isArray(awbNumbers) || awbNumbers.length === 0) {
+        throw new Error('AWB numbers array is required and cannot be empty');
+      }
+
+      if (!this.basicAuthHeader) {
+        throw new Error('Shipway API configuration error. Please contact administrator.');
+      }
+
+      const url = `${this.baseURL}/Cancel`;
+      const requestBody = {
+        awb_number: awbNumbers
+      };
+
+      this.logApiActivity({
+        type: 'shipway-cancel-request',
+        url,
+        awbNumbers,
+        headers: { Authorization: '***' },
+      });
+
+      const response = await axios.post(url, requestBody, {
+        headers: {
+          'Authorization': this.basicAuthHeader,
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000 // 10 second timeout
+      });
+
+      this.logApiActivity({
+        type: 'shipway-cancel-response',
+        status: response.status,
+        data: response.data,
+      });
+
+      // Check if response is successful
+      if (response.status !== 200) {
+        throw new Error(`Shipway API returned status ${response.status}`);
+      }
+
+      const data = response.data;
+
+      // Validate response structure
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid response format from Shipway API');
+      }
+
+      return {
+        success: true,
+        data: data,
+        awbNumbers: awbNumbers
+      };
+
+    } catch (error) {
+      this.logApiActivity({
+        type: 'shipway-cancel-error',
+        awbNumbers,
+        error: error.message,
+        stack: error.stack,
+      });
+      console.error('Error cancelling shipment for AWB numbers:', awbNumbers, 'from Shipway API:', error.message);
+      
+      // Handle specific error cases
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        throw new Error('Unable to connect to Shipway API. Please check your internet connection.');
+      }
+      
+      if (error.code === 'ETIMEDOUT') {
+        throw new Error('Request to Shipway API timed out. Please try again.');
+      }
+
+      if (error.response) {
+        // API returned an error response
+        const status = error.response.status;
+        if (status === 401) {
+          throw new Error('Invalid Shipway API credentials. Please check your configuration.');
+        } else if (status === 404) {
+          throw new Error('AWB numbers not found in Shipway system.');
+        } else if (status === 429) {
+          throw new Error('Rate limit exceeded. Please try again later.');
+        } else {
+          throw new Error(`Shipway API error: ${error.response.data?.message || `Status ${status}`}`);
+        }
+      }
+
+      // Re-throw the original error if it's already formatted
+      if (error.message.includes('Shipway API') || 
+          error.message.includes('Unable to connect') ||
+          error.message.includes('timed out')) {
+        throw error;
+      }
+
+      throw new Error('Failed to cancel shipment from Shipway API');
     }
   }
 }
