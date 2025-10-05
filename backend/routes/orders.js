@@ -1084,11 +1084,12 @@ router.get('/priority-carrier-stats', authenticateBasicAuth, requireAdminOrSuper
  * @access  Vendor (token required)
  */
 router.post('/download-label', async (req, res) => {
-  const { order_id } = req.body;
+  const { order_id, format = 'thermal' } = req.body;
   const token = req.headers['authorization'];
   
   console.log('🔵 DOWNLOAD LABEL REQUEST START');
   console.log('  - order_id:', order_id);
+  console.log('  - format:', format);
   console.log('  - token received:', token ? 'YES' : 'NO');
   
   if (!order_id || !token) {
@@ -1187,7 +1188,6 @@ router.post('/download-label', async (req, res) => {
     
     console.log('🔍 No downloaded label found, proceeding with label generation...');
 
-<<<<<<< HEAD
     // Debug: Log product counts and details
     console.log(`📊 Product Analysis for ${order_id}:`);
     console.log(`  - Total products in order: ${orderProducts.length}`);
@@ -1195,19 +1195,16 @@ router.post('/download-label', async (req, res) => {
     console.log(`  - All products:`, orderProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
     console.log(`  - Claimed products:`, claimedProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
 
-=======
->>>>>>> 05da4a81 ( dev sync)
     // Updated logic: Only 2 conditions (removed underscore check)
     if (orderProducts.length === claimedProducts.length) {
       // Condition 1: Direct download - all products claimed by vendor
       console.log('✅ CONDITION 1: Direct download - all products claimed by vendor');
       
-      const labelResponse = await generateLabelForOrder(order_id, claimedProducts, vendor);
+      const labelResponse = await generateLabelForOrder(order_id, claimedProducts, vendor, format);
       
       // Store label in cache after successful generation
       if (labelResponse.success && labelResponse.data.shipping_url) {
         try {
-<<<<<<< HEAD
           const labelDataToStore = {
             order_id: order_id,
             label_url: labelResponse.data.shipping_url,
@@ -1234,16 +1231,6 @@ router.post('/download-label', async (req, res) => {
         } catch (cacheError) {
           console.log(`⚠️ Failed to cache label URL: ${cacheError.message}`);
           console.log(`  - Error details:`, cacheError);
-=======
-          await database.upsertLabel({
-            order_id: order_id,
-            label_url: labelResponse.data.shipping_url,
-            awb: labelResponse.data.awb
-          });
-          console.log(`✅ Stored label URL in cache for direct download order ${order_id}`);
-        } catch (cacheError) {
-          console.log(`⚠️ Failed to cache label URL: ${cacheError.message}`);
->>>>>>> 05da4a81 ( dev sync)
         }
       }
       
@@ -1278,7 +1265,7 @@ router.post('/download-label', async (req, res) => {
 /**
  * Generate label for an order (Condition 1: Direct download)
  */
-async function generateLabelForOrder(orderId, products, vendor) {
+async function generateLabelForOrder(orderId, products, vendor, format = 'thermal') {
   try {
     console.log('🔄 Generating label for order:', orderId);
     
@@ -1372,20 +1359,146 @@ async function generateLabelForOrder(orderId, products, vendor) {
     console.log('  - Shipping URL:', shipping_url);
     console.log('  - AWB:', awb);
     
-    return {
-      success: true,
-      message: 'Label generated successfully',
-      data: {
-        shipping_url: shipping_url,
-        awb: awb,
-        order_id: orderId,
-        carrier_id: assignedCarrier.carrier_id,
-        carrier_name: assignedCarrier.carrier_name
+    // Handle different formats
+    if (format === 'thermal') {
+      // For thermal format, return the original label URL
+      return {
+        success: true,
+        message: 'Label generated successfully',
+        data: {
+          shipping_url: shipping_url,
+          awb: awb,
+          order_id: orderId,
+          carrier_id: assignedCarrier.carrier_id,
+          carrier_name: assignedCarrier.carrier_name
+        }
+      };
+    } else {
+      // For A4 and four-in-one formats, generate a PDF with appropriate layout
+      console.log(`🔄 Generating ${format} format PDF...`);
+      
+      try {
+        const formattedPdfBuffer = await generateFormattedLabelPDF(shipping_url, format);
+        
+        // Create a temporary file or return the buffer directly
+        // For now, we'll return the buffer and let the frontend handle it
+        return {
+          success: true,
+          message: `${format} format label generated successfully`,
+          data: {
+            shipping_url: shipping_url, // Keep original for reference
+            awb: awb,
+            order_id: orderId,
+            carrier_id: assignedCarrier.carrier_id,
+            carrier_name: assignedCarrier.carrier_name,
+            formatted_pdf: formattedPdfBuffer.toString('base64'), // Base64 encoded PDF
+            format: format
+          }
+        };
+      } catch (pdfError) {
+        console.error('❌ PDF formatting failed:', pdfError);
+        // Fallback to original thermal label
+        return {
+          success: true,
+          message: 'Label generated successfully (fallback to thermal format)',
+          data: {
+            shipping_url: shipping_url,
+            awb: awb,
+            order_id: orderId,
+            carrier_id: assignedCarrier.carrier_id,
+            carrier_name: assignedCarrier.carrier_name
+          }
+        };
       }
-    };
+    }
     
   } catch (error) {
     console.error('❌ Label generation failed:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate formatted label PDF based on format type
+ */
+async function generateFormattedLabelPDF(shippingUrl, format) {
+  try {
+    console.log(`🔄 Generating ${format} format PDF from URL: ${shippingUrl}`);
+    
+    // Import PDF-lib for PDF manipulation
+    const { PDFDocument } = require('pdf-lib');
+    
+    // Fetch the original PDF from the shipping URL
+    const response = await fetch(shippingUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch label PDF: ${response.status}`);
+    }
+    
+    const originalPdfBuffer = await response.arrayBuffer();
+    const originalPdf = await PDFDocument.load(originalPdfBuffer);
+    
+    // Create a new PDF document
+    const formattedPdf = await PDFDocument.create();
+    
+    if (format === 'a4') {
+      // A4 format: One label per A4 page
+      console.log('📄 Creating A4 format (one label per page)');
+      
+      const a4Page = formattedPdf.addPage([595, 842]); // A4 size in points
+      const [originalPage] = await formattedPdf.embedPages([originalPdf.getPage(0)]);
+      
+      // Center the label on the A4 page
+      const labelWidth = 288; // 4x6 label width in points
+      const labelHeight = 432; // 4x6 label height in points
+      const x = (595 - labelWidth) / 2; // Center horizontally
+      const y = (842 - labelHeight) / 2; // Center vertically
+      
+      a4Page.drawPage(originalPage, {
+        x: x,
+        y: y,
+        width: labelWidth,
+        height: labelHeight
+      });
+      
+    } else if (format === 'four-in-one') {
+      // Four-in-one format: 4 labels per A4 page
+      console.log('📄 Creating four-in-one format (4 labels per A4 page)');
+      
+      const a4Page = formattedPdf.addPage([595, 842]); // A4 size in points
+      const [originalPage] = await formattedPdf.embedPages([originalPdf.getPage(0)]);
+      
+      // Calculate positions for 4 labels (2x2 grid)
+      const labelWidth = 288; // 4x6 label width in points
+      const labelHeight = 432; // 4x6 label height in points
+      const margin = 10; // Margin between labels
+      
+      // Positions for 4 labels: top-left, top-right, bottom-left, bottom-right
+      const positions = [
+        [margin, 842 - labelHeight - margin], // top-left
+        [595 - labelWidth - margin, 842 - labelHeight - margin], // top-right
+        [margin, margin], // bottom-left
+        [595 - labelWidth - margin, margin] // bottom-right
+      ];
+      
+      // Draw the same label 4 times
+      for (const [x, y] of positions) {
+        a4Page.drawPage(originalPage, {
+          x: x,
+          y: y,
+          width: labelWidth,
+          height: labelHeight
+        });
+      }
+    }
+    
+    // Save the formatted PDF
+    const formattedPdfBytes = await formattedPdf.save();
+    console.log(`✅ ${format} format PDF generated successfully`);
+    
+    return Buffer.from(formattedPdfBytes);
+    
+  } catch (error) {
+    console.error(`❌ ${format} format PDF generation failed:`, error);
     throw error;
   }
 }
@@ -1777,7 +1890,6 @@ async function updateLocalDatabaseAfterClone(inputData) {
     for (const product of claimedProducts) {
       // Update orders table: set order_id to clone ID
       await database.updateOrder(product.unique_id, {
-<<<<<<< HEAD
         order_id: cloneOrderId  // ✅ Update orders table with clone ID
       });
       
@@ -1862,78 +1974,6 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
     console.log(`  ⚠️ No shipping URL found in label response, skipping labels table storage`);
   }
   
-=======
-      order_id: cloneOrderId,           // ✅ Set to clone order ID
-      clone_status: 'cloned',           // ✅ Mark as cloned
-      cloned_order_id: originalOrderId, // ✅ Store original order ID (not clone ID)
-      label_downloaded: 0               // ✅ Initially 0 (not downloaded)
-    });
-    
-    console.log(`  ✅ Updated product ${product.unique_id} after clone creation:`);
-    console.log(`     - order_id: ${cloneOrderId}`);
-    console.log(`     - clone_status: cloned`);
-    console.log(`     - cloned_order_id: ${originalOrderId}`);
-    console.log(`     - label_downloaded: 0`);
-  }
-  
-  console.log('✅ Local database updated after clone creation');
-  return { success: true, updatedProducts: claimedProducts.length };
-}
-
-// Step 6: Generate label for clone
-async function generateLabelForClone(inputData) {
-  const { cloneOrderId, claimedProducts, vendor } = inputData;
-  
-  console.log(`🔒 Generating label with consistent data:`);
-  console.log(`  - Clone ID: ${cloneOrderId}`);
-  console.log(`  - Products for label: ${claimedProducts.length}`);
-  console.log(`  - Timestamp: ${inputData.timestamp}`);
-  
-  // Generate label for the clone order
-  const labelResponse = await generateLabelForOrder(cloneOrderId, claimedProducts, vendor);
-  
-  if (!labelResponse.success) {
-    throw new Error(`Failed to generate label for clone: ${labelResponse.message || 'Unknown error'}`);
-  }
-  
-  console.log('✅ Label generated successfully for clone order');
-  return labelResponse;
-}
-
-// Step 7: Mark label as downloaded and store in labels table
-async function markLabelAsDownloaded(inputData, labelResponse) {
-  const { claimedProducts, cloneOrderId } = inputData;
-  const database = require('../config/database');
-  
-  console.log(`🔒 Marking label as downloaded and storing in labels table:`);
-  console.log(`  - Clone Order ID: ${cloneOrderId}`);
-  console.log(`  - Products count: ${claimedProducts.length}`);
-  console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
-  console.log(`  - AWB: ${labelResponse.data.awb}`);
-  
-  // Update orders table: mark label as downloaded
-  for (const product of claimedProducts) {
-    await database.updateOrder(product.unique_id, {
-      label_downloaded: 1  // ✅ Mark as downloaded only after successful label generation
-    });
-    
-    console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
-  }
-  
-  // Store label URL in labels table (one entry per order_id, no duplicates)
-  if (labelResponse.data.shipping_url) {
-    await database.upsertLabel({
-      order_id: cloneOrderId,
-      label_url: labelResponse.data.shipping_url,
-      awb: labelResponse.data.awb
-    });
-    
-    console.log(`  ✅ Stored label URL in labels table for order ${cloneOrderId}`);
-  } else {
-    console.log(`  ⚠️ No shipping URL found in label response, skipping labels table storage`);
-  }
-  
->>>>>>> 05da4a81 ( dev sync)
   console.log('✅ All product labels marked as downloaded and cached');
   return { success: true, markedProducts: claimedProducts.length };
 }
@@ -2187,11 +2227,12 @@ async function syncOrdersFromShipway() {
  * @access  Vendor (token required)
  */
 router.post('/bulk-download-labels', async (req, res) => {
-  const { order_ids } = req.body;
+  const { order_ids, format = 'thermal' } = req.body;
   const token = req.headers['authorization'];
   
   console.log('🔵 BULK DOWNLOAD LABELS REQUEST START');
   console.log('  - order_ids:', order_ids);
+  console.log('  - format:', format);
   console.log('  - token received:', token ? 'YES' : 'NO');
   
   if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
@@ -2277,7 +2318,7 @@ router.post('/bulk-download-labels', async (req, res) => {
         if (isCloneOrder) {
           // Already a clone order - direct download
           console.log(`📋 BULK: Processing clone order ${orderId}`);
-          labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor);
+          labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor, format);
           
           // Store label and carrier info for clone order
           if (labelResponse.success && labelResponse.data.shipping_url) {
@@ -2302,7 +2343,7 @@ router.post('/bulk-download-labels', async (req, res) => {
         } else if (orderProducts.length === claimedProducts.length) {
           // Direct download - all products claimed by vendor
           console.log(`📋 BULK: Processing direct download for ${orderId}`);
-          labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor);
+          labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor, format);
           
           // Store label and carrier info for direct download
           if (labelResponse.success && labelResponse.data.shipping_url) {
@@ -2373,7 +2414,7 @@ router.post('/bulk-download-labels', async (req, res) => {
 
     // Generate combined PDF
     try {
-      const combinedPdfBuffer = await generateCombinedLabelsPDF(results);
+      const combinedPdfBuffer = await generateCombinedLabelsPDF(results, format);
       
       // Set response headers for PDF download
       res.setHeader('Content-Type', 'application/pdf');
@@ -2480,7 +2521,6 @@ router.post('/download-pdf', async (req, res) => {
     
     // Set response headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
-<<<<<<< HEAD
     
     // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
     const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
@@ -2489,9 +2529,6 @@ router.post('/download-pdf', async (req, res) => {
     const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
     
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-=======
-    res.setHeader('Content-Disposition', 'attachment; filename="label.pdf"');
->>>>>>> 05da4a81 ( dev sync)
     res.setHeader('Content-Length', pdfBuffer.byteLength);
     
     // Send the PDF buffer
@@ -2510,9 +2547,9 @@ router.post('/download-pdf', async (req, res) => {
 /**
  * Generate combined PDF from multiple label URLs
  */
-async function generateCombinedLabelsPDF(labels) {
+async function generateCombinedLabelsPDF(labels, format = 'thermal') {
   try {
-    console.log('🔄 Generating combined PDF for', labels.length, 'labels');
+    console.log(`🔄 Generating combined PDF for ${labels.length} labels in ${format} format`);
     
     // Import PDF-lib for PDF manipulation
     const { PDFDocument } = require('pdf-lib');
@@ -2520,37 +2557,135 @@ async function generateCombinedLabelsPDF(labels) {
     // Create a new PDF document
     const mergedPdf = await PDFDocument.create();
     
-    // Process each label
-    for (const label of labels) {
-      try {
-        console.log(`  - Processing label for order ${label.order_id}`);
-        
-        // Fetch the PDF from the shipping URL
-        const response = await fetch(label.shipping_url);
-        if (!response.ok) {
-          console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
-          continue;
+    if (format === 'thermal') {
+      // Original behavior: just concatenate all labels
+      for (const label of labels) {
+        try {
+          console.log(`  - Processing label for order ${label.order_id}`);
+          
+          // Fetch the PDF from the shipping URL
+          const response = await fetch(label.shipping_url);
+          if (!response.ok) {
+            console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
+            continue;
+          }
+          
+          const pdfBuffer = await response.arrayBuffer();
+          
+          // Load the PDF
+          const pdf = await PDFDocument.load(pdfBuffer);
+          
+          // Copy all pages from this PDF to the merged PDF
+          const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+          pages.forEach(page => mergedPdf.addPage(page));
+          
+          console.log(`    ✅ Added label for order ${label.order_id}`);
+          
+        } catch (labelError) {
+          console.log(`    ❌ Error processing label for order ${label.order_id}:`, labelError.message);
         }
-        
-        const pdfBuffer = await response.arrayBuffer();
-        
-        // Load the PDF
-        const pdf = await PDFDocument.load(pdfBuffer);
-        
-        // Copy all pages from this PDF to the merged PDF
-        const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-        pages.forEach(page => mergedPdf.addPage(page));
-        
-        console.log(`    ✅ Added label for order ${label.order_id}`);
-        
-      } catch (labelError) {
-        console.log(`    ❌ Error processing label for order ${label.order_id}:`, labelError.message);
+      }
+    } else {
+      // For A4 and four-in-one formats, process labels in batches
+      console.log(`📄 Processing labels in ${format} format batches`);
+      
+      if (format === 'a4') {
+        // A4 format: One label per A4 page
+        for (const label of labels) {
+          try {
+            console.log(`  - Processing A4 label for order ${label.order_id}`);
+            
+            const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
+            
+            // Fetch the original PDF
+            const response = await fetch(label.shipping_url);
+            if (!response.ok) {
+              console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
+              continue;
+            }
+            
+            const pdfBuffer = await response.arrayBuffer();
+            const originalPdf = await PDFDocument.load(pdfBuffer);
+            const [originalPage] = await mergedPdf.embedPages([originalPdf.getPage(0)]);
+            
+            // Center the label on the A4 page
+            const labelWidth = 288; // 4x6 label width in points
+            const labelHeight = 432; // 4x6 label height in points
+            const x = (595 - labelWidth) / 2; // Center horizontally
+            const y = (842 - labelHeight) / 2; // Center vertically
+            
+            a4Page.drawPage(originalPage, {
+              x: x,
+              y: y,
+              width: labelWidth,
+              height: labelHeight
+            });
+            
+            console.log(`    ✅ Added A4 label for order ${label.order_id}`);
+            
+          } catch (labelError) {
+            console.log(`    ❌ Error processing A4 label for order ${label.order_id}:`, labelError.message);
+          }
+        }
+      } else if (format === 'four-in-one') {
+        // Four-in-one format: 4 labels per A4 page
+        const batchSize = 4;
+        for (let i = 0; i < labels.length; i += batchSize) {
+          const batch = labels.slice(i, i + batchSize);
+          console.log(`  - Processing four-in-one batch ${Math.floor(i / batchSize) + 1} (${batch.length} labels)`);
+          
+          const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
+          
+          // Calculate positions for 4 labels (2x2 grid)
+          const labelWidth = 288; // 4x6 label width in points
+          const labelHeight = 432; // 4x6 label height in points
+          const margin = 10; // Margin between labels
+          
+          // Positions for 4 labels: top-left, top-right, bottom-left, bottom-right
+          const positions = [
+            [margin, 842 - labelHeight - margin], // top-left
+            [595 - labelWidth - margin, 842 - labelHeight - margin], // top-right
+            [margin, margin], // bottom-left
+            [595 - labelWidth - margin, margin] // bottom-right
+          ];
+          
+          // Process each label in the batch
+          for (let j = 0; j < batch.length; j++) {
+            const label = batch[j];
+            const [x, y] = positions[j];
+            
+            try {
+              // Fetch the original PDF
+              const response = await fetch(label.shipping_url);
+              if (!response.ok) {
+                console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
+                continue;
+              }
+              
+              const pdfBuffer = await response.arrayBuffer();
+              const originalPdf = await PDFDocument.load(pdfBuffer);
+              const [originalPage] = await mergedPdf.embedPages([originalPdf.getPage(0)]);
+              
+              a4Page.drawPage(originalPage, {
+                x: x,
+                y: y,
+                width: labelWidth,
+                height: labelHeight
+              });
+              
+              console.log(`    ✅ Added label for order ${label.order_id} at position ${j + 1}`);
+              
+            } catch (labelError) {
+              console.log(`    ❌ Error processing label for order ${label.order_id}:`, labelError.message);
+            }
+          }
+        }
       }
     }
     
     // Save the merged PDF
     const mergedPdfBytes = await mergedPdf.save();
-    console.log('✅ Combined PDF generated successfully');
+    console.log(`✅ Combined PDF generated successfully in ${format} format`);
     
     return Buffer.from(mergedPdfBytes);
     

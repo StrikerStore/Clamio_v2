@@ -678,13 +678,14 @@ class ApiClient {
   }
 
   // Download label methods
-  async downloadLabel(orderId: string): Promise<ApiResponse> {
+  async downloadLabel(orderId: string, format: string = 'thermal'): Promise<ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
     console.log('🔍 DOWNLOAD LABEL API CLIENT DEBUG:');
     console.log('  - Order ID being sent:', orderId);
     console.log('  - Order ID type:', typeof orderId);
+    console.log('  - Format being sent:', format);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
@@ -693,10 +694,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_id: orderId })
+      body: JSON.stringify({ order_id: orderId, format: format })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_id: orderId }));
+    console.log('  - Request body:', JSON.stringify({ order_id: orderId, format: format }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/download-label`, config)
@@ -718,13 +719,14 @@ class ApiClient {
     }
   }
 
-  async bulkDownloadLabels(orderIds: string[]): Promise<Blob> {
+  async bulkDownloadLabels(orderIds: string[], format: string = 'thermal'): Promise<Blob> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
     console.log('🔍 BULK DOWNLOAD LABELS API CLIENT DEBUG:');
     console.log('  - Order IDs being sent:', orderIds);
     console.log('  - Order IDs count:', orderIds.length);
+    console.log('  - Format being sent:', format);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
@@ -733,10 +735,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_ids: orderIds })
+      body: JSON.stringify({ order_ids: orderIds, format: format })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds }));
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)

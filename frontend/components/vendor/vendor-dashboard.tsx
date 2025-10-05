@@ -204,7 +204,6 @@ export function VendorDashboard() {
   const [selectedSettlementForView, setSelectedSettlementForView] = useState<any>(null)
   const [showViewRequestDialog, setShowViewRequestDialog] = useState(false)
   const [selectedImageProduct, setSelectedImageProduct] = useState<{url: string, title: string} | null>(null)
-<<<<<<< HEAD
   
   // Loading states for label downloads
   const [labelDownloadLoading, setLabelDownloadLoading] = useState<{[key: string]: boolean}>({})
@@ -212,8 +211,6 @@ export function VendorDashboard() {
   
   // Loading states for reverse operations
   const [reverseLoading, setReverseLoading] = useState<{[key: string]: boolean}>({})
-=======
->>>>>>> 05da4a81 ( dev sync)
 
   useEffect(() => {
     async function fetchAddress() {
@@ -302,12 +299,11 @@ export function VendorDashboard() {
       console.log('🔄 Refreshing orders data...');
       const response = await apiClient.getOrders();
       if (response.success && response.data && Array.isArray(response.data.orders)) {
-<<<<<<< HEAD
         console.log('📊 Raw orders data:', response.data.orders.length, 'orders');
         // Check for duplicates in raw data
-        const uniqueIds = new Set();
-        const duplicates = [];
-        response.data.orders.forEach((order, index) => {
+        const uniqueIds = new Set<string>();
+        const duplicates: Array<{index: number, unique_id: string, order: any}> = [];
+        response.data.orders.forEach((order: any, index: number) => {
           if (uniqueIds.has(order.unique_id)) {
             duplicates.push({ index, unique_id: order.unique_id, order });
           } else {
@@ -316,8 +312,14 @@ export function VendorDashboard() {
         });
         if (duplicates.length > 0) {
           console.warn('🚨 Duplicate unique_ids found in raw API data:', duplicates);
-=======
-        setOrders(response.data.orders);
+        }
+        
+        // Filter out duplicates and ensure uniqueness
+        const uniqueOrders = response.data.orders.filter((order: any, index: number, self: any[]) => 
+          index === self.findIndex((o: any) => o.unique_id === order.unique_id)
+        );
+        
+        setOrders(uniqueOrders);
         console.log('✅ Orders refreshed successfully');
       } else if (response.success && response.data && response.data.orders) {
         setOrders([response.data.orders]);
@@ -343,44 +345,8 @@ export function VendorDashboard() {
   };
 
   useEffect(() => {
-    async function fetchOrders() {
-      setOrdersLoading(true);
-      setOrdersError("");
-      try {
-        const response = await apiClient.getOrders();
-        if (response.success && response.data && Array.isArray(response.data.orders)) {
-          setOrders(response.data.orders);
-        } else if (response.success && response.data && response.data.orders) {
-          setOrders([response.data.orders]);
-        } else {
-          setOrders([]);
-          setOrdersError("No orders found");
->>>>>>> 05da4a81 ( dev sync)
-        }
-        setOrders(response.data.orders);
-        console.log('✅ Orders refreshed successfully');
-      } else if (response.success && response.data && response.data.orders) {
-        setOrders([response.data.orders]);
-        console.log('✅ Orders refreshed successfully');
-      } else {
-        setOrders([]);
-        setOrdersError("No orders found");
-      }
-
-      // Also refresh grouped orders for My Orders tab
-      console.log('🔄 Refreshing grouped orders data...');
-      const groupedResponse = await apiClient.getGroupedOrders();
-      if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
-        setGroupedOrders(groupedResponse.data.groupedOrders);
-        console.log('✅ Grouped orders refreshed successfully');
-      } else {
-        console.log('⚠️ Failed to refresh grouped orders');
-      }
-    } catch (err: any) {
-      console.error("Error refreshing orders:", err);
-      setOrdersError(err.message || "Failed to refresh orders");
-    }
-  };
+    fetchOrders();
+  }, []);
 
   const fetchOrders = async () => {
     setOrdersLoading(true);
@@ -534,7 +500,7 @@ export function VendorDashboard() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': user?.token || '',
+          'Authorization': localStorage.getItem('authHeader') || '',
         },
         body: JSON.stringify({ order_id: orderId }),
       });
@@ -582,7 +548,7 @@ export function VendorDashboard() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': user?.token || '',
+          'Authorization': localStorage.getItem('authHeader') || '',
         },
         body: JSON.stringify({ order_ids: selectedMyOrders }),
       });
@@ -1122,63 +1088,121 @@ export function VendorDashboard() {
       console.log('🔍 FRONTEND: Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
       console.log('🔍 FRONTEND: Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
-      // Call the download label API
-      const response = await apiClient.downloadLabel(orderId);
+      // Call the download label API with format parameter
+      const response = await apiClient.downloadLabel(orderId, format);
       
       console.log('📥 FRONTEND: Download label response received');
       console.log('  - success:', response.success);
       console.log('  - data:', response.data);
       
       if (response.success && response.data) {
-        const { shipping_url, awb, original_order_id, clone_order_id } = response.data;
+        const { shipping_url, awb, original_order_id, clone_order_id, formatted_pdf, format: responseFormat } = response.data;
         
         console.log('✅ FRONTEND: Label generated successfully');
         console.log('  - Shipping URL:', shipping_url);
         console.log('  - AWB:', awb);
+        console.log('  - Format:', responseFormat);
+        console.log('  - Has formatted PDF:', !!formatted_pdf);
         
-        // Download the label file
-        try {
-          const blob = await apiClient.downloadLabelFile(shipping_url);
-          
-          // Create download link
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          
-          // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
-          const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
-          const vendorId = user?.warehouseId || 'unknown';
-          const vendorCity = vendorAddress?.city || 'unknown';
-          const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
-          
-          link.download = filename;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(url);
-          
-          console.log('✅ FRONTEND: Label file downloaded successfully');
-          
-          // Show success message
-          const orderDisplayId = clone_order_id || original_order_id || orderId;
-          toast({
-            title: "Label Downloaded",
-            description: `${format} label for order ${orderDisplayId} downloaded successfully`,
-          });
-          
-          // Refresh orders to update the UI
-          await refreshOrders();
-          
-        } catch (downloadError) {
-          console.error('❌ FRONTEND: Label file download failed:', downloadError);
-          
-          // Fallback: open in new tab
-          window.open(shipping_url, '_blank');
-          
-          toast({
-            title: "Label Generated",
-            description: `Label generated successfully. Opening in new tab.`,
-          });
+        // Handle different formats
+        if (formatted_pdf && (responseFormat === 'a4' || responseFormat === 'four-in-one')) {
+          // Handle A4 and four-in-one formats with base64 PDF
+          try {
+            console.log('🔄 FRONTEND: Processing formatted PDF...');
+            
+            // Convert base64 to blob
+            const binaryString = atob(formatted_pdf);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            
+            // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
+            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+            const vendorId = user?.warehouseId || 'unknown';
+            const vendorCity = vendorAddress?.city || 'unknown';
+            const filename = `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`;
+            
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+            
+            console.log('✅ FRONTEND: Formatted PDF downloaded successfully');
+            
+            // Show success message
+            const orderDisplayId = clone_order_id || original_order_id || orderId;
+            toast({
+              title: "Label Downloaded",
+              description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully`,
+            });
+            
+            // Refresh orders to update the UI
+            await refreshOrders();
+            
+          } catch (pdfError) {
+            console.error('❌ FRONTEND: Formatted PDF download failed:', pdfError);
+            
+            // Fallback: open original URL in new tab
+            window.open(shipping_url, '_blank');
+            
+            toast({
+              title: "Label Generated",
+              description: `Label generated successfully. Opening in new tab.`,
+            });
+          }
+        } else {
+          // Handle thermal format (original behavior)
+          try {
+            const blob = await apiClient.downloadLabelFile(shipping_url);
+            
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            
+            // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
+            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+            const vendorId = user?.warehouseId || 'unknown';
+            const vendorCity = vendorAddress?.city || 'unknown';
+            const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
+            
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+            
+            console.log('✅ FRONTEND: Label file downloaded successfully');
+            
+            // Show success message
+            const orderDisplayId = clone_order_id || original_order_id || orderId;
+            toast({
+              title: "Label Downloaded",
+              description: `${format} label for order ${orderDisplayId} downloaded successfully`,
+            });
+            
+            // Refresh orders to update the UI
+            await refreshOrders();
+            
+          } catch (downloadError) {
+            console.error('❌ FRONTEND: Label file download failed:', downloadError);
+            
+            // Fallback: open in new tab
+            window.open(shipping_url, '_blank');
+            
+            toast({
+              title: "Label Generated",
+              description: `Label generated successfully. Opening in new tab.`,
+            });
+          }
         }
         
       } else {
@@ -1234,8 +1258,8 @@ export function VendorDashboard() {
       console.log('  - selected orders:', selectedOrders);
       console.log('  - tab:', tab);
 
-      // Call the bulk download labels API
-      const blob = await apiClient.bulkDownloadLabels(selectedOrders);
+      // Call the bulk download labels API with format parameter
+      const blob = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat);
       
       console.log('📥 FRONTEND: Bulk download labels response received');
       console.log('  - blob size:', blob.size);
@@ -1893,7 +1917,7 @@ export function VendorDashboard() {
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => handleDownloadLabel(order.order_id, "single")}
+                                    onClick={() => handleDownloadLabel(order.order_id, labelFormat)}
                                     disabled={labelDownloadLoading[order.order_id] || bulkDownloadLoading}
                                     className="text-xs px-2 py-1 h-8"
                                   >

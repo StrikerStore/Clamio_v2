@@ -860,7 +860,6 @@ class ShipwayService {
       }
     }
     
-<<<<<<< HEAD
     console.log(`📊 Sync Summary: ${newOrdersCount} new orders, ${existingOrders.length} existing orders`);
     
     // Note: We no longer check for removed rows to preserve historical data
@@ -947,59 +946,6 @@ class ShipwayService {
       });
       
       console.log(`📊 Sync Results: ${newOrdersCount} new, ${updatedOrdersCount} updated, ${flatOrders.length - newOrdersCount - updatedOrdersCount} preserved`);
-=======
-    // Note: We no longer check for removed rows to preserve historical data
-    // Orders that are no longer in Shipway API will remain in our database
-    
-    // ALWAYS update is_in_new_order flags (regardless of other changes)
-    try {
-      // Step 1: Mark all existing orders as NOT in new order (is_in_new_order = 0)
-      for (const existingOrder of existingOrders) {
-        await database.updateOrder(existingOrder.unique_id, {
-          is_in_new_order: false
-        });
-      }
-      
-      // Step 2: Insert or update orders from current Shipway API (is_in_new_order = 1)
-      for (const orderRow of flatOrders) {
-        const key = `${orderRow.order_id}|${orderRow.product_code}`;
-        // Set is_in_new_order = 1 for all orders from current Shipway API
-        orderRow.is_in_new_order = true;
-        
-        if (existingKeySet.has(key)) {
-          // Update existing order (preserve claim data)
-          const existingOrder = existingOrders.find(o => `${o.order_id}|${o.product_code}` === key);
-          if (existingOrder) {
-            await database.updateOrder(existingOrder.unique_id, {
-              order_date: orderRow.order_date,
-              product_name: orderRow.product_name,
-              selling_price: orderRow.selling_price,
-              order_total: orderRow.order_total,
-              payment_type: orderRow.payment_type,
-              prepaid_amount: orderRow.prepaid_amount,
-              order_total_ratio: orderRow.order_total_ratio,
-              order_total_split: orderRow.order_total_split,
-              collectable_amount: orderRow.collectable_amount,
-              pincode: orderRow.pincode,
-              is_in_new_order: true
-            });
-          }
-        } else {
-          // Insert new order
-          await database.createOrder(orderRow);
-          changed = true; // Mark as changed for new orders
-        }
-      }
-    
-      
-      // Log the flag updates
-      this.logApiActivity({ 
-        type: 'mysql-flags-updated', 
-        rows: flatOrders.length, 
-        preservedClaims: existingClaimData.size,
-        flagsUpdated: true
-      });
->>>>>>> 05da4a81 ( dev sync)
 
       // Only update other data if there were actual changes to orders
       if (changed || existingOrders.length === 0) {
@@ -1007,11 +953,7 @@ class ShipwayService {
           type: 'mysql-write-with-new-columns', 
           rows: flatOrders.length, 
           preservedClaims: existingClaimData.size,
-<<<<<<< HEAD
           newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode', 'is_in_new_order']
-=======
-          newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'product_image', 'priority_carrier', 'pincode', 'is_in_new_order']
->>>>>>> 05da4a81 ( dev sync)
         });
 
         // Automatically enhance orders with customer names and product images

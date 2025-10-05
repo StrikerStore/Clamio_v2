@@ -287,27 +287,7 @@ class Database {
       `;
       
       await this.mysqlConnection.execute(createTableQuery);
-<<<<<<< HEAD
       console.log('✅ Fresh orders table created with clean structure');
-=======
-      console.log('✅ Orders table created/verified');
-
-      // Add is_in_new_order column if it doesn't exist
-      try {
-        await this.mysqlConnection.execute(`
-          ALTER TABLE orders 
-          ADD COLUMN is_in_new_order BOOLEAN DEFAULT 1
-        `);
-        console.log('✅ Added is_in_new_order column to orders table');
-      } catch (error) {
-        // Column might already exist, check if it's the expected error
-        if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ is_in_new_order column already exists');
-        } else {
-          console.error('❌ Error adding is_in_new_order column:', error.message);
-        }
-      }
->>>>>>> 05da4a81 ( dev sync)
 
       // Create labels table for caching label URLs
       await this.createLabelsTable();
@@ -318,33 +298,6 @@ class Database {
 
   /**
    * Create labels table for caching label URLs
-<<<<<<< HEAD
-=======
-   */
-  async createLabelsTable() {
-    try {
-      const createLabelsTableQuery = `
-        CREATE TABLE IF NOT EXISTS labels (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          order_id VARCHAR(100) UNIQUE NOT NULL,
-          label_url VARCHAR(1000) NOT NULL,
-          awb VARCHAR(100),
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_order_id (order_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-      `;
-      
-      await this.mysqlConnection.execute(createLabelsTableQuery);
-      console.log('✅ Labels table created/verified');
-    } catch (error) {
-      console.error('❌ Error creating labels table:', error.message);
-    }
-  }
-
-  /**
-   * Ensure the data directory exists
->>>>>>> 05da4a81 ( dev sync)
    */
   async createLabelsTable() {
     try {
@@ -1918,7 +1871,6 @@ class Database {
           id, unique_id, order_id, customer_name, order_date,
           product_name, product_code, selling_price, order_total, payment_type,
           prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
-<<<<<<< HEAD
           pincode, is_in_new_order
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
@@ -1933,12 +1885,6 @@ class Database {
           collectable_amount = VALUES(collectable_amount),
           pincode = VALUES(pincode),
           is_in_new_order = VALUES(is_in_new_order)`,
-=======
-          pincode, status, claimed_by, claimed_at, last_claimed_by, last_claimed_at,
-          clone_status, cloned_order_id, is_cloned_row, label_downloaded,
-          handover_at, priority_carrier, is_in_new_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
->>>>>>> 05da4a81 ( dev sync)
         [
           orderData.id || null,
           orderData.unique_id || null,
@@ -2160,7 +2106,6 @@ class Database {
     }
 
     try {
-<<<<<<< HEAD
       const [rows] = await this.mysqlConnection.execute(`
         SELECT 
           o.*,
@@ -2196,11 +2141,6 @@ class Database {
         ORDER BY o.order_date DESC, o.order_id, o.product_name
       `);
       
-=======
-      const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM orders WHERE (is_in_new_order = 1 OR label_downloaded = 1) ORDER BY order_date DESC, order_id, product_name'
-      );
->>>>>>> 05da4a81 ( dev sync)
       return rows;
     } catch (error) {
       console.error('Error getting all orders:', error);
@@ -2219,7 +2159,6 @@ class Database {
     }
 
     try {
-<<<<<<< HEAD
       const [rows] = await this.mysqlConnection.execute(`
         SELECT 
           o.*,
@@ -2255,12 +2194,6 @@ class Database {
         ORDER BY c.claimed_at DESC
       `, [warehouseId]);
       
-=======
-      const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM orders WHERE claimed_by = ? AND (is_in_new_order = 1 OR label_downloaded = 1) ORDER BY claimed_at DESC',
-        [warehouseId]
-      );
->>>>>>> 05da4a81 ( dev sync)
       return rows;
     } catch (error) {
       console.error('Error getting orders by vendor:', error);
@@ -2280,7 +2213,6 @@ class Database {
     }
 
     try {
-<<<<<<< HEAD
       const [rows] = await this.mysqlConnection.execute(`
         SELECT 
           o.*,
@@ -2319,16 +2251,6 @@ class Database {
         ORDER BY o.order_date DESC, o.order_id
       `, [warehouseId]);
       
-=======
-      const [rows] = await this.mysqlConnection.execute(
-        `SELECT * FROM orders 
-        WHERE claimed_by = ? 
-        AND (status = 'claimed' OR status = 'ready_for_handover')
-        AND (is_in_new_order = 1 OR label_downloaded = 1)
-        ORDER BY order_date DESC, order_id`,
-        [warehouseId]
-      );
->>>>>>> 05da4a81 ( dev sync)
       return rows;
     } catch (error) {
       console.error('Error getting vendor orders:', error);
@@ -2361,14 +2283,7 @@ class Database {
         'order_id', 'customer_name', 'order_date',
         'product_name', 'product_code', 'selling_price', 'order_total',
         'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split',
-<<<<<<< HEAD
         'collectable_amount', 'pincode', 'is_in_new_order'
-=======
-        'collectable_amount', 'pincode', 'status', 'claimed_by', 'claimed_at',
-        'last_claimed_by', 'last_claimed_at', 'clone_status', 'cloned_order_id',
-        'is_cloned_row', 'label_downloaded', 'handover_at', 'priority_carrier',
-        'is_in_new_order'
->>>>>>> 05da4a81 ( dev sync)
       ];
 
       // Claims table fields
@@ -2532,7 +2447,6 @@ class Database {
 
     try {
       const [rows] = await this.mysqlConnection.execute(
-<<<<<<< HEAD
         `SELECT o.*, p.image as product_image
          FROM orders o
          LEFT JOIN products p ON TRIM(
@@ -2548,13 +2462,6 @@ class Database {
          OR o.product_code LIKE ? OR o.pincode LIKE ?)
          AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
          ORDER BY o.order_date DESC, o.order_id`,
-=======
-        `SELECT * FROM orders 
-         WHERE (order_id LIKE ? OR customer_name LIKE ? OR product_name LIKE ? 
-         OR product_code LIKE ? OR pincode LIKE ?)
-         AND (is_in_new_order = 1 OR label_downloaded = 1)
-         ORDER BY order_date DESC, order_id`,
->>>>>>> 05da4a81 ( dev sync)
         [
           `%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`,
           `%${searchTerm}%`, `%${searchTerm}%`
@@ -2624,7 +2531,6 @@ class Database {
     }
 
     try {
-<<<<<<< HEAD
       // Handle partial updates by only updating provided fields
       const updateFields = [];
       const updateValues = [];
@@ -2673,19 +2579,6 @@ class Database {
           labelData.priority_carrier || null,
           labelData.is_manifest || 0,
           ...updateValues
-=======
-      const [result] = await this.mysqlConnection.execute(
-        `INSERT INTO labels (order_id, label_url, awb) 
-         VALUES (?, ?, ?) 
-         ON DUPLICATE KEY UPDATE 
-         label_url = VALUES(label_url), 
-         awb = VALUES(awb),
-         updated_at = CURRENT_TIMESTAMP`,
-        [
-          labelData.order_id,
-          labelData.label_url,
-          labelData.awb || null
->>>>>>> 05da4a81 ( dev sync)
         ]
       );
 

@@ -278,7 +278,7 @@ app.listen(PORT, async () => {
       console.error('[Shipway Sync] Failed:', err.message);
     }
   });
-  // Run once immediately on startup
+  // Run once immediately on startup (incremental sync - only recent orders)
   (async () => {
     try {
       await shipwayService.syncOrdersToMySQL();
