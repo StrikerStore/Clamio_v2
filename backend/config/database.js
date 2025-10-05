@@ -1133,13 +1133,16 @@ class Database {
         address, city, pincode 
       } = userData;
       
+      // Generate ID if not provided
+      const userId = id || `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
       const [result] = await this.mysqlConnection.execute(
         'INSERT INTO users (id, name, email, phone, password, role, status, token, active_session, contactNumber, warehouseId, address, city, pincode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, name, email, phone || null, password || null, role, status || 'active', token || null, active_session || null, contactNumber || null, warehouseId || null, address || null, city || null, pincode || null]
+        [userId, name, email, phone || null, password || null, role, status || 'active', token || null, active_session || null, contactNumber || null, warehouseId || null, address || null, city || null, pincode || null]
       );
 
       return {
-        id,
+        id: userId,
         name,
         email,
         phone,

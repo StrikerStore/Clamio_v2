@@ -71,8 +71,16 @@ const validateUserRegistration = [
   
   body('warehouseId')
     .optional()
-    .isNumeric()
-    .withMessage('Warehouse ID must be a number'),
+    .custom((value) => {
+      if (value === undefined || value === null || value === '') {
+        return true; // Optional field, allow empty
+      }
+      // Convert to string and check if it's a valid positive number
+      const stringValue = String(value).trim();
+      const numValue = parseInt(stringValue, 10);
+      return !isNaN(numValue) && numValue > 0 && numValue.toString() === stringValue;
+    })
+    .withMessage('Warehouse ID must be a positive number'),
   
   body('contactNumber')
     .optional()

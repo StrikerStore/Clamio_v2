@@ -84,13 +84,26 @@ class ShipwayService {
       };
 
     } catch (error) {
+      // Check if this is an expected validation failure (warehouse not found)
+      const isValidationFailure = error.message.includes('Warehouse not found') || 
+                                  error.message.includes('not found') ||
+                                  error.message.includes('Invalid warehouse ID');
+
       this.logApiActivity({
-        type: 'shipway-error',
+        type: isValidationFailure ? 'shipway-validation-failure' : 'shipway-error',
         warehouseId,
         error: error.message,
         stack: error.stack,
       });
-      console.error('Error fetching for warehouseId:', warehouseId, 'from Shipway API:', error.message);
+
+      if (isValidationFailure) {
+        console.log('⚠️ Warehouse validation failed (expected):', {
+          warehouseId,
+          reason: error.message
+        });
+      } else {
+        console.error('Error fetching for warehouseId:', warehouseId, 'from Shipway API:', error.message);
+      }
       
       // Handle specific error cases
       if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
