@@ -328,8 +328,6 @@ export function LoginForm() {
             <p className="text-sm text-gray-600 mb-2">Demo Credentials:</p>
             <div className="text-xs space-y-1 text-gray-500">
               <p>Super Admin: superadmin@example.com / password123</p>
-              <p>Admin: testadmin@example.com / TestPass123</p>
-              <p>Vendor: testvendor@example.com / TestPass123</p>
             </div>
           </div>
         </CardContent>

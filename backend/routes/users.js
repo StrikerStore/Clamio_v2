@@ -152,6 +152,23 @@ router.delete('/vendor/:id', requireAdminOrSuperadmin, validateUserId, (req, res
   }
 }, userController.deleteUser);
 
+// Admin or Superadmin can update vendor via vendor-specific route
+router.put('/vendor/:id', requireAdminOrSuperadmin, validateUserId, (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const user = database.getUserById(id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (user.role !== 'vendor') {
+      return res.status(403).json({ success: false, message: 'Only vendor updates allowed' });
+    }
+    next();
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}, validateUserUpdate, userController.updateUser);
+
 // Apply superadmin authorization to the remaining admin-only user routes
 router.use(requireSuperadmin);
 

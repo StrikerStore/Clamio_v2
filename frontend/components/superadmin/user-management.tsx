@@ -953,7 +953,7 @@ export function UserManagement() {
 
         {/* Edit and Password Dialogs for Mobile */}
         <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Edit className="h-5 w-5 text-blue-600" />
@@ -964,7 +964,7 @@ export function UserManagement() {
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleEditSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-name" className="text-sm font-medium text-gray-700">Full Name *</Label>
                   <Input id="edit-name" value={editFormData.name} onChange={(e) => handleEditInputChange('name', e.target.value)} required disabled={editing} className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500" />
@@ -1002,6 +1002,89 @@ export function UserManagement() {
                   </Select>
                 </div>
               </div>
+
+              {/* Warehouse ID field for vendors */}
+              {editFormData.role === 'vendor' && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-warehouseId" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        id="edit-warehouseId"
+                        value={editFormData.warehouseId}
+                        onChange={(e) => handleEditInputChange('warehouseId', e.target.value)}
+                        required
+                        disabled={editing}
+                        className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
+                          warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
+                          warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
+                        }`}
+                        placeholder="Enter warehouse ID"
+                      />
+                      {warehouseValidating && (
+                        <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-blue-600" />
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleVerifyWarehouse}
+                      disabled={warehouseVerifyLoading || !editFormData.warehouseId.trim() || editing || !editDialogOpen}
+                    >
+                      {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                    </Button>
+                  </div>
+                  {warehouseValid === true && (
+                    <div className="space-y-1">
+                      <p className="text-sm text-green-600 flex items-center gap-1">
+                        <UserCheck className="h-3 w-3" />
+                        Valid warehouse ID
+                      </p>
+                      {warehouseInfo && (
+                        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
+                          <p><strong>Address:</strong> {warehouseInfo.address}</p>
+                          <p><strong>City:</strong> {warehouseInfo.city}</p>
+                          <p><strong>Pincode:</strong> {warehouseInfo.pincode}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {warehouseValid === false && (
+                    <p className="text-sm text-red-600 flex items-center gap-1">
+                      <Shield className="h-3 w-3" />
+                      Invalid warehouse ID
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Contact Number field */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-contactNumber" className="text-sm font-medium text-gray-700">Contact Number</Label>
+                <Input
+                  id="edit-contactNumber"
+                  value={editFormData.contactNumber}
+                  onChange={(e) => handleEditInputChange('contactNumber', e.target.value)}
+                  disabled={editing}
+                  className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                  placeholder="Enter contact number (optional)"
+                />
+              </div>
+
+              {/* Error and Success Messages */}
+              {error && (
+                <Alert variant="destructive" className="border-red-200 bg-red-50">
+                  <AlertDescription className="text-red-800">{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {success && (
+                <Alert className="border-green-200 bg-green-50">
+                  <AlertDescription className="text-green-800">{success}</AlertDescription>
+                </Alert>
+              )}
+
               <DialogFooter>
                 <Button type="submit" disabled={editing}>
                   {editing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

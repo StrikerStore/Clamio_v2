@@ -1628,6 +1628,9 @@ export function AdminDashboard() {
                                         variant="destructive"
                                         onClick={async () => {
                                           try {
+                                            // Check localStorage directly for auth header
+                                            const storedAuthHeader = localStorage.getItem('authHeader')
+                                            if (!storedAuthHeader) throw new Error('Not authenticated. Please login again.')
                                             const res = await apiClient.deleteUser(vendor.id)
                                             if (res.success) {
                                               toast({ title: 'Vendor Deleted', description: `${vendor.name} removed.` })
@@ -1673,8 +1676,9 @@ export function AdminDashboard() {
                               <Button size="sm" variant="outline" onClick={() => { setVendorDialogVendor(vendor); setEditVendorForm({ name: vendor.name, email: vendor.email, phone: vendor.phone, status: vendor.status, warehouseId: vendor.warehouseId || '', contactNumber: vendor.contactNumber || '' }); setShowVendorEditDialog(true) }}><Edit className="w-3 h-3" /></Button>
                               <Button size="sm" variant="destructive" onClick={async () => {
                                 try {
-                                  // Ensure auth header exists (admin only action)
-                                  if (!authHeader) throw new Error('Not authenticated. Please login again.')
+                                  // Ensure auth header exists (admin only action) - check localStorage directly
+                                  const storedAuthHeader = localStorage.getItem('authHeader')
+                                  if (!storedAuthHeader) throw new Error('Not authenticated. Please login again.')
                                   const res = await apiClient.deleteUser(vendor.id)
                                   if (res.success) {
                                     toast({ title: 'Vendor Deleted', description: `${vendor.name} removed.` })
@@ -1804,7 +1808,9 @@ export function AdminDashboard() {
                         <Button variant="outline" onClick={() => setShowVendorEditDialog(false)}>Cancel</Button>
                         <Button onClick={async () => {
                           try {
-                            if (!authHeader) throw new Error('Not authenticated. Please login again.')
+                            // Check localStorage directly for auth header
+                            const storedAuthHeader = localStorage.getItem('authHeader')
+                            if (!storedAuthHeader) throw new Error('Not authenticated. Please login again.')
                             const payload: any = {}
                             if (editVendorForm.name && editVendorForm.name.trim()) payload.name = editVendorForm.name.trim()
                             if (editVendorForm.email && editVendorForm.email.trim()) payload.email = editVendorForm.email.trim()

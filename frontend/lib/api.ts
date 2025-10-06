@@ -135,21 +135,47 @@ class ApiClient {
     warehouseId: string
     contactNumber: string
   }>): Promise<ApiResponse> {
-    // Always use the general users endpoint for superadmin operations
-    // The superadmin route /users/:id can update any user type
-    const endpoint = `/users/${userId}`
-    return this.makeRequest(endpoint, {
-      method: 'PUT',
-      body: JSON.stringify(userData)
-    })
+    // Try vendor-specific route first (allows admin access)
+    // If it fails with permission error, fall back to general route
+    try {
+      const response = await this.makeRequest(`/users/vendor/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(userData)
+      })
+      return response
+    } catch (error: any) {
+      // If vendor route fails with permission error, try general route
+      if (error.message && error.message.includes('Insufficient permissions')) {
+        console.log('Vendor route failed, trying general route')
+        return this.makeRequest(`/users/${userId}`, {
+          method: 'PUT',
+          body: JSON.stringify(userData)
+        })
+      }
+      // Re-throw other errors
+      throw error
+    }
   }
 
   async deleteUser(userId: string): Promise<ApiResponse> {
-    // Use the general users endpoint for superadmin operations
-    // The superadmin route /users/:id can delete any user type
-    return this.makeRequest(`/users/${userId}`, {
-      method: 'DELETE'
-    })
+    // Try vendor-specific route first (allows admin access)
+    // If it fails with permission error, fall back to general route
+    try {
+      const response = await this.makeRequest(`/users/vendor/${userId}`, {
+        method: 'DELETE'
+      })
+      return response
+    } catch (error: any) {
+      // If vendor route fails with permission error, try general route
+      if (error.message && error.message.includes('Insufficient permissions')) {
+        console.log('Vendor route failed, trying general route')
+        return this.makeRequest(`/users/${userId}`, {
+          method: 'DELETE'
+        })
+      }
+      // Re-throw other errors
+      throw error
+    }
   }
 
   async getUserById(userId: string): Promise<ApiResponse> {
