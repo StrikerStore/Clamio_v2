@@ -1017,18 +1017,28 @@ export function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center space-x-4">
-              <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
                 <Settings className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-semibold text-gray-900">Admin Dashboard v4</h1>
-                <p className="text-sm text-gray-500">Welcome back, {user?.name}</p>
+                <h1 className="text-xl font-bold text-gray-900">Clamio - Admin</h1>
+                <p className="text-sm text-gray-600">Welcome back, {user?.name}</p>
               </div>
             </div>
-            <Button variant="outline" onClick={logout}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
+            <div className="flex items-center space-x-2">
+              <div className="text-right">
+                <p className="text-sm font-medium text-gray-900 truncate max-w-[120px]">{user?.name}</p>
+                <p className="text-xs text-gray-500 break-all max-w-[200px]">{user?.email}</p>
+              </div>
+              <Button 
+                variant="outline" 
+                onClick={logout}
+                className="flex items-center gap-2 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -1036,65 +1046,65 @@ export function AdminDashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Stats Cards - compact, colorful, 2x2 on mobile */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6 mb-4 md:mb-8">
-          <Card className="border-0 shadow-sm bg-gradient-to-br from-blue-50 to-blue-100">
+          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
             <CardContent className="p-4 md:p-6">
-              <div className="flex items-center">
-                <div className="p-2 md:p-2.5 bg-white/70 rounded-lg">
-                  <Package className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs md:text-sm font-medium text-blue-100 opacity-90">Total Orders</p>
+                  <p className="text-xl md:text-2xl font-bold mt-1">{ordersStats.totalOrders}</p>
                 </div>
-                <div className="ml-3 md:ml-4">
-                  <p className="text-xs md:text-sm font-medium text-blue-700">Total Orders</p>
-                  <p className="text-xl md:text-2xl font-bold text-blue-900">{ordersStats.totalOrders}</p>
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <Package className="w-5 h-5 md:w-6 md:h-6" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
 
-          <Card className="border-0 shadow-sm bg-gradient-to-br from-indigo-50 to-indigo-100">
+          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
             <CardContent className="p-4 md:p-6">
-              <div className="flex items-center">
-                <div className="p-2 md:p-2.5 bg-white/70 rounded-lg">
-                  <Package className="w-5 h-5 md:w-6 md:h-6 text-indigo-600" />
-                </div>
-                <div className="ml-3 md:ml-4">
-                  <p className="text-xs md:text-sm font-medium text-indigo-700">Claimed Orders</p>
-                  <p className="text-xl md:text-2xl font-bold text-indigo-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs md:text-sm font-medium text-green-100 opacity-90">Claimed Orders</p>
+                  <p className="text-xl md:text-2xl font-bold mt-1">
                     {ordersStats.claimedOrders}
                   </p>
                 </div>
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <Package className="w-5 h-5 md:w-6 md:h-6" />
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-0 shadow-sm bg-gradient-to-br from-amber-50 to-amber-100">
+          <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
             <CardContent className="p-4 md:p-6">
-              <div className="flex items-center">
-                <div className="p-2 md:p-2.5 bg-white/70 rounded-lg">
-                  <Clock className="w-5 h-5 md:w-6 md:h-6 text-amber-600" />
-                </div>
-                <div className="ml-3 md:ml-4">
-                  <p className="text-xs md:text-sm font-medium text-amber-700">Unclaimed Orders</p>
-                  <p className="text-xl md:text-2xl font-bold text-amber-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs md:text-sm font-medium text-orange-100 opacity-90">Unclaimed Orders</p>
+                  <p className="text-xl md:text-2xl font-bold mt-1">
                     {ordersStats.unclaimedOrders}
                   </p>
                 </div>
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <Clock className="w-5 h-5 md:w-6 md:h-6" />
+                </div>
               </div>
             </CardContent>
           </Card>
 
 
-          <Card className="border-0 shadow-sm bg-gradient-to-br from-emerald-50 to-emerald-100">
+          <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg">
             <CardContent className="p-4 md:p-6">
-              <div className="flex items-center">
-                <div className="p-2 md:p-2.5 bg-white/70 rounded-lg">
-                  <Users className="w-5 h-5 md:w-6 md:h-6 text-emerald-600" />
-                </div>
-                <div className="ml-3 md:ml-4">
-                  <p className="text-xs md:text-sm font-medium text-emerald-700">Active Vendors</p>
-                  <p className="text-xl md:text-2xl font-bold text-emerald-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs md:text-sm font-medium text-purple-100 opacity-90">Active Vendors</p>
+                  <p className="text-xl md:text-2xl font-bold mt-1">
                     {vendors.filter((v) => (v.status || '').toString().trim().toLowerCase() === 'active').length}
                   </p>
+                </div>
+                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <Users className="w-5 h-5 md:w-6 md:h-6" />
                 </div>
               </div>
             </CardContent>
@@ -2710,3 +2720,4 @@ export function AdminDashboard() {
     </div>
   )
 }
+

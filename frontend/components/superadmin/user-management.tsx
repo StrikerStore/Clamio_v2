@@ -1180,10 +1180,10 @@ export function UserManagement() {
               </div>
               <div className="min-w-0">
                 <h1 className={`font-bold text-gray-900 ${isMobile ? 'text-lg' : 'text-xl'}`}>
-                  {isMobile ? 'Admin Panel' : 'Super Admin Panel'}
+                  {isMobile ? 'Clamio' : 'Clamio - Super Admin'}
                 </h1>
                 {!isMobile && (
-                  <p className="text-sm text-gray-600">User Management & System Control</p>
+                  <p className="text-sm text-gray-600">Welcome back, Super Admin</p>
                 )}
               </div>
             </div>

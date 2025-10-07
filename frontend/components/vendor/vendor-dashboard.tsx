@@ -1436,12 +1436,12 @@ export function VendorDashboard() {
           <div className="flex items-center justify-between py-4 gap-4">
             {/* Dashboard Name and Welcome */}
             <div className="flex items-center gap-4 min-w-0">
-              <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
                 <Settings className="w-5 h-5 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-xl font-semibold text-gray-900 truncate">Vendor Dashboard</h1>
-                <p className="text-sm text-gray-500 truncate">
+                <h1 className="text-xl font-bold text-gray-900 truncate">Clamio - Vendor</h1>
+                <p className="text-sm text-gray-600 truncate">
                   Welcome back, {user?.name}
                 </p>
               </div>
@@ -1474,65 +1474,65 @@ export function VendorDashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
+          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
             <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Package className="w-6 h-6 text-blue-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">All Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-blue-100 opacity-90">All Orders</p>
+                  <p className="text-2xl font-bold mt-1">
                     {orders.filter((o) => o.status === "unclaimed").length}
                   </p>
                 </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <Package className="w-6 h-6" />
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
             <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <CheckCircle className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">My Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-green-100 opacity-90">My Orders</p>
+                  <p className="text-2xl font-bold mt-1">
                     {orders.filter((o) => o.status === "claimed" && o.claimed_by === user?.warehouseId).length}
                   </p>
                 </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <CheckCircle className="w-6 h-6" />
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
             <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-orange-100 rounded-lg">
-                  <Upload className="w-6 h-6 text-orange-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Handover</p>
-                  <p className="text-2xl font-bold text-gray-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-orange-100 opacity-90">Handover</p>
+                  <p className="text-2xl font-bold mt-1">
                     {orders.filter((o) => o.status === "ready_for_handover" && o.claimed_by === user?.warehouseId && o.is_manifest === 1).length}
                   </p>
                 </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <Upload className="w-6 h-6" />
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setShowRevenueModal(true)}>
+          <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-shadow" onClick={() => setShowRevenueModal(true)}>
             <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-purple-100 rounded-lg">
-                  <IndianRupee className="w-6 h-6 text-purple-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Revenue (Click to Claim)</p>
-                  <p className="text-2xl font-bold text-gray-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-purple-100 opacity-90">Revenue (Click to Claim)</p>
+                  <p className="text-2xl font-bold mt-1">
                     {paymentsLoading ? "Loading..." : payments ? `₹${payments.currentPayment.toFixed(2)}` : "₹0.00"}
                   </p>
+                </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <IndianRupee className="w-6 h-6" />
                 </div>
               </div>
             </CardContent>
