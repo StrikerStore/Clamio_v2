@@ -119,9 +119,9 @@ class ApiClient {
     warehouseId?: string
     contactNumber?: string
   }): Promise<ApiResponse> {
-    const isAdminCreatingVendor = userData.role === 'vendor'
-    const endpoint = isAdminCreatingVendor ? '/users/vendor' : '/users'
-    return this.makeRequest(endpoint, {
+    // Superadmin can create both vendors and admins via the general /users endpoint
+    // Admins (if they have access) would use /users/vendor for creating vendors only
+    return this.makeRequest('/users', {
       method: 'POST',
       body: JSON.stringify(userData)
     })
@@ -135,47 +135,21 @@ class ApiClient {
     warehouseId: string
     contactNumber: string
   }>): Promise<ApiResponse> {
-    // Try vendor-specific route first (allows admin access)
-    // If it fails with permission error, fall back to general route
-    try {
-      const response = await this.makeRequest(`/users/vendor/${userId}`, {
-        method: 'PUT',
-        body: JSON.stringify(userData)
-      })
-      return response
-    } catch (error: any) {
-      // If vendor route fails with permission error, try general route
-      if (error.message && error.message.includes('Insufficient permissions')) {
-        console.log('Vendor route failed, trying general route')
-        return this.makeRequest(`/users/${userId}`, {
-          method: 'PUT',
-          body: JSON.stringify(userData)
-        })
-      }
-      // Re-throw other errors
-      throw error
-    }
+    // Superadmin uses the general route which allows updating any user (vendor or admin)
+    // The general route requires superadmin role only
+    return this.makeRequest(`/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(userData)
+    })
   }
 
   async deleteUser(userId: string): Promise<ApiResponse> {
-    // Try vendor-specific route first (allows admin access)
-    // If it fails with permission error, fall back to general route
-    try {
-      const response = await this.makeRequest(`/users/vendor/${userId}`, {
-        method: 'DELETE'
-      })
-      return response
-    } catch (error: any) {
-      // If vendor route fails with permission error, try general route
-      if (error.message && error.message.includes('Insufficient permissions')) {
-        console.log('Vendor route failed, trying general route')
-        return this.makeRequest(`/users/${userId}`, {
-          method: 'DELETE'
-        })
-      }
-      // Re-throw other errors
-      throw error
-    }
+    // Superadmin uses the general route which allows deleting any user (vendor or admin)
+    // The general route requires superadmin role only
+    // Note: Superadmin users themselves cannot be deleted (protected in controller)
+    return this.makeRequest(`/users/${userId}`, {
+      method: 'DELETE'
+    })
   }
 
   async getUserById(userId: string): Promise<ApiResponse> {

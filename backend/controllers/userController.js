@@ -471,11 +471,13 @@ class UserController {
         });
       }
 
-      // Prevent deletion of superadmin
+      // SAFEGUARD: Prevent deletion of superadmin users
+      // This is a security measure to prevent accidental system lockout
+      // Superadmin can delete vendors and admins, but not other superadmins
       if (user.role === 'superadmin') {
         return res.status(403).json({
           success: false,
-          message: 'Cannot delete superadmin user'
+          message: 'Cannot delete superadmin user. This is a security safeguard to prevent system lockout.'
         });
       }
 

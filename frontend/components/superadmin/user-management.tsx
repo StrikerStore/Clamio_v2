@@ -899,6 +899,20 @@ export function UserManagement() {
                       <Label htmlFor="contactNumber">Contact Number</Label>
                       <Input id="contactNumber" value={formData.contactNumber} onChange={(e) => handleInputChange('contactNumber', e.target.value)} disabled={creating} />
                     </div>
+                    {/* Password Requirements Alert */}
+                    <Alert className="border-blue-200 bg-blue-50">
+                      <Shield className="h-4 w-4 text-blue-600" />
+                      <AlertDescription className="text-blue-800 text-xs">
+                        <strong>Password Requirements:</strong>
+                        <ul className="list-disc list-inside mt-1 space-y-0.5">
+                          <li>Min 6 characters</li>
+                          <li>One uppercase (A-Z)</li>
+                          <li>One lowercase (a-z)</li>
+                          <li>One number (0-9)</li>
+                        </ul>
+                      </AlertDescription>
+                    </Alert>
+
                     <div className="space-y-2">
                       <Label htmlFor="password">Password *</Label>
                       <Input id="password" type="password" value={formData.password} onChange={(e) => handleInputChange('password', e.target.value)} required disabled={creating} />
@@ -1107,6 +1121,20 @@ export function UserManagement() {
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              {/* Password Requirements Alert */}
+              <Alert className="border-purple-200 bg-purple-50">
+                <Shield className="h-4 w-4 text-purple-600" />
+                <AlertDescription className="text-purple-800 text-xs">
+                  <strong>Password Requirements:</strong>
+                  <ul className="list-disc list-inside mt-1 space-y-0.5">
+                    <li>Min 6 characters</li>
+                    <li>One uppercase (A-Z)</li>
+                    <li>One lowercase (a-z)</li>
+                    <li>One number (0-9)</li>
+                  </ul>
+                </AlertDescription>
+              </Alert>
+
               <div className="space-y-2">
                 <Label htmlFor="new-password">New Password</Label>
                 <Input id="new-password" type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} required />
@@ -1614,6 +1642,20 @@ export function UserManagement() {
 
                         <Separator />
 
+                        {/* Password Requirements Alert */}
+                        <Alert className="border-blue-200 bg-blue-50">
+                          <Shield className="h-4 w-4 text-blue-600" />
+                          <AlertDescription className="text-blue-800 text-sm">
+                            <strong>Password Requirements:</strong>
+                            <ul className="list-disc list-inside mt-1 space-y-0.5">
+                              <li>Minimum 6 characters long</li>
+                              <li>At least one uppercase letter (A-Z)</li>
+                              <li>At least one lowercase letter (a-z)</li>
+                              <li>At least one number (0-9)</li>
+                            </ul>
+                          </AlertDescription>
+                        </Alert>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div className="space-y-2">
                             <Label htmlFor="password" className="text-sm font-medium text-gray-700">Password *</Label>
@@ -1897,6 +1939,20 @@ export function UserManagement() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            {/* Password Requirements Alert */}
+            <Alert className="border-purple-200 bg-purple-50">
+              <Shield className="h-4 w-4 text-purple-600" />
+              <AlertDescription className="text-purple-800 text-sm">
+                <strong>Password Requirements:</strong>
+                <ul className="list-disc list-inside mt-1 space-y-0.5">
+                  <li>Minimum 6 characters long</li>
+                  <li>At least one uppercase letter (A-Z)</li>
+                  <li>At least one lowercase letter (a-z)</li>
+                  <li>At least one number (0-9)</li>
+                </ul>
+              </AlertDescription>
+            </Alert>
+
             <div className="space-y-2">
               <Label htmlFor="newPassword" className="text-sm font-medium text-gray-700">New Password *</Label>
               <div className="relative">
