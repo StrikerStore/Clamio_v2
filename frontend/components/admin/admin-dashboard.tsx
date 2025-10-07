@@ -22,6 +22,13 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { DatePicker } from "@/components/ui/date-picker"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
 import {
   Users,
   Package,
@@ -41,6 +48,13 @@ import {
   Edit,
   IndianRupee,
   Shield,
+  Bell,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  RefreshCw,
+  ChevronDown,
+  ExternalLink,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -247,6 +261,38 @@ export function AdminDashboard() {
   const [settlementPage, setSettlementPage] = useState(1)
   const [settlementPagination, setSettlementPagination] = useState({ totalPages: 1, totalItems: 0 })
   const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null)
+
+  // Notification management state
+  const [notifications, setNotifications] = useState<any[]>([])
+  const [notificationsLoading, setNotificationsLoading] = useState(false)
+  const [notificationStats, setNotificationStats] = useState<any>(null)
+  const [selectedNotification, setSelectedNotification] = useState<any>(null)
+  const [showNotificationDialog, setShowNotificationDialog] = useState(false)
+  const [resolutionNotes, setResolutionNotes] = useState("")
+  const [notificationFilters, setNotificationFilters] = useState({ 
+    status: "all", 
+    type: "all", 
+    severity: "all",
+    search: "",
+    vendor: "all",
+    dateFrom: undefined as Date | undefined,
+    dateTo: undefined as Date | undefined
+  })
+  const [notificationPage, setNotificationPage] = useState(1)
+  const [notificationPagination, setNotificationPagination] = useState({ totalPages: 1, totalItems: 0 })
+  const [showNotificationInfo, setShowNotificationInfo] = useState(false)
+  const [sampleNotificationStatuses, setSampleNotificationStatuses] = useState<{[key: number]: {status: string, resolved_at?: string, resolved_by?: string, resolution_notes?: string}}>({})
+  const [notificationFilterOptions, setNotificationFilterOptions] = useState<{
+    vendors: string[],
+    types: string[],
+    severities: string[],
+    statuses: string[]
+  }>({
+    vendors: [],
+    types: [],
+    severities: [],
+    statuses: []
+  })
   const [showProofDialog, setShowProofDialog] = useState(false)
 
   // Image modal state
@@ -862,6 +908,53 @@ export function AdminDashboard() {
     }
   };
 
+  // Fetch notification filter options from database
+  const fetchNotificationFilterOptions = async () => {
+    try {
+      const response = await apiClient.getNotifications({ page: 1, limit: 1000 });
+      if (response.success && response.data.notifications) {
+        const notifications = response.data.notifications;
+        
+        // Extract unique values for each filter
+        const uniqueVendors = [...new Set(notifications
+          .map((n: any) => n.vendor_name)
+          .filter((v: any) => v)
+        )].sort() as string[];
+        
+        const uniqueTypes = [...new Set(notifications
+          .map((n: any) => n.type)
+          .filter((t: any) => t)
+        )].sort() as string[];
+        
+        const uniqueSeverities = [...new Set(notifications
+          .map((n: any) => n.severity)
+          .filter((s: any) => s)
+        )].sort() as string[];
+        
+        const uniqueStatuses = [...new Set(notifications
+          .map((n: any) => n.status)
+          .filter((s: any) => s)
+        )].sort() as string[];
+        
+        setNotificationFilterOptions({
+          vendors: uniqueVendors,
+          types: uniqueTypes,
+          severities: uniqueSeverities,
+          statuses: uniqueStatuses
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching notification filter options:', error);
+      // Use default values if fetch fails
+      setNotificationFilterOptions({
+        vendors: ['Mumbai Warehouse', 'Delhi Warehouse', 'Bangalore Warehouse'],
+        types: ['reverse_order_failure', 'shipment_assignment_error', 'carrier_unavailable', 'low_balance'],
+        severities: ['critical', 'high', 'medium', 'low'],
+        statuses: ['pending', 'in_progress', 'resolved', 'dismissed']
+      });
+    }
+  };
+
   // Handle order assignment to vendor
   const handleAssignOrder = async () => {
     if (!selectedOrderForAssignment || !selectedVendorId) {
@@ -1010,6 +1103,13 @@ export function AdminDashboard() {
     }
   };
 
+  // Load notification filter options when notifications tab is active
+  useEffect(() => {
+    if (activeTab === 'notifications') {
+      fetchNotificationFilterOptions();
+    }
+  }, [activeTab]);
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header - Fixed */}
@@ -1136,6 +1236,15 @@ export function AdminDashboard() {
                   </TabsTrigger>
                   <TabsTrigger value="settlement-management" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
                     <span className={isMobile ? "" : "font-semibold"}>Settlement Management</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="notifications" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                    <Bell className="w-4 h-4 mr-2" />
+                    <span className={isMobile ? "" : "font-semibold"}>Notifications</span>
+                    {notificationStats && notificationStats.pending > 0 && (
+                      <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                        {notificationStats.pending}
+                      </span>
+                    )}
                   </TabsTrigger>
                 </TabsList>
 
@@ -2176,11 +2285,959 @@ export function AdminDashboard() {
                     )}
                   </div>
                 </TabsContent>
+
+                {/* Notifications Tab */}
+                <TabsContent value="notifications" className="mt-0">
+                  <div className="space-y-4">
+                    {/* Filters Section */}
+                    {isMobile ? (
+                      <Accordion type="single" collapsible className="w-full">
+                        <AccordionItem value="filters" className="border rounded-lg bg-white">
+                          <AccordionTrigger className="px-3 py-2 hover:no-underline">
+                            <div className="flex items-center justify-between w-full pr-2">
+                              <div className="flex items-center gap-2">
+                                <Filter className="w-4 h-4 text-gray-600" />
+                                <span className="text-sm font-semibold text-gray-700">Filters</span>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowNotificationInfo(!showNotificationInfo);
+                                }}
+                                className="h-7 px-2 text-xs"
+                              >
+                                <Info className="w-3 h-3 mr-1" />
+                                Info
+                              </Button>
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent className="px-3 pb-3">
+                            <div className="space-y-3 pt-2">
+                              {/* Filter Controls */}
+                              <div className="grid grid-cols-1 gap-3">
+                            {/* Order ID Filter */}
+                            <div>
+                              <Label htmlFor="filter-order-id" className={`${isMobile ? 'text-xs' : 'text-xs'} text-gray-600 mb-1`}>Order ID</Label>
+                              <Input
+                                id="filter-order-id"
+                                placeholder={isMobile ? "Order ID..." : "Search by order ID..."}
+                                value={notificationFilters.search}
+                                onChange={(e) => setNotificationFilters({...notificationFilters, search: e.target.value})}
+                                className={isMobile ? "h-10" : "h-9"}
+                              />
+                            </div>
+
+                            {/* Status Filter */}
+                            <div>
+                              <Label htmlFor="filter-status" className={`${isMobile ? 'text-xs' : 'text-xs'} text-gray-600 mb-1`}>Status</Label>
+                              <Select
+                                value={notificationFilters.status}
+                                onValueChange={(value) => setNotificationFilters({...notificationFilters, status: value})}
+                              >
+                                <SelectTrigger id="filter-status" className={isMobile ? "h-10" : "h-9"}>
+                                  <SelectValue placeholder="All Status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Status</SelectItem>
+                                  {notificationFilterOptions.statuses.map((status) => (
+                                    <SelectItem key={status} value={status}>
+                                      {status.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Severity/Criticality Filter */}
+                            <div>
+                              <Label htmlFor="filter-severity" className={`${isMobile ? 'text-xs' : 'text-xs'} text-gray-600 mb-1`}>Criticality</Label>
+                              <Select
+                                value={notificationFilters.severity}
+                                onValueChange={(value) => setNotificationFilters({...notificationFilters, severity: value})}
+                              >
+                                <SelectTrigger id="filter-severity" className={isMobile ? "h-10" : "h-9"}>
+                                  <SelectValue placeholder="All Levels" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Levels</SelectItem>
+                                  {notificationFilterOptions.severities.map((severity) => {
+                                    const emoji = severity === 'critical' ? '🔴' : 
+                                                  severity === 'high' ? '🟠' : 
+                                                  severity === 'medium' ? '🟡' : '🔵';
+                                    return (
+                                      <SelectItem key={severity} value={severity}>
+                                        {emoji} {severity.charAt(0).toUpperCase() + severity.slice(1)}
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Type Filter */}
+                            <div>
+                              <Label htmlFor="filter-type" className={`${isMobile ? 'text-xs' : 'text-xs'} text-gray-600 mb-1`}>Type</Label>
+                              <Select
+                                value={notificationFilters.type}
+                                onValueChange={(value) => setNotificationFilters({...notificationFilters, type: value})}
+                              >
+                                <SelectTrigger id="filter-type" className={isMobile ? "h-10" : "h-9"}>
+                                  <SelectValue placeholder="All Types" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Types</SelectItem>
+                                  {notificationFilterOptions.types.map((type) => {
+                                    const typeLabels: any = {
+                                      reverse_order_failure: 'Reverse Order Failed',
+                                      shipment_assignment_error: 'Shipment Error',
+                                      carrier_unavailable: 'Carrier Unavailable',
+                                      low_balance: 'Low Balance',
+                                      warehouse_issue: 'Warehouse Issue',
+                                      payment_failed: 'Payment Failed',
+                                      order_stuck: 'Order Stuck',
+                                      other: 'Other'
+                                    };
+                                    return (
+                                      <SelectItem key={type} value={type}>
+                                        {typeLabels[type] || type}
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Vendor Filter */}
+                            <div>
+                              <Label htmlFor="filter-vendor" className={`${isMobile ? 'text-xs' : 'text-xs'} text-gray-600 mb-1`}>Vendor</Label>
+                              <Select
+                                value={notificationFilters.vendor || 'all'}
+                                onValueChange={(value) => setNotificationFilters({...notificationFilters, vendor: value})}
+                              >
+                                <SelectTrigger id="filter-vendor" className={isMobile ? "h-10" : "h-9"}>
+                                  <SelectValue placeholder="All Vendors" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Vendors</SelectItem>
+                                  {notificationFilterOptions.vendors.map((vendor) => (
+                                    <SelectItem key={vendor} value={vendor}>
+                                      {vendor}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {/* Date Filter */}
+                            <div className={isMobile ? "" : "md:col-span-2"}>
+                              <Label className={`${isMobile ? 'text-xs' : 'text-xs'} text-gray-600 mb-1`}>Date Range</Label>
+                              <div className={`flex ${isMobile ? 'flex-col gap-3' : 'gap-2 items-center'}`}>
+                                <DatePicker
+                                  date={notificationFilters.dateFrom}
+                                  onDateChange={(date) => {
+                                    // Date validation logic
+                                    if (date && notificationFilters.dateTo && date > notificationFilters.dateTo) {
+                                      setNotificationFilters({...notificationFilters, dateFrom: date, dateTo: undefined});
+                                      setTimeout(() => {
+                                        toast({
+                                          title: "Date Adjusted",
+                                          description: "To date was cleared as From date is after it",
+                                          variant: "default"
+                                        });
+                                      }, 100);
+                                    } else {
+                                      setNotificationFilters({...notificationFilters, dateFrom: date});
+                                    }
+                                  }}
+                                  placeholder="From date"
+                                  className={isMobile ? "w-full" : "flex-1"}
+                                />
+                                {!isMobile && <span className="text-gray-500 text-sm px-1">to</span>}
+                                {isMobile && <div className="text-center text-xs text-gray-500">to</div>}
+                                <DatePicker
+                                  date={notificationFilters.dateTo}
+                                  onDateChange={(date) => {
+                                    // Date validation logic
+                                    if (date && notificationFilters.dateFrom && date < notificationFilters.dateFrom) {
+                                      setNotificationFilters({...notificationFilters, dateTo: date, dateFrom: undefined});
+                                      setTimeout(() => {
+                                        toast({
+                                          title: "Date Adjusted",
+                                          description: "From date was cleared as To date is before it",
+                                          variant: "default"
+                                        });
+                                      }, 100);
+                                    } else {
+                                      setNotificationFilters({...notificationFilters, dateTo: date});
+                                    }
+                                  }}
+                                  placeholder="To date"
+                                  className={isMobile ? "w-full" : "flex-1"}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Clear Filters Button */}
+                          <div className="flex justify-end">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setNotificationFilters({
+                                  status: "all",
+                                  type: "all",
+                                  severity: "all",
+                                  search: "",
+                                  vendor: "all",
+                                  dateFrom: undefined,
+                                  dateTo: undefined
+                                });
+                                toast({
+                                  title: "Filters Cleared",
+                                  description: "All notification filters have been reset"
+                                });
+                              }}
+                              className={`flex items-center ${isMobile ? 'gap-1 h-8 px-2 text-xs' : 'gap-2'}`}
+                            >
+                              <XCircle className={isMobile ? "w-3 h-3" : "w-4 h-4"} />
+                              {isMobile ? 'Clear' : 'Clear Filters'}
+                            </Button>
+                          </div>
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    ) : (
+                      <Card>
+                        <CardContent className="p-4">
+                          <div className="space-y-4">
+                            {/* Header with Info Button */}
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                <Filter className="w-4 h-4" />
+                                Filter Notifications
+                              </h3>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowNotificationInfo(!showNotificationInfo)}
+                                className="flex items-center gap-1"
+                              >
+                                <Info className="w-4 h-4" />
+                                {showNotificationInfo ? 'Hide Info' : 'Show Info'}
+                              </Button>
+                            </div>
+
+                            {/* Filter Controls - Desktop */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                              {/* Order ID Filter */}
+                              <div>
+                                <Label htmlFor="filter-order-id-desktop" className="text-xs text-gray-600 mb-1">Order ID</Label>
+                                <Input
+                                  id="filter-order-id-desktop"
+                                  placeholder="Search by order ID..."
+                                  value={notificationFilters.search}
+                                  onChange={(e) => setNotificationFilters({...notificationFilters, search: e.target.value})}
+                                  className="h-9"
+                                />
+                              </div>
+
+                              {/* Status Filter */}
+                              <div>
+                                <Label htmlFor="filter-status-desktop" className="text-xs text-gray-600 mb-1">Status</Label>
+                                <Select
+                                  value={notificationFilters.status}
+                                  onValueChange={(value) => setNotificationFilters({...notificationFilters, status: value})}
+                                >
+                                  <SelectTrigger id="filter-status-desktop" className="h-9">
+                                    <SelectValue placeholder="All Status" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Status</SelectItem>
+                                    {notificationFilterOptions.statuses.map((status) => (
+                                      <SelectItem key={status} value={status}>
+                                        {status.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Severity/Criticality Filter */}
+                              <div>
+                                <Label htmlFor="filter-severity-desktop" className="text-xs text-gray-600 mb-1">Criticality</Label>
+                                <Select
+                                  value={notificationFilters.severity}
+                                  onValueChange={(value) => setNotificationFilters({...notificationFilters, severity: value})}
+                                >
+                                  <SelectTrigger id="filter-severity-desktop" className="h-9">
+                                    <SelectValue placeholder="All Levels" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Levels</SelectItem>
+                                    {notificationFilterOptions.severities.map((severity) => {
+                                      const emoji = severity === 'critical' ? '🔴' : 
+                                                    severity === 'high' ? '🟠' : 
+                                                    severity === 'medium' ? '🟡' : '🔵';
+                                      return (
+                                        <SelectItem key={severity} value={severity}>
+                                          {emoji} {severity.charAt(0).toUpperCase() + severity.slice(1)}
+                                        </SelectItem>
+                                      );
+                                    })}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Type Filter */}
+                              <div>
+                                <Label htmlFor="filter-type-desktop" className="text-xs text-gray-600 mb-1">Notification Type</Label>
+                                <Select
+                                  value={notificationFilters.type}
+                                  onValueChange={(value) => setNotificationFilters({...notificationFilters, type: value})}
+                                >
+                                  <SelectTrigger id="filter-type-desktop" className="h-9">
+                                    <SelectValue placeholder="All Types" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Types</SelectItem>
+                                    {notificationFilterOptions.types.map((type) => {
+                                      const typeLabels: any = {
+                                        reverse_order_failure: 'Reverse Order Failed',
+                                        shipment_assignment_error: 'Shipment Assignment Error',
+                                        carrier_unavailable: 'Carrier Unavailable',
+                                        low_balance: 'Low Balance',
+                                        warehouse_issue: 'Warehouse Issue',
+                                        payment_failed: 'Payment Failed',
+                                        order_stuck: 'Order Stuck',
+                                        other: 'Other'
+                                      };
+                                      return (
+                                        <SelectItem key={type} value={type}>
+                                          {typeLabels[type] || type}
+                                        </SelectItem>
+                                      );
+                                    })}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Vendor Filter */}
+                              <div>
+                                <Label htmlFor="filter-vendor-desktop" className="text-xs text-gray-600 mb-1">Vendor</Label>
+                                <Select
+                                  value={notificationFilters.vendor || 'all'}
+                                  onValueChange={(value) => setNotificationFilters({...notificationFilters, vendor: value})}
+                                >
+                                  <SelectTrigger id="filter-vendor-desktop" className="h-9">
+                                    <SelectValue placeholder="All Vendors" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Vendors</SelectItem>
+                                    {notificationFilterOptions.vendors.map((vendor) => (
+                                      <SelectItem key={vendor} value={vendor}>
+                                        {vendor}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              {/* Date Filter */}
+                              <div className="md:col-span-2">
+                                <Label className="text-xs text-gray-600 mb-1">Date Range</Label>
+                                <div className="flex gap-2 items-center">
+                                  <DatePicker
+                                    date={notificationFilters.dateFrom}
+                                    onDateChange={(date) => {
+                                      if (date && notificationFilters.dateTo && date > notificationFilters.dateTo) {
+                                        setNotificationFilters({...notificationFilters, dateFrom: date, dateTo: undefined});
+                                        setTimeout(() => {
+                                          toast({
+                                            title: "Date Adjusted",
+                                            description: "To date was cleared as From date is after it",
+                                            variant: "default"
+                                          });
+                                        }, 100);
+                                      } else {
+                                        setNotificationFilters({...notificationFilters, dateFrom: date});
+                                      }
+                                    }}
+                                    placeholder="From date"
+                                    className="flex-1"
+                                  />
+                                  <span className="text-gray-500 text-sm px-1">to</span>
+                                  <DatePicker
+                                    date={notificationFilters.dateTo}
+                                    onDateChange={(date) => {
+                                      if (date && notificationFilters.dateFrom && date < notificationFilters.dateFrom) {
+                                        setNotificationFilters({...notificationFilters, dateTo: date, dateFrom: undefined});
+                                        setTimeout(() => {
+                                          toast({
+                                            title: "Date Adjusted",
+                                            description: "From date was cleared as To date is before it",
+                                            variant: "default"
+                                          });
+                                        }, 100);
+                                      } else {
+                                        setNotificationFilters({...notificationFilters, dateTo: date});
+                                      }
+                                    }}
+                                    placeholder="To date"
+                                    className="flex-1"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Clear Filters Button */}
+                            <div className="flex justify-end">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setNotificationFilters({
+                                    status: "all",
+                                    type: "all",
+                                    severity: "all",
+                                    search: "",
+                                    vendor: "all",
+                                    dateFrom: undefined,
+                                    dateTo: undefined
+                                  });
+                                  toast({
+                                    title: "Filters Cleared",
+                                    description: "All notification filters have been reset"
+                                  });
+                                }}
+                                className="flex items-center gap-2"
+                              >
+                                <XCircle className="w-4 h-4" />
+                                Clear Filters
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Collapsible Info Section */}
+                    {showNotificationInfo && (
+                      <Card className="bg-blue-50 border-blue-200">
+                        <CardContent className="p-6">
+                          <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
+                              <Bell className="w-6 h-6 text-white" />
+                            </div>
+                            <div className="flex-1">
+                              <h3 className="font-bold text-lg text-gray-900 mb-2">Notification System - Coming Soon!</h3>
+                              <p className="text-gray-700 mb-4">
+                                Track system alerts, vendor-reported issues, and critical errors in real-time.
+                              </p>
+                              <div className="space-y-2 text-sm">
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle className="w-4 h-4 text-green-600" />
+                                  <span className="text-gray-700">Reverse order failure notifications</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle className="w-4 h-4 text-green-600" />
+                                  <span className="text-gray-700">Shipment assignment error tracking</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle className="w-4 h-4 text-green-600" />
+                                  <span className="text-gray-700">Carrier unavailability alerts</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <CheckCircle className="w-4 h-4 text-green-600" />
+                                  <span className="text-gray-700">Low balance warnings</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Sample Notifications UI */}
+                    <Card>
+                      <CardHeader className={isMobile ? "p-4" : ""}>
+                        <CardTitle className={`flex items-center gap-2 ${isMobile ? 'text-base' : ''}`}>
+                          <Bell className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} text-blue-600`} />
+                          {isMobile ? 'Notifications' : 'Sample Notifications'}
+                        </CardTitle>
+                        <CardDescription className={isMobile ? "text-xs" : ""}>
+                          {isMobile ? 'Placeholder for notification system' : 'This is a placeholder. Full notification system is ready for activation.'}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className={isMobile ? "p-4 pt-0" : ""}>
+                        <div className={isMobile ? "space-y-2" : "space-y-3"}>
+                          {/* Sample Notification 1 - Critical */}
+                          <div 
+                            className={`border rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
+                              isMobile ? 'p-3' : 'p-4'
+                            } ${
+                              sampleNotificationStatuses[1]?.status === 'resolved' 
+                                ? 'border-green-200 bg-green-50 opacity-60' 
+                                : 'border-red-200 bg-red-50'
+                            }`}
+                            onClick={() => {
+                              const currentStatus = sampleNotificationStatuses[1] || { status: 'pending' };
+                              setSelectedNotification({
+                                id: 1,
+                                type: 'shipment_assignment_error',
+                                severity: 'critical',
+                                title: 'No Carrier Available - Order #12346',
+                                message: 'Unable to assign carrier to order. No carriers available for the delivery pincode.',
+                                order_id: '12346',
+                                vendor_name: 'Delhi Warehouse',
+                                vendor_warehouse_id: '102',
+                                status: currentStatus.status,
+                                created_at: new Date().toISOString(),
+                                resolved_at: currentStatus.resolved_at,
+                                resolved_by_name: currentStatus.resolved_by,
+                                resolution_notes: currentStatus.resolution_notes,
+                                error_details: 'No carriers serviceable for pincode 110001. Attempted carriers: BlueDart, Delhivery, DTDC',
+                                metadata: { delivery_pincode: '110001', weight: '2.5kg', cod_amount: 1500 }
+                              });
+                              setShowNotificationDialog(true);
+                            }}
+                          >
+                            <div className={`flex items-start ${isMobile ? 'flex-col gap-2' : 'justify-between gap-4'}`}>
+                              <div className="flex-1 w-full">
+                                <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
+                                  <Badge className={`bg-red-100 text-red-700 border-red-200 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                    <AlertCircle className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
+                                    CRITICAL
+                                  </Badge>
+                                  <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>Shipment Error</Badge>
+                                  <Badge className={`${
+                                    sampleNotificationStatuses[1]?.status === 'resolved' 
+                                      ? 'bg-green-100 text-green-700' 
+                                      : 'bg-orange-100 text-orange-700'
+                                  } ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                    {sampleNotificationStatuses[1]?.status === 'resolved' ? 'RESOLVED' : 'PENDING'}
+                                  </Badge>
+                                </div>
+                                <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
+                                  No Carrier Available - Order #12346
+                                </h3>
+                                <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                                  Unable to assign carrier to order. No carriers available for the delivery pincode.
+                                </p>
+                                <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
+                                  <span>📍 {isMobile ? 'Delhi WH' : 'Vendor: Delhi Warehouse'}</span>
+                                  <span>📦 {isMobile ? '#12346' : 'Order: #12346'}</span>
+                                  <span>🕐 {isMobile ? new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : new Date().toLocaleString()}</span>
+                                </div>
+                              </div>
+                              <Button size="sm" variant="outline" className={isMobile ? "w-full mt-2 h-8 text-xs" : ""} onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedNotification({
+                                  id: 1,
+                                  type: 'shipment_assignment_error',
+                                  severity: 'critical',
+                                  title: 'No Carrier Available - Order #12346',
+                                  message: 'Unable to assign carrier to order. No carriers available for the delivery pincode.',
+                                  order_id: '12346',
+                                  vendor_name: 'Delhi Warehouse',
+                                  vendor_warehouse_id: '102',
+                                  status: 'pending',
+                                  created_at: new Date().toISOString(),
+                                  error_details: 'No carriers serviceable for pincode 110001. Attempted carriers: BlueDart, Delhivery, DTDC',
+                                  metadata: { delivery_pincode: '110001', weight: '2.5kg', cod_amount: 1500 }
+                                });
+                                setShowNotificationDialog(true);
+                              }}>
+                                View Details <ExternalLink className="w-3 h-3 ml-1" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Sample Notification 2 - High */}
+                          <div 
+                            className={`border rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
+                              isMobile ? 'p-3' : 'p-4'
+                            } ${
+                              sampleNotificationStatuses[2]?.status === 'resolved' 
+                                ? 'border-green-200 bg-green-50 opacity-60' 
+                                : 'border-orange-200 bg-orange-50'
+                            }`}
+                            onClick={() => {
+                              const currentStatus = sampleNotificationStatuses[2] || { status: 'pending' };
+                              setSelectedNotification({
+                                id: 2,
+                                type: 'reverse_order_failure',
+                                severity: 'high',
+                                title: 'Reverse Order Failed - Order #12345',
+                                message: 'Vendor failed to process reverse order. Customer requested return but order status could not be updated.',
+                                order_id: '12345',
+                                vendor_name: 'Mumbai Warehouse',
+                                vendor_warehouse_id: '101',
+                                status: currentStatus.status,
+                                created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+                                resolved_at: currentStatus.resolved_at,
+                                resolved_by_name: currentStatus.resolved_by,
+                                resolution_notes: currentStatus.resolution_notes,
+                                error_details: 'API timeout while connecting to Shipway. Error code: TIMEOUT_ERROR',
+                                metadata: { customer_name: 'John Doe', reason: 'Product damaged', attempted_at: new Date().toISOString() }
+                              });
+                              setShowNotificationDialog(true);
+                            }}
+                          >
+                            <div className={`flex items-start ${isMobile ? 'flex-col gap-2' : 'justify-between gap-4'}`}>
+                              <div className="flex-1 w-full">
+                                <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
+                                  <Badge className={`bg-orange-100 text-orange-700 border-orange-200 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                    <AlertTriangle className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
+                                    HIGH
+                                  </Badge>
+                                  <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>Reverse Order</Badge>
+                                  <Badge className={`${
+                                    sampleNotificationStatuses[2]?.status === 'resolved' 
+                                      ? 'bg-green-100 text-green-700' 
+                                      : 'bg-orange-100 text-orange-700'
+                                  } ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                    {sampleNotificationStatuses[2]?.status === 'resolved' ? 'RESOLVED' : 'PENDING'}
+                                  </Badge>
+                                </div>
+                                <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
+                                  Reverse Order Failed - Order #12345
+                                </h3>
+                                <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                                  Vendor failed to process reverse order. Customer requested return but order status could not be updated.
+                                </p>
+                                <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
+                                  <span>📍 {isMobile ? 'Mumbai WH' : 'Vendor: Mumbai Warehouse'}</span>
+                                  <span>📦 {isMobile ? '#12345' : 'Order: #12345'}</span>
+                                  <span>🕐 {isMobile ? new Date(Date.now() - 2 * 60 * 60 * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : new Date(Date.now() - 2 * 60 * 60 * 1000).toLocaleString()}</span>
+                                </div>
+                              </div>
+                              <Button size="sm" variant="outline" className={isMobile ? "w-full mt-2 h-8 text-xs" : ""} onClick={(e) => e.stopPropagation()}>
+                                View Details <ExternalLink className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} ml-1`} />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Sample Notification 3 - Critical Low Balance */}
+                          <div 
+                            className={`border rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
+                              isMobile ? 'p-3' : 'p-4'
+                            } ${
+                              sampleNotificationStatuses[3]?.status === 'resolved' 
+                                ? 'border-green-200 bg-green-50 opacity-60' 
+                                : 'border-red-200 bg-red-50'
+                            }`}
+                            onClick={() => {
+                              const currentStatus = sampleNotificationStatuses[3] || { status: 'pending' };
+                              setSelectedNotification({
+                                id: 3,
+                                type: 'low_balance',
+                                severity: 'critical',
+                                title: 'Low Shipway Balance Alert',
+                                message: 'Shipway account balance is critically low. Unable to create new shipments.',
+                                status: currentStatus.status,
+                                created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+                                resolved_at: currentStatus.resolved_at,
+                                resolved_by_name: currentStatus.resolved_by,
+                                resolution_notes: currentStatus.resolution_notes,
+                                error_details: 'Balance check returned: INR 150.50. Minimum required: INR 1000',
+                                metadata: { current_balance: '₹150.50', threshold: '₹1,000', pending_orders: 45 }
+                              });
+                              setShowNotificationDialog(true);
+                            }}
+                          >
+                            <div className={`flex items-start ${isMobile ? 'flex-col gap-2' : 'justify-between gap-4'}`}>
+                              <div className="flex-1 w-full">
+                                <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
+                                  <Badge className={`bg-red-100 text-red-700 border-red-200 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                    <AlertCircle className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
+                                    CRITICAL
+                                  </Badge>
+                                  <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>Low Balance</Badge>
+                                  <Badge className={`${
+                                    sampleNotificationStatuses[3]?.status === 'resolved' 
+                                      ? 'bg-green-100 text-green-700' 
+                                      : 'bg-orange-100 text-orange-700'
+                                  } ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                    {sampleNotificationStatuses[3]?.status === 'resolved' ? 'RESOLVED' : 'PENDING'}
+                                  </Badge>
+                                </div>
+                                <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
+                                  Low Shipway Balance Alert
+                                </h3>
+                                <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                                  Shipway account balance is critically low (₹150.50). Unable to create new shipments.
+                                </p>
+                                <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
+                                  <span>💰 Balance: ₹150.50</span>
+                                  <span>⚠️ Min: ₹1,000</span>
+                                  <span>🕐 {isMobile ? new Date(Date.now() - 30 * 60 * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : new Date(Date.now() - 30 * 60 * 1000).toLocaleString()}</span>
+                                </div>
+                              </div>
+                              <Button size="sm" variant="outline" className={isMobile ? "w-full mt-2 h-8 text-xs" : ""} onClick={(e) => e.stopPropagation()}>
+                                View Details <ExternalLink className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} ml-1`} />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Sample Notification 4 - Resolved */}
+                          <div 
+                            className={`border border-green-200 bg-green-50 rounded-lg opacity-60 cursor-pointer hover:opacity-100 hover:shadow-md transition-all ${
+                              isMobile ? 'p-3' : 'p-4'
+                            }`}
+                            onClick={() => {
+                              setSelectedNotification({
+                                id: 4,
+                                type: 'carrier_unavailable',
+                                severity: 'medium',
+                                title: 'Carrier Service Down - Order #12347',
+                                message: 'Primary carrier service was temporarily unavailable. Order has been successfully assigned to alternate carrier.',
+                                order_id: '12347',
+                                vendor_name: 'Bangalore Warehouse',
+                                vendor_warehouse_id: '103',
+                                status: 'resolved',
+                                created_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+                                resolved_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+                                resolved_by_name: user?.name || 'Admin User',
+                                resolution_notes: 'Successfully switched to alternate carrier (Delhivery). Order has been assigned and shipment created.',
+                                error_details: 'Carrier API returned 503 Service Unavailable. Will retry in 30 minutes.',
+                                metadata: { carrier_name: 'BlueDart', alternate_carrier: 'Delhivery', retry_count: 3 }
+                              });
+                              setShowNotificationDialog(true);
+                            }}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1">
+                                <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
+                                  <Badge className={`bg-yellow-100 text-yellow-700 border-yellow-200 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                    <Info className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
+                                    MEDIUM
+                                  </Badge>
+                                  <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>Carrier Issue</Badge>
+                                  <Badge className={`bg-green-100 text-green-700 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>RESOLVED</Badge>
+                                </div>
+                                <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
+                                  Carrier Service Down - Order #12347
+                                </h3>
+                                <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                                  Primary carrier service was temporarily unavailable. Order has been successfully assigned to alternate carrier.
+                                </p>
+                                <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
+                                  <span>📍 {isMobile ? 'Bangalore WH' : 'Vendor: Bangalore Warehouse'}</span>
+                                  <span>📦 {isMobile ? '#12347' : 'Order: #12347'}</span>
+                                  <span>✅ {isMobile ? user?.name?.split(' ')[0] || 'Admin' : `Resolved by: ${user?.name || 'Admin User'}`}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </TabsContent>
               </div>
             </Tabs>
           </CardContent>
         </Card>
       </div>
+
+      {/* Notification Detail Dialog */}
+      <Dialog open={showNotificationDialog} onOpenChange={setShowNotificationDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="w-5 h-5 text-blue-600" />
+              Notification Details
+            </DialogTitle>
+          </DialogHeader>
+          {selectedNotification && (
+            <div className="space-y-4">
+              {/* Status Badges */}
+              <div className="flex flex-wrap gap-2">
+                <Badge className={
+                  selectedNotification.severity === 'critical' ? 'bg-red-100 text-red-700 border-red-200' :
+                  selectedNotification.severity === 'high' ? 'bg-orange-100 text-orange-700 border-orange-200' :
+                  selectedNotification.severity === 'medium' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
+                  'bg-blue-100 text-blue-700 border-blue-200'
+                }>
+                  {selectedNotification.severity === 'critical' && <AlertCircle className="w-3 h-3 mr-1" />}
+                  {selectedNotification.severity === 'high' && <AlertTriangle className="w-3 h-3 mr-1" />}
+                  {selectedNotification.severity === 'medium' && <Info className="w-3 h-3 mr-1" />}
+                  <span className="uppercase">{selectedNotification.severity}</span>
+                </Badge>
+                <Badge variant="outline">
+                  {selectedNotification.type.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                </Badge>
+                <Badge className={
+                  selectedNotification.status === 'resolved' ? 'bg-green-100 text-green-700' :
+                  selectedNotification.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                  selectedNotification.status === 'dismissed' ? 'bg-gray-100 text-gray-700' :
+                  'bg-orange-100 text-orange-700'
+                }>
+                  {selectedNotification.status.replace('_', ' ').toUpperCase()}
+                </Badge>
+              </div>
+
+              {/* Title & Message */}
+              <div>
+                <h3 className="font-bold text-xl text-gray-900 mb-2">{selectedNotification.title}</h3>
+                <p className="text-gray-700 leading-relaxed">{selectedNotification.message}</p>
+              </div>
+
+              {/* Details Grid */}
+              <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                {selectedNotification.vendor_name && (
+                  <div>
+                    <p className="text-sm text-gray-600 font-medium">Vendor</p>
+                    <p className="text-gray-900">{selectedNotification.vendor_name}</p>
+                  </div>
+                )}
+                {selectedNotification.vendor_warehouse_id && (
+                  <div>
+                    <p className="text-sm text-gray-600 font-medium">Warehouse ID</p>
+                    <p className="text-gray-900 font-mono">{selectedNotification.vendor_warehouse_id}</p>
+                  </div>
+                )}
+                {selectedNotification.order_id && (
+                  <div>
+                    <p className="text-sm text-gray-600 font-medium">Order ID</p>
+                    <p className="text-gray-900 font-mono">{selectedNotification.order_id}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm text-gray-600 font-medium">Created At</p>
+                  <p className="text-gray-900">{new Date(selectedNotification.created_at).toLocaleString()}</p>
+                </div>
+              </div>
+
+              {/* Metadata */}
+              {selectedNotification.metadata && Object.keys(selectedNotification.metadata).length > 0 && (
+                <div>
+                  <p className="text-sm text-gray-600 font-medium mb-2">Additional Information</p>
+                  <div className="bg-gray-50 rounded-lg p-3 space-y-1">
+                    {Object.entries(selectedNotification.metadata).map(([key, value]) => (
+                      <div key={key} className="flex justify-between text-sm">
+                        <span className="text-gray-600">{key.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}:</span>
+                        <span className="text-gray-900 font-medium">{String(value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Error Details */}
+              {selectedNotification.error_details && (
+                <div>
+                  <p className="text-sm text-gray-600 font-medium mb-2">Error Details</p>
+                  <pre className="text-sm bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto whitespace-pre-wrap">
+                    {selectedNotification.error_details}
+                  </pre>
+                </div>
+              )}
+
+              {/* Resolution Section */}
+              {selectedNotification.status === 'pending' || selectedNotification.status === 'in_progress' ? (
+                <div className="border-t pt-4">
+                  <Label htmlFor="resolution-notes" className="text-base font-semibold">Resolution Notes</Label>
+                  <Textarea
+                    id="resolution-notes"
+                    value={resolutionNotes}
+                    onChange={(e) => setResolutionNotes(e.target.value)}
+                    placeholder="Enter resolution notes (optional)..."
+                    rows={4}
+                    className="mt-2"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Describe how this issue was resolved or what actions were taken.
+                  </p>
+                </div>
+              ) : selectedNotification.status === 'resolved' && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm text-green-800 font-semibold mb-1">
+                        ✅ Resolved by {selectedNotification.resolved_by_name || 'Admin'}
+                      </p>
+                      <p className="text-sm text-green-700">
+                        {selectedNotification.resolved_at && new Date(selectedNotification.resolved_at).toLocaleString()}
+                      </p>
+                      {selectedNotification.resolution_notes && (
+                        <p className="text-sm text-green-800 mt-2 bg-green-100 p-2 rounded">
+                          <span className="font-medium">Note:</span> {selectedNotification.resolution_notes}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            {selectedNotification && (selectedNotification.status === 'pending' || selectedNotification.status === 'in_progress') && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    // Update the notification status to dismissed
+                    setSampleNotificationStatuses(prev => ({
+                      ...prev,
+                      [selectedNotification.id]: {
+                        status: 'dismissed',
+                        resolved_at: new Date().toISOString(),
+                        resolved_by: user?.name || 'Admin User',
+                        resolution_notes: 'Dismissed by admin'
+                      }
+                    }));
+                    
+                    toast({
+                      title: "Notification Dismissed",
+                      description: "Notification has been dismissed successfully.",
+                    });
+                    setShowNotificationDialog(false);
+                    setResolutionNotes("");
+                  }}
+                >
+                  Dismiss
+                </Button>
+                <Button
+                  onClick={() => {
+                    // Update the notification status to resolved
+                    setSampleNotificationStatuses(prev => ({
+                      ...prev,
+                      [selectedNotification.id]: {
+                        status: 'resolved',
+                        resolved_at: new Date().toISOString(),
+                        resolved_by: user?.name || 'Admin User',
+                        resolution_notes: resolutionNotes || 'Issue resolved by admin'
+                      }
+                    }));
+                    
+                    toast({
+                      title: "✅ Notification Resolved",
+                      description: `Marked as resolved by ${user?.name}${resolutionNotes ? ' with notes' : ''}.`,
+                    });
+                    setShowNotificationDialog(false);
+                    setResolutionNotes("");
+                  }}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Mark as Resolved
+                </Button>
+              </>
+            )}
+            {selectedNotification && selectedNotification.status === 'resolved' && (
+              <Button variant="outline" onClick={() => setShowNotificationDialog(false)}>
+                Close
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Settlement Modal */}
       <Dialog open={showSettlementModal} onOpenChange={setShowSettlementModal}>

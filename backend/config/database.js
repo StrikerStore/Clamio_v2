@@ -58,6 +58,7 @@ class Database {
       await this.createTransactionsTable();
       await this.createOrdersTable();
       await this.createClaimsTable();
+      await this.createNotificationsTable();
       this.mysqlInitialized = true;
     } catch (error) {
       console.error('❌ MySQL connection failed:', error.message);
@@ -455,6 +456,97 @@ class Database {
 
     } catch (error) {
       console.error('❌ Error migrating claims data:', error.message);
+    }
+  }
+
+  /**
+   * Create notifications table for tracking system alerts
+   */
+  async createNotificationsTable() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      const createNotificationsTableQuery = `
+        CREATE TABLE IF NOT EXISTS notifications (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          
+          -- Notification Core Info
+          type ENUM(
+            'reverse_order_failure',
+            'shipment_assignment_error',
+            'carrier_unavailable',
+            'low_balance',
+            'warehouse_issue',
+            'payment_failed',
+            'order_stuck',
+            'other'
+          ) NOT NULL,
+          severity ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+          title VARCHAR(255) NOT NULL,
+          message TEXT NOT NULL,
+          
+          -- Related Entity Info
+          order_id VARCHAR(100),
+          vendor_id VARCHAR(50),
+          vendor_name VARCHAR(255),
+          vendor_warehouse_id VARCHAR(50),
+          
+          -- Additional Context
+          metadata JSON,
+          error_details TEXT,
+          
+          -- Status Tracking
+          status ENUM('pending', 'in_progress', 'resolved', 'dismissed') DEFAULT 'pending',
+          
+          -- Resolution Info
+          resolved_by VARCHAR(50),
+          resolved_by_name VARCHAR(255),
+          resolved_at DATETIME,
+          resolution_notes TEXT,
+          
+          -- Timestamps
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          
+          -- Indexes for performance
+          INDEX idx_type (type),
+          INDEX idx_status (status),
+          INDEX idx_vendor (vendor_id),
+          INDEX idx_order (order_id),
+          INDEX idx_created_at (created_at),
+          INDEX idx_severity (severity),
+          
+          -- Foreign key constraints
+          FOREIGN KEY (vendor_id) REFERENCES users(id) ON DELETE SET NULL,
+          FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+      
+      await this.mysqlConnection.execute(createNotificationsTableQuery);
+      console.log('✅ Notifications table created/verified');
+
+      // Create notification_views table for tracking admin views
+      const createNotificationViewsTableQuery = `
+        CREATE TABLE IF NOT EXISTS notification_views (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          notification_id INT NOT NULL,
+          admin_id VARCHAR(50) NOT NULL,
+          viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          
+          UNIQUE KEY unique_view (notification_id, admin_id),
+          FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+          FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
+          
+          INDEX idx_notification (notification_id),
+          INDEX idx_admin (admin_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+
+      await this.mysqlConnection.execute(createNotificationViewsTableQuery);
+      console.log('✅ Notification views table created/verified');
+
+    } catch (error) {
+      console.error('❌ Error creating notifications tables:', error.message);
     }
   }
 
@@ -2619,6 +2711,26 @@ class Database {
     } catch (error) {
       console.error('Error getting all labels:', error);
       throw new Error('Failed to get labels from database');
+    }
+  }
+
+  /**
+   * Generic query method for executing SQL queries
+   * @param {string} sql - SQL query string
+   * @param {Array} params - Query parameters
+   * @returns {Promise<Array>} Array of result rows
+   */
+  async query(sql, params = []) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(sql, params);
+      return rows;
+    } catch (error) {
+      console.error('Error executing query:', error);
+      throw error;
     }
   }
 }
