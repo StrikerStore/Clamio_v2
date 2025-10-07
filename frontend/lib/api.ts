@@ -17,6 +17,20 @@ class ApiClient {
     return null
   }
 
+  private getCurrentUserInfo(): { role?: string; email?: string } | null {
+    try {
+      if (typeof window !== 'undefined') {
+        const userData = localStorage.getItem('user_data')
+        if (userData) {
+          return JSON.parse(userData)
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing user info:', error)
+    }
+    return null
+  }
+
   private async makeRequest<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -39,6 +53,12 @@ class ApiClient {
 
 
       if (!response.ok) {
+        // Log detailed validation errors for debugging
+        if (data.errors && Array.isArray(data.errors)) {
+          console.error('Validation errors:', data.errors)
+          const errorMessages = data.errors.map((err: any) => `${err.field}: ${err.message}`).join(', ')
+          throw new Error(`${data.message}: ${errorMessages}`)
+        }
         throw new Error(data.message || `HTTP error! status: ${response.status}`)
       }
 
@@ -119,12 +139,33 @@ class ApiClient {
     warehouseId?: string
     contactNumber?: string
   }): Promise<ApiResponse> {
-    // Superadmin can create both vendors and admins via the general /users endpoint
-    // Admins (if they have access) would use /users/vendor for creating vendors only
-    return this.makeRequest('/users', {
-      method: 'POST',
-      body: JSON.stringify(userData)
-    })
+    // Check user role from localStorage to determine which endpoint to use
+    const authHeader = this.getAuthHeader()
+    if (!authHeader) {
+      throw new Error('Authentication required')
+    }
+
+    // Decode the auth header to check user role
+    const userInfo = this.getCurrentUserInfo()
+    
+    if (userInfo?.role === 'superadmin') {
+      // Superadmin can create both vendors and admins via the general /users endpoint
+      return this.makeRequest('/users', {
+        method: 'POST',
+        body: JSON.stringify(userData)
+      })
+    } else if (userInfo?.role === 'admin') {
+      // Admin can only create vendors via the vendor-specific endpoint
+      if (userData.role !== 'vendor') {
+        throw new Error('Admins can only create vendor accounts')
+      }
+      return this.makeRequest('/users/vendor', {
+        method: 'POST',
+        body: JSON.stringify(userData)
+      })
+    } else {
+      throw new Error('Insufficient permissions to create users')
+    }
   }
 
   async updateUser(userId: string, userData: Partial<{
@@ -135,21 +176,41 @@ class ApiClient {
     warehouseId: string
     contactNumber: string
   }>): Promise<ApiResponse> {
-    // Superadmin uses the general route which allows updating any user (vendor or admin)
-    // The general route requires superadmin role only
-    return this.makeRequest(`/users/${userId}`, {
-      method: 'PUT',
-      body: JSON.stringify(userData)
-    })
+    const userInfo = this.getCurrentUserInfo()
+    
+    if (userInfo?.role === 'superadmin') {
+      // Superadmin uses the general route which allows updating any user (vendor or admin)
+      return this.makeRequest(`/users/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(userData)
+      })
+    } else if (userInfo?.role === 'admin') {
+      // Admin can only update vendors via the vendor-specific endpoint
+      return this.makeRequest(`/users/vendor/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(userData)
+      })
+    } else {
+      throw new Error('Insufficient permissions to update users')
+    }
   }
 
   async deleteUser(userId: string): Promise<ApiResponse> {
-    // Superadmin uses the general route which allows deleting any user (vendor or admin)
-    // The general route requires superadmin role only
-    // Note: Superadmin users themselves cannot be deleted (protected in controller)
-    return this.makeRequest(`/users/${userId}`, {
-      method: 'DELETE'
-    })
+    const userInfo = this.getCurrentUserInfo()
+    
+    if (userInfo?.role === 'superadmin') {
+      // Superadmin uses the general route which allows deleting any user (vendor or admin)
+      return this.makeRequest(`/users/${userId}`, {
+        method: 'DELETE'
+      })
+    } else if (userInfo?.role === 'admin') {
+      // Admin can only delete vendors via the vendor-specific endpoint
+      return this.makeRequest(`/users/vendor/${userId}`, {
+        method: 'DELETE'
+      })
+    } else {
+      throw new Error('Insufficient permissions to delete users')
+    }
   }
 
   async getUserById(userId: string): Promise<ApiResponse> {

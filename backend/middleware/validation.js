@@ -51,8 +51,18 @@ const validateUserRegistration = [
   body('phone')
     .optional()
     .trim()
-    .matches(/^\+?[\d\s\-\(\)]+$/)
-    .withMessage('Please provide a valid phone number'),
+    .custom((value) => {
+      // If phone is empty or undefined, it's allowed (optional field)
+      if (!value || value.trim() === '') {
+        return true;
+      }
+      // Check if it matches valid phone patterns
+      const phoneRegex = /^\+?[\d\s\-\(\)]+$/;
+      if (!phoneRegex.test(value)) {
+        throw new Error('Please provide a valid phone number (digits, spaces, dashes, parentheses, and optional + prefix)');
+      }
+      return true;
+    }),
   
   body('password')
     .isLength({ min: 6 })
@@ -85,8 +95,18 @@ const validateUserRegistration = [
   body('contactNumber')
     .optional()
     .trim()
-    .matches(/^\+?[\d\s\-\(\)]+$/)
-    .withMessage('Please provide a valid contact number'),
+    .custom((value) => {
+      // If contactNumber is empty or undefined, it's allowed (optional field)
+      if (!value || value.trim() === '') {
+        return true;
+      }
+      // Check if it matches valid contact number patterns
+      const contactRegex = /^\+?[\d\s\-\(\)]+$/;
+      if (!contactRegex.test(value)) {
+        throw new Error('Please provide a valid contact number (digits, spaces, dashes, parentheses, and optional + prefix)');
+      }
+      return true;
+    }),
   
   handleValidationErrors
 ];

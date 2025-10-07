@@ -130,10 +130,10 @@ router.get('/vendors-report', requireAdminOrSuperadmin, async (req, res) => {
 });
 
 // Admin or Superadmin can update vendor via vendor-specific route
-router.put('/vendor/:id', requireAdminOrSuperadmin, validateUserId, (req, res, next) => {
+router.put('/vendor/:id', requireAdminOrSuperadmin, validateUserId, async (req, res, next) => {
   try {
     const id = req.params.id;
-    const user = database.getUserById(id);
+    const user = await database.getUserById(id);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -151,10 +151,10 @@ router.put('/vendor/:id', requireAdminOrSuperadmin, validateUserId, (req, res, n
 }, validateUserUpdate, userController.updateUser);
 
 // Admin or Superadmin can delete vendor via vendor-specific route
-router.delete('/vendor/:id', requireAdminOrSuperadmin, validateUserId, (req, res, next) => {
+router.delete('/vendor/:id', requireAdminOrSuperadmin, validateUserId, async (req, res, next) => {
   try {
     const id = req.params.id;
-    const user = database.getUserById(id);
+    const user = await database.getUserById(id);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }

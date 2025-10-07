@@ -21,6 +21,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Users,
   Package,
@@ -39,6 +40,7 @@ import {
   Trash2,
   Edit,
   IndianRupee,
+  Shield,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -1333,6 +1335,18 @@ export function AdminDashboard() {
                                   />
                                 </div>
                               </div>
+                              <Alert className="border-blue-200 bg-blue-50">
+                                <Shield className="h-4 w-4 text-blue-600" />
+                                <AlertDescription className="text-blue-800 text-sm">
+                                  <strong>Password Requirements:</strong>
+                                  <ul className="list-disc list-inside mt-1 space-y-0.5">
+                                    <li>Minimum 6 characters long</li>
+                                    <li>At least one uppercase letter (A-Z)</li>
+                                    <li>At least one lowercase letter (a-z)</li>
+                                    <li>At least one number (0-9)</li>
+                                  </ul>
+                                </AlertDescription>
+                              </Alert>
                               <Button onClick={handleAddVendor} className="w-full">
                                 Add Vendor
                               </Button>
