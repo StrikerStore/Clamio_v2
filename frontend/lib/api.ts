@@ -818,6 +818,22 @@ class ApiClient {
       const blob = await response.blob()
       console.log('✅ Bulk labels PDF downloaded successfully');
       console.log('  - Blob size:', blob.size, 'bytes');
+      
+      // Check for warning headers and store them in blob object
+      const warningsHeader = response.headers.get('X-Download-Warnings');
+      const failedOrdersHeader = response.headers.get('X-Failed-Orders');
+      
+      if (warningsHeader) {
+        console.log('⚠️ Some orders failed during bulk download');
+        const warnings = atob(warningsHeader);
+        const failedOrders = failedOrdersHeader ? JSON.parse(failedOrdersHeader) : [];
+        console.log('  - Warnings:', warnings);
+        console.log('  - Failed orders:', failedOrders);
+        
+        // Store warnings in blob object for later access
+        (blob as any)._warnings = warnings;
+        (blob as any)._failedOrders = failedOrders;
+      }
       console.log('  - Blob type:', blob.type);
       
       return blob

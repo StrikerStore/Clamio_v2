@@ -7,6 +7,129 @@ const { authenticateBasicAuth, requireAdminOrSuperadmin } = require('../middlewa
 const carrierServiceabilityService = require('../services/carrierServiceabilityService');
 
 /**
+/**
+ * Helper function to create notification when label generation fails
+ * @param {string} errorMessage - The error message from Shipway API
+ * @param {string} orderId - The order ID that failed
+ * @param {Object} vendor - The vendor object with id, name, warehouseId
+ */
+async function createLabelGenerationNotification(errorMessage, orderId, vendor) {
+  try {
+    console.log('📢 Creating notification for label generation error...');
+    console.log('  - Error:', errorMessage);
+    console.log('  - Order ID:', orderId);
+    console.log('  - Vendor:', vendor.name);
+    
+    const database = require('../config/database');
+    let notificationData = null;
+
+    // Pattern 1: Insufficient Shipping Balance
+    if (errorMessage.toLowerCase().includes('insufficient') && errorMessage.toLowerCase().includes('balance')) {
+      console.log('✅ Detected: Insufficient Shipping Balance error');
+      
+      // Extract carrier_id from message (format: "carrier id {carrier_id}")
+      const carrierMatch = errorMessage.match(/carrier\s+id\s+(\d+)/i);
+      const carrierId = carrierMatch ? carrierMatch[1] : null;
+      
+      notificationData = {
+        type: 'low_balance',
+        severity: 'high',
+        title: `Add balance to shipway wallet - Order ${orderId}`,
+        message: errorMessage,
+        order_id: orderId,
+        vendor_id: vendor.id,
+        vendor_name: vendor.name,
+        vendor_warehouse_id: vendor.warehouseId,
+        metadata: carrierId ? JSON.stringify({ carrier_attempted: carrierId }) : null,
+        error_details: 'Please add balance to shipway wallet and reassign this order'
+      };
+    }
+    
+    // Pattern 2: Delivery pincode not serviceable
+    else if (errorMessage.toLowerCase().includes('pincode') && errorMessage.toLowerCase().includes('serviceable')) {
+      console.log('✅ Detected: Delivery pincode not serviceable error');
+      
+      // Extract carrier_id from message (format: "carrier id {carrier_id}")
+      const carrierMatch = errorMessage.match(/carrier\s+id\s+(\d+)/i);
+      const carrierId = carrierMatch ? carrierMatch[1] : null;
+      
+      // Extract pincode from message (format: "({pincode})" at end)
+      const pincodeMatch = errorMessage.match(/\((\d{6})\)/);
+      const pincode = pincodeMatch ? pincodeMatch[1] : null;
+      
+      notificationData = {
+        type: 'carrier_unavailable',
+        severity: 'high',
+        title: `Delivery pincode not serviceable - Order ${orderId}`,
+        message: errorMessage,
+        order_id: orderId,
+        vendor_id: vendor.id,
+        vendor_name: vendor.name,
+        vendor_warehouse_id: vendor.warehouseId,
+        metadata: JSON.stringify({
+          carrier_attempted: carrierId,
+          pincode: pincode
+        }),
+        error_details: 'Check the serviceability of carrier manually in shipway and assign to vendor'
+      };
+    }
+    
+    // Pattern 3: Order already exists error
+    else if (errorMessage.toLowerCase().includes('order already exists')) {
+      console.log('✅ Detected: Order already exists error');
+      
+      notificationData = {
+        type: 'shipment_assignment_error',
+        severity: 'high',
+        title: `Order already exists in Shipway - Order ${orderId}`,
+        message: errorMessage,
+        order_id: orderId,
+        vendor_id: vendor.id,
+        vendor_name: vendor.name,
+        vendor_warehouse_id: vendor.warehouseId,
+        metadata: null,
+        error_details: 'Enter a valid store code or check if order was previously created. or check if vendor failure rate is high and vendor is blocked'
+      };
+    }
+    
+    // If we identified a pattern, create the notification
+    if (notificationData) {
+      console.log('📝 Creating notification in database:', notificationData);
+      
+      // Insert notification into database
+      await database.query(
+        `INSERT INTO notifications 
+        (type, severity, title, message, order_id, vendor_id, vendor_name, vendor_warehouse_id, metadata, error_details)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          notificationData.type,
+          notificationData.severity,
+          notificationData.title,
+          notificationData.message,
+          notificationData.order_id,
+          notificationData.vendor_id,
+          notificationData.vendor_name,
+          notificationData.vendor_warehouse_id,
+          notificationData.metadata,
+          notificationData.error_details
+        ]
+      );
+      
+      console.log('✅ Notification created successfully');
+      return true;
+    } else {
+      console.log('⚠️ No matching error pattern found for notification');
+      return false;
+    }
+    
+  } catch (error) {
+    console.error('❌ Failed to create notification:', error);
+    // Don't throw error - we don't want notification creation failure to break label generation
+    return false;
+  }
+}
+
+/**
  * @route   GET /api/orders
  * @desc    Get all orders from MySQL database
  * @access  Public (add auth as needed)
@@ -1097,6 +1220,9 @@ router.post('/download-label', async (req, res) => {
     return res.status(400).json({ success: false, message: 'order_id and Authorization token required' });
   }
 
+  // Declare vendor outside try block so it's accessible in catch block
+  let vendor = null;
+  
   try {
     // Load users from MySQL to get vendor info
     const database = require('../config/database');
@@ -1112,7 +1238,7 @@ router.post('/download-label', async (req, res) => {
     console.log('🔍 DOWNLOAD LABEL DEBUG:');
     console.log('  - Token received:', token ? token.substring(0, 20) + '...' : 'null');
     
-    const vendor = await database.getUserByToken(token);
+    vendor = await database.getUserByToken(token);
     
     if (!vendor || vendor.active_session !== 'TRUE') {
       console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
@@ -1254,10 +1380,29 @@ router.post('/download-label', async (req, res) => {
 
   } catch (error) {
     console.error('❌ DOWNLOAD LABEL ERROR:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to download label', 
-      error: error.message 
+    
+    // Create notification for specific error patterns (only if vendor is defined)
+    let notificationCreated = false;
+    if (vendor) {
+      try {
+        notificationCreated = await createLabelGenerationNotification(error.message, order_id, vendor);
+        console.log('✅ Notification created for failed order:', order_id);
+      } catch (notificationError) {
+        console.error('⚠️ Failed to create notification (non-blocking):', notificationError.message);
+      }
+    } else {
+      console.log('⚠️ Skipping notification creation - vendor not authenticated');
+    }
+    
+    // Return a user-friendly response with warning message
+    return res.status(200).json({ 
+      success: false,
+      warning: true,
+      message: `Order ${order_id} not assigned, please contact admin`,
+      userMessage: `Order ${order_id} not assigned, please contact admin`,
+      error: error.message,
+      notificationCreated: notificationCreated,
+      order_id: order_id
     });
   }
 });
@@ -2187,8 +2332,10 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false) {
     
     const data = await response.json();
     
-    if (!response.ok) {
-      throw new Error(`Shipway API error: ${data.message || response.statusText}`);
+    // Check if Shipway returned an error
+    if (!response.ok || data.success === false) {
+      const errorMessage = data.message || response.statusText || 'Unknown Shipway API error';
+      throw new Error(errorMessage);
     }
     
     console.log('✅ Shipway API call successful');
@@ -2393,9 +2540,20 @@ router.post('/bulk-download-labels', async (req, res) => {
 
       } catch (error) {
         console.error(`❌ Error processing order ${orderId}:`, error);
+        
+        // Create notification for this failed order
+        try {
+          const notificationCreated = await createLabelGenerationNotification(error.message, orderId, vendor);
+          console.log(`✅ BULK: Notification created for failed order: ${orderId}`);
+        } catch (notificationError) {
+          console.error(`⚠️ BULK: Failed to create notification for ${orderId}:`, notificationError.message);
+        }
+        
+        // Add user-friendly error message
         errors.push({
           order_id: orderId,
-          error: error.message
+          error: error.message,
+          userMessage: `Order ${orderId} not assigned, please contact admin`
         });
       }
     }
@@ -2407,8 +2565,11 @@ router.post('/bulk-download-labels', async (req, res) => {
     if (results.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'No labels could be generated for any of the selected orders',
-        data: { errors }
+        message: 'No labels could be generated for any of the selected orders. Please contact admin.',
+        data: { 
+          errors,
+          warnings: errors.map(e => e.userMessage || e.error)
+        }
       });
     }
 
@@ -2428,6 +2589,13 @@ router.post('/bulk-download-labels', async (req, res) => {
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.setHeader('Content-Length', combinedPdfBuffer.length);
       
+      // Add warnings header if there were any failures
+      if (errors.length > 0) {
+        const warningMessages = errors.map(e => e.userMessage || e.error).join('; ');
+        res.setHeader('X-Download-Warnings', Buffer.from(warningMessages).toString('base64'));
+        res.setHeader('X-Failed-Orders', JSON.stringify(errors.map(e => e.order_id)));
+      }
+      
       // Send the PDF buffer
       res.send(combinedPdfBuffer);
       
@@ -2438,9 +2606,11 @@ router.post('/bulk-download-labels', async (req, res) => {
       return res.json({
         success: true,
         message: 'Labels generated but PDF combination failed. Returning individual URLs.',
+        hasWarnings: errors.length > 0,
         data: {
           labels: results,
           errors,
+          warnings: errors.map(e => e.userMessage || e.error),
           total_successful: results.length,
           total_failed: errors.length
         }

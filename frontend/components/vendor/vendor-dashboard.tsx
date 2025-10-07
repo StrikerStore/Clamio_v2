@@ -1208,11 +1208,23 @@ export function VendorDashboard() {
       } else {
         console.log('❌ FRONTEND: Download label failed');
         console.log('  - Error message:', response.message);
-        toast({
-          title: 'Download Label Failed',
-          description: response.message || 'Could not generate label',
-          variant: 'destructive',
-        });
+        console.log('  - Warning flag:', response.warning);
+        console.log('  - User message:', response.userMessage);
+        
+        // Show warning toast with yellowish color for non-blocking errors
+        if (response.warning) {
+          toast({
+            title: '⚠️ Label Generation Issue',
+            description: response.userMessage || response.message || 'Could not generate label',
+            className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
+          });
+        } else {
+          toast({
+            title: 'Download Label Failed',
+            description: response.message || 'Could not generate label',
+            variant: 'destructive',
+          });
+        }
       }
       
     } catch (error) {
@@ -1277,10 +1289,26 @@ export function VendorDashboard() {
       
       console.log('✅ FRONTEND: Bulk labels PDF downloaded successfully');
       
-      toast({
-        title: "Bulk Download Complete",
-        description: `Successfully downloaded labels for ${selectedOrders.length} orders`,
-      })
+      // Check if there are warnings
+      const warnings = (blob as any)._warnings;
+      const failedOrders = (blob as any)._failedOrders;
+      
+      if (warnings && failedOrders && failedOrders.length > 0) {
+        console.log('⚠️ FRONTEND: Some orders failed during bulk download');
+        console.log('  - Failed orders:', failedOrders);
+        
+        // Show warning toast
+        toast({
+          title: "⚠️ Bulk Download Completed with Warnings",
+          description: `Downloaded labels successfully, but ${failedOrders.length} order(s) failed. Please contact admin for: ${failedOrders.join(', ')}`,
+          className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
+        });
+      } else {
+        toast({
+          title: "Bulk Download Complete",
+          description: `Successfully downloaded labels for ${selectedOrders.length} orders`,
+        });
+      }
 
       // Refresh orders to update the UI
       await refreshOrders();
