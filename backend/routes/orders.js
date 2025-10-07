@@ -2321,6 +2321,13 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false) {
       delete apiRequestBody.generate_label;
     }
     
+    // Print the request being sent to Shipway
+    console.log('📤 ========== SHIPWAY API REQUEST ==========');
+    console.log('🌐 Endpoint: https://app.shipway.com/api/v2orders');
+    console.log('📝 Method: POST');
+    console.log('📝 Request Body:', JSON.stringify(apiRequestBody, null, 2));
+    console.log('📤 ==========================================');
+    
     const response = await fetch('https://app.shipway.com/api/v2orders', {
       method: 'POST',
       headers: {
@@ -2332,13 +2339,26 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false) {
     
     const data = await response.json();
     
+    // Print the complete Shipway API response
+    console.log('📦 ========== SHIPWAY API RESPONSE ==========');
+    console.log('📊 Response Status:', response.status, response.statusText);
+    console.log('📊 Response OK:', response.ok);
+    console.log('📊 Full Response Data:', JSON.stringify(data, null, 2));
+    console.log('📦 ==========================================');
+    
     // Check if Shipway returned an error
     if (!response.ok || data.success === false) {
+      console.log('❌ Shipway API returned an error');
+      console.log('  - Success flag:', data.success);
+      console.log('  - Error message:', data.message);
+      console.log('  - Full error data:', JSON.stringify(data, null, 2));
       const errorMessage = data.message || response.statusText || 'Unknown Shipway API error';
       throw new Error(errorMessage);
     }
     
     console.log('✅ Shipway API call successful');
+    console.log('  - Label URL:', data.data?.label_url || 'N/A');
+    console.log('  - Shipway Order ID:', data.data?.shipway_order_id || 'N/A');
     return data;
     
   } catch (error) {
