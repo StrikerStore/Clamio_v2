@@ -281,7 +281,6 @@ export function AdminDashboard() {
   const [notificationPage, setNotificationPage] = useState(1)
   const [notificationPagination, setNotificationPagination] = useState({ totalPages: 1, totalItems: 0 })
   const [showNotificationInfo, setShowNotificationInfo] = useState(false)
-  const [sampleNotificationStatuses, setSampleNotificationStatuses] = useState<{[key: number]: {status: string, resolved_at?: string, resolved_by?: string, resolution_notes?: string}}>({})
   const [notificationFilterOptions, setNotificationFilterOptions] = useState<{
     vendors: string[],
     types: string[],
@@ -908,6 +907,72 @@ export function AdminDashboard() {
     }
   };
 
+  // Fetch notifications from database with filters
+  const fetchNotifications = async () => {
+    try {
+      setNotificationsLoading(true);
+      
+      // Build query params based on filters
+      const params: any = {
+        page: notificationPage,
+        limit: 20
+      };
+      
+      if (notificationFilters.status !== 'all') {
+        params.status = notificationFilters.status;
+      }
+      if (notificationFilters.type !== 'all') {
+        params.type = notificationFilters.type;
+      }
+      if (notificationFilters.severity !== 'all') {
+        params.severity = notificationFilters.severity;
+      }
+      if (notificationFilters.vendor !== 'all') {
+        params.vendor_id = notificationFilters.vendor;
+      }
+      if (notificationFilters.search) {
+        params.search = notificationFilters.search;
+      }
+      if (notificationFilters.dateFrom) {
+        params.start_date = notificationFilters.dateFrom.toISOString();
+      }
+      if (notificationFilters.dateTo) {
+        params.end_date = notificationFilters.dateTo.toISOString();
+      }
+      
+      const response = await apiClient.getNotifications(params);
+      
+      if (response.success && response.data) {
+        setNotifications(response.data.notifications || []);
+        setNotificationPagination({
+          totalPages: response.data.pagination?.pages || 1,
+          totalItems: response.data.pagination?.total || 0
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch notifications",
+        variant: "destructive"
+      });
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
+  // Fetch notification statistics
+  const fetchNotificationStats = async () => {
+    try {
+      const response = await apiClient.getNotificationStats();
+      if (response.success && response.data) {
+        setNotificationStats(response.data.overview);
+      }
+    } catch (error) {
+      console.error('Error fetching notification stats:', error);
+    }
+  };
+
   // Fetch notification filter options from database
   const fetchNotificationFilterOptions = async () => {
     try {
@@ -1103,12 +1168,21 @@ export function AdminDashboard() {
     }
   };
 
-  // Load notification filter options when notifications tab is active
+  // Load notifications data when notifications tab is active
   useEffect(() => {
     if (activeTab === 'notifications') {
       fetchNotificationFilterOptions();
+      fetchNotifications();
+      fetchNotificationStats();
     }
   }, [activeTab]);
+
+  // Reload notifications when filters or page change
+  useEffect(() => {
+    if (activeTab === 'notifications') {
+      fetchNotifications();
+    }
+  }, [notificationPage, notificationFilters]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -2761,281 +2835,153 @@ export function AdminDashboard() {
                       </Card>
                     )}
 
-                    {/* Sample Notifications UI */}
+                    {/* Notifications UI */}
                     <Card>
                       <CardHeader className={isMobile ? "p-4" : ""}>
                         <CardTitle className={`flex items-center gap-2 ${isMobile ? 'text-base' : ''}`}>
                           <Bell className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} text-blue-600`} />
-                          {isMobile ? 'Notifications' : 'Sample Notifications'}
+                          Notifications
+                          {notificationStats && notificationStats.pending > 0 && (
+                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                              {notificationStats.pending} pending
+                            </span>
+                          )}
                         </CardTitle>
                         <CardDescription className={isMobile ? "text-xs" : ""}>
-                          {isMobile ? 'Placeholder for notification system' : 'This is a placeholder. Full notification system is ready for activation.'}
+                          {notificationPagination.totalItems === 0 ? 'No notifications found' : `Showing ${notifications.length} of ${notificationPagination.totalItems} notifications`}
                         </CardDescription>
                       </CardHeader>
                       <CardContent className={isMobile ? "p-4 pt-0" : ""}>
-                        <div className={isMobile ? "space-y-2" : "space-y-3"}>
-                          {/* Sample Notification 1 - Critical */}
-                          <div 
-                            className={`border rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
-                              isMobile ? 'p-3' : 'p-4'
-                            } ${
-                              sampleNotificationStatuses[1]?.status === 'resolved' 
-                                ? 'border-green-200 bg-green-50 opacity-60' 
-                                : 'border-red-200 bg-red-50'
-                            }`}
-                            onClick={() => {
-                              const currentStatus = sampleNotificationStatuses[1] || { status: 'pending' };
-                              setSelectedNotification({
-                                id: 1,
-                                type: 'shipment_assignment_error',
-                                severity: 'critical',
-                                title: 'No Carrier Available - Order #12346',
-                                message: 'Unable to assign carrier to order. No carriers available for the delivery pincode.',
-                                order_id: '12346',
-                                vendor_name: 'Delhi Warehouse',
-                                vendor_warehouse_id: '102',
-                                status: currentStatus.status,
-                                created_at: new Date().toISOString(),
-                                resolved_at: currentStatus.resolved_at,
-                                resolved_by_name: currentStatus.resolved_by,
-                                resolution_notes: currentStatus.resolution_notes,
-                                error_details: 'No carriers serviceable for pincode 110001. Attempted carriers: BlueDart, Delhivery, DTDC',
-                                metadata: { delivery_pincode: '110001', weight: '2.5kg', cod_amount: 1500 }
-                              });
-                              setShowNotificationDialog(true);
-                            }}
-                          >
-                            <div className={`flex items-start ${isMobile ? 'flex-col gap-2' : 'justify-between gap-4'}`}>
-                              <div className="flex-1 w-full">
-                                <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
-                                  <Badge className={`bg-red-100 text-red-700 border-red-200 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
-                                    <AlertCircle className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
-                                    CRITICAL
-                                  </Badge>
-                                  <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>Shipment Error</Badge>
-                                  <Badge className={`${
-                                    sampleNotificationStatuses[1]?.status === 'resolved' 
-                                      ? 'bg-green-100 text-green-700' 
-                                      : 'bg-orange-100 text-orange-700'
-                                  } ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
-                                    {sampleNotificationStatuses[1]?.status === 'resolved' ? 'RESOLVED' : 'PENDING'}
-                                  </Badge>
-                                </div>
-                                <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
-                                  No Carrier Available - Order #12346
-                                </h3>
-                                <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
-                                  Unable to assign carrier to order. No carriers available for the delivery pincode.
-                                </p>
-                                <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
-                                  <span>📍 {isMobile ? 'Delhi WH' : 'Vendor: Delhi Warehouse'}</span>
-                                  <span>📦 {isMobile ? '#12346' : 'Order: #12346'}</span>
-                                  <span>🕐 {isMobile ? new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : new Date().toLocaleString()}</span>
-                                </div>
-                              </div>
-                              <Button size="sm" variant="outline" className={isMobile ? "w-full mt-2 h-8 text-xs" : ""} onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedNotification({
-                                  id: 1,
-                                  type: 'shipment_assignment_error',
-                                  severity: 'critical',
-                                  title: 'No Carrier Available - Order #12346',
-                                  message: 'Unable to assign carrier to order. No carriers available for the delivery pincode.',
-                                  order_id: '12346',
-                                  vendor_name: 'Delhi Warehouse',
-                                  vendor_warehouse_id: '102',
-                                  status: 'pending',
-                                  created_at: new Date().toISOString(),
-                                  error_details: 'No carriers serviceable for pincode 110001. Attempted carriers: BlueDart, Delhivery, DTDC',
-                                  metadata: { delivery_pincode: '110001', weight: '2.5kg', cod_amount: 1500 }
-                                });
-                                setShowNotificationDialog(true);
-                              }}>
-                                View Details <ExternalLink className="w-3 h-3 ml-1" />
-                              </Button>
-                            </div>
+                        {notificationsLoading ? (
+                          <div className="flex justify-center items-center py-12">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                           </div>
+                        ) : notifications.length === 0 ? (
+                          <div className="text-center py-12 text-gray-500">
+                            <Bell className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                            <p className="text-lg font-medium">No notifications found</p>
+                            <p className="text-sm mt-2">All clear! No issues to report.</p>
+                          </div>
+                        ) : (
+                          <div className={isMobile ? "space-y-2" : "space-y-3"}>
+                          {/* Map over real notifications from database */}
+                          {notifications.map((notification) => {
+                            const getSeverityColor = (severity: string) => {
+                              switch (severity) {
+                                case 'critical': return { border: 'border-red-200', bg: 'bg-red-50', badge: 'bg-red-100 text-red-700 border-red-200', icon: AlertCircle };
+                                case 'high': return { border: 'border-orange-200', bg: 'bg-orange-50', badge: 'bg-orange-100 text-orange-700 border-orange-200', icon: AlertTriangle };
+                                case 'medium': return { border: 'border-yellow-200', bg: 'bg-yellow-50', badge: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: Info };
+                                case 'low': return { border: 'border-blue-200', bg: 'bg-blue-50', badge: 'bg-blue-100 text-blue-700 border-blue-200', icon: Info };
+                                default: return { border: 'border-gray-200', bg: 'bg-gray-50', badge: 'bg-gray-100 text-gray-700 border-gray-200', icon: Info };
+                              }
+                            };
 
-                          {/* Sample Notification 2 - High */}
-                          <div 
-                            className={`border rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
-                              isMobile ? 'p-3' : 'p-4'
-                            } ${
-                              sampleNotificationStatuses[2]?.status === 'resolved' 
-                                ? 'border-green-200 bg-green-50 opacity-60' 
-                                : 'border-orange-200 bg-orange-50'
-                            }`}
-                            onClick={() => {
-                              const currentStatus = sampleNotificationStatuses[2] || { status: 'pending' };
-                              setSelectedNotification({
-                                id: 2,
-                                type: 'reverse_order_failure',
-                                severity: 'high',
-                                title: 'Reverse Order Failed - Order #12345',
-                                message: 'Vendor failed to process reverse order. Customer requested return but order status could not be updated.',
-                                order_id: '12345',
-                                vendor_name: 'Mumbai Warehouse',
-                                vendor_warehouse_id: '101',
-                                status: currentStatus.status,
-                                created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-                                resolved_at: currentStatus.resolved_at,
-                                resolved_by_name: currentStatus.resolved_by,
-                                resolution_notes: currentStatus.resolution_notes,
-                                error_details: 'API timeout while connecting to Shipway. Error code: TIMEOUT_ERROR',
-                                metadata: { customer_name: 'John Doe', reason: 'Product damaged', attempted_at: new Date().toISOString() }
-                              });
-                              setShowNotificationDialog(true);
-                            }}
-                          >
-                            <div className={`flex items-start ${isMobile ? 'flex-col gap-2' : 'justify-between gap-4'}`}>
-                              <div className="flex-1 w-full">
-                                <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
-                                  <Badge className={`bg-orange-100 text-orange-700 border-orange-200 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
-                                    <AlertTriangle className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
-                                    HIGH
-                                  </Badge>
-                                  <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>Reverse Order</Badge>
-                                  <Badge className={`${
-                                    sampleNotificationStatuses[2]?.status === 'resolved' 
-                                      ? 'bg-green-100 text-green-700' 
-                                      : 'bg-orange-100 text-orange-700'
-                                  } ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
-                                    {sampleNotificationStatuses[2]?.status === 'resolved' ? 'RESOLVED' : 'PENDING'}
-                                  </Badge>
-                                </div>
-                                <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
-                                  Reverse Order Failed - Order #12345
-                                </h3>
-                                <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
-                                  Vendor failed to process reverse order. Customer requested return but order status could not be updated.
-                                </p>
-                                <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
-                                  <span>📍 {isMobile ? 'Mumbai WH' : 'Vendor: Mumbai Warehouse'}</span>
-                                  <span>📦 {isMobile ? '#12345' : 'Order: #12345'}</span>
-                                  <span>🕐 {isMobile ? new Date(Date.now() - 2 * 60 * 60 * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : new Date(Date.now() - 2 * 60 * 60 * 1000).toLocaleString()}</span>
-                                </div>
-                              </div>
-                              <Button size="sm" variant="outline" className={isMobile ? "w-full mt-2 h-8 text-xs" : ""} onClick={(e) => e.stopPropagation()}>
-                                View Details <ExternalLink className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} ml-1`} />
-                              </Button>
-                            </div>
-                          </div>
+                            const getStatusColor = (status: string) => {
+                              switch (status) {
+                                case 'resolved': return 'bg-green-100 text-green-700';
+                                case 'in_progress': return 'bg-blue-100 text-blue-700';
+                                case 'dismissed': return 'bg-gray-100 text-gray-700';
+                                default: return 'bg-orange-100 text-orange-700';
+                              }
+                            };
 
-                          {/* Sample Notification 3 - Critical Low Balance */}
-                          <div 
-                            className={`border rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
-                              isMobile ? 'p-3' : 'p-4'
-                            } ${
-                              sampleNotificationStatuses[3]?.status === 'resolved' 
-                                ? 'border-green-200 bg-green-50 opacity-60' 
-                                : 'border-red-200 bg-red-50'
-                            }`}
-                            onClick={() => {
-                              const currentStatus = sampleNotificationStatuses[3] || { status: 'pending' };
-                              setSelectedNotification({
-                                id: 3,
-                                type: 'low_balance',
-                                severity: 'critical',
-                                title: 'Low Shipway Balance Alert',
-                                message: 'Shipway account balance is critically low. Unable to create new shipments.',
-                                status: currentStatus.status,
-                                created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-                                resolved_at: currentStatus.resolved_at,
-                                resolved_by_name: currentStatus.resolved_by,
-                                resolution_notes: currentStatus.resolution_notes,
-                                error_details: 'Balance check returned: INR 150.50. Minimum required: INR 1000',
-                                metadata: { current_balance: '₹150.50', threshold: '₹1,000', pending_orders: 45 }
-                              });
-                              setShowNotificationDialog(true);
-                            }}
-                          >
-                            <div className={`flex items-start ${isMobile ? 'flex-col gap-2' : 'justify-between gap-4'}`}>
-                              <div className="flex-1 w-full">
-                                <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
-                                  <Badge className={`bg-red-100 text-red-700 border-red-200 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
-                                    <AlertCircle className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
-                                    CRITICAL
-                                  </Badge>
-                                  <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>Low Balance</Badge>
-                                  <Badge className={`${
-                                    sampleNotificationStatuses[3]?.status === 'resolved' 
-                                      ? 'bg-green-100 text-green-700' 
-                                      : 'bg-orange-100 text-orange-700'
-                                  } ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
-                                    {sampleNotificationStatuses[3]?.status === 'resolved' ? 'RESOLVED' : 'PENDING'}
-                                  </Badge>
-                                </div>
-                                <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
-                                  Low Shipway Balance Alert
-                                </h3>
-                                <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
-                                  Shipway account balance is critically low (₹150.50). Unable to create new shipments.
-                                </p>
-                                <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
-                                  <span>💰 Balance: ₹150.50</span>
-                                  <span>⚠️ Min: ₹1,000</span>
-                                  <span>🕐 {isMobile ? new Date(Date.now() - 30 * 60 * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : new Date(Date.now() - 30 * 60 * 1000).toLocaleString()}</span>
-                                </div>
-                              </div>
-                              <Button size="sm" variant="outline" className={isMobile ? "w-full mt-2 h-8 text-xs" : ""} onClick={(e) => e.stopPropagation()}>
-                                View Details <ExternalLink className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} ml-1`} />
-                              </Button>
-                            </div>
-                          </div>
+                            const severity = getSeverityColor(notification.severity);
+                            const SeverityIcon = severity.icon;
+                            const isResolved = notification.status === 'resolved' || notification.status === 'dismissed';
 
-                          {/* Sample Notification 4 - Resolved */}
-                          <div 
-                            className={`border border-green-200 bg-green-50 rounded-lg opacity-60 cursor-pointer hover:opacity-100 hover:shadow-md transition-all ${
-                              isMobile ? 'p-3' : 'p-4'
-                            }`}
-                            onClick={() => {
-                              setSelectedNotification({
-                                id: 4,
-                                type: 'carrier_unavailable',
-                                severity: 'medium',
-                                title: 'Carrier Service Down - Order #12347',
-                                message: 'Primary carrier service was temporarily unavailable. Order has been successfully assigned to alternate carrier.',
-                                order_id: '12347',
-                                vendor_name: 'Bangalore Warehouse',
-                                vendor_warehouse_id: '103',
-                                status: 'resolved',
-                                created_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
-                                resolved_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-                                resolved_by_name: user?.name || 'Admin User',
-                                resolution_notes: 'Successfully switched to alternate carrier (Delhivery). Order has been assigned and shipment created.',
-                                error_details: 'Carrier API returned 503 Service Unavailable. Will retry in 30 minutes.',
-                                metadata: { carrier_name: 'BlueDart', alternate_carrier: 'Delhivery', retry_count: 3 }
-                              });
-                              setShowNotificationDialog(true);
-                            }}
+                            return (
+                              <div
+                                key={notification.id}
+                                className={`border rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
+                                  isMobile ? 'p-3' : 'p-4'
+                                } ${
+                                  isResolved
+                                  ? `border-green-200 bg-green-50 opacity-60`
+                                  : `${severity.border} ${severity.bg}`
+                                }`}
+                                onClick={() => {
+                                  setSelectedNotification(notification);
+                                  setShowNotificationDialog(true);
+                                }}
                           >
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex-1">
-                                <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
-                                  <Badge className={`bg-yellow-100 text-yellow-700 border-yellow-200 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
-                                    <Info className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
-                                    MEDIUM
-                                  </Badge>
-                                  <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>Carrier Issue</Badge>
-                                  <Badge className={`bg-green-100 text-green-700 ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>RESOLVED</Badge>
-                                </div>
-                                <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
-                                  Carrier Service Down - Order #12347
-                                </h3>
-                                <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
-                                  Primary carrier service was temporarily unavailable. Order has been successfully assigned to alternate carrier.
-                                </p>
-                                <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
-                                  <span>📍 {isMobile ? 'Bangalore WH' : 'Vendor: Bangalore Warehouse'}</span>
-                                  <span>📦 {isMobile ? '#12347' : 'Order: #12347'}</span>
-                                  <span>✅ {isMobile ? user?.name?.split(' ')[0] || 'Admin' : `Resolved by: ${user?.name || 'Admin User'}`}</span>
+                                <div className={`flex items-start ${isMobile ? 'flex-col gap-2' : 'justify-between gap-4'}`}>
+                                  <div className="flex-1 w-full">
+                                    <div className={`flex ${isMobile ? 'flex-wrap' : 'items-center'} gap-1 mb-2`}>
+                                      <Badge className={`${severity.badge} ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                        <SeverityIcon className={`${isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} mr-1`} />
+                                        {notification.severity.toUpperCase()}
+                                      </Badge>
+                                      <Badge variant="outline" className={isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}>
+                                        {notification.type.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                                      </Badge>
+                                      <Badge className={`${getStatusColor(notification.status)} ${isMobile ? 'text-[10px] px-1.5 py-0.5' : ''}`}>
+                                        {notification.status.toUpperCase().replace('_', ' ')}
+                                      </Badge>
+                                    </div>
+                                    <h3 className={`font-semibold text-gray-900 mb-1 ${isMobile ? 'text-sm' : ''}`}>
+                                      {notification.title}
+                                    </h3>
+                                    <p className={`text-gray-700 mb-2 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                                      {notification.message}
+                                    </p>
+                                    <div className={`flex flex-wrap ${isMobile ? 'gap-2' : 'gap-4'} text-xs text-gray-600`}>
+                                      {notification.vendor_name && (
+                                        <span>📍 {isMobile ? notification.vendor_name.split(' ')[0] : `Vendor: ${notification.vendor_name}`}</span>
+                                      )}
+                                      {notification.order_id && (
+                                        <span>📦 {isMobile ? `#${notification.order_id}` : `Order: #${notification.order_id}`}</span>
+                                      )}
+                                      <span>🕐 {isMobile 
+                                        ? new Date(notification.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) 
+                                        : new Date(notification.created_at).toLocaleString()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className={isMobile ? "w-full mt-2 h-8 text-xs" : ""} 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedNotification(notification);
+                                      setShowNotificationDialog(true);
+                                    }}
+                                  >
+                                    View Details <ExternalLink className="w-3 h-3 ml-1" />
+                                  </Button>
                                 </div>
                               </div>
-                            </div>
-                          </div>
+                            );
+                          })}
                         </div>
+                        )}
                       </CardContent>
                     </Card>
+
+                    {/* Pagination */}
+                    {notificationPagination.totalPages > 1 && (
+                      <div className="flex justify-center items-center gap-2 mt-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setNotificationPage(Math.max(1, notificationPage - 1))}
+                          disabled={notificationPage === 1 || notificationsLoading}
+                        >
+                          Previous
+                        </Button>
+                        <span className="text-sm text-gray-600">
+                          Page {notificationPage} of {notificationPagination.totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setNotificationPage(Math.min(notificationPagination.totalPages, notificationPage + 1))}
+                          disabled={notificationPage === notificationPagination.totalPages || notificationsLoading}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
               </div>
@@ -3181,47 +3127,47 @@ export function AdminDashboard() {
               <>
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    // Update the notification status to dismissed
-                    setSampleNotificationStatuses(prev => ({
-                      ...prev,
-                      [selectedNotification.id]: {
-                        status: 'dismissed',
-                        resolved_at: new Date().toISOString(),
-                        resolved_by: user?.name || 'Admin User',
-                        resolution_notes: 'Dismissed by admin'
-                      }
-                    }));
-                    
-                    toast({
-                      title: "Notification Dismissed",
-                      description: "Notification has been dismissed successfully.",
-                    });
-                    setShowNotificationDialog(false);
-                    setResolutionNotes("");
+                  onClick={async () => {
+                    try {
+                      await apiClient.dismissNotification(selectedNotification.id, 'Dismissed by admin');
+                      setShowNotificationDialog(false);
+                      setResolutionNotes("");
+                      fetchNotifications();
+                      fetchNotificationStats();
+                      toast({
+                        title: "Notification Dismissed",
+                        description: "Notification has been dismissed successfully.",
+                      });
+                    } catch (error) {
+                      toast({
+                        title: "Error",
+                        description: "Failed to dismiss notification",
+                        variant: "destructive"
+                      });
+                    }
                   }}
                 >
                   Dismiss
                 </Button>
                 <Button
-                  onClick={() => {
-                    // Update the notification status to resolved
-                    setSampleNotificationStatuses(prev => ({
-                      ...prev,
-                      [selectedNotification.id]: {
-                        status: 'resolved',
-                        resolved_at: new Date().toISOString(),
-                        resolved_by: user?.name || 'Admin User',
-                        resolution_notes: resolutionNotes || 'Issue resolved by admin'
-                      }
-                    }));
-                    
-                    toast({
-                      title: "✅ Notification Resolved",
-                      description: `Marked as resolved by ${user?.name}${resolutionNotes ? ' with notes' : ''}.`,
-                    });
-                    setShowNotificationDialog(false);
-                    setResolutionNotes("");
+                  onClick={async () => {
+                    try {
+                      await apiClient.resolveNotification(selectedNotification.id, resolutionNotes || 'Issue resolved by admin');
+                      setShowNotificationDialog(false);
+                      setResolutionNotes("");
+                      fetchNotifications();
+                      fetchNotificationStats();
+                      toast({
+                        title: "✅ Notification Resolved",
+                        description: `Marked as resolved by ${user?.name}${resolutionNotes ? ' with notes' : ''}.`,
+                      });
+                    } catch (error) {
+                      toast({
+                        title: "Error",
+                        description: "Failed to resolve notification",
+                        variant: "destructive"
+                      });
+                    }
                   }}
                   className="bg-green-600 hover:bg-green-700"
                 >

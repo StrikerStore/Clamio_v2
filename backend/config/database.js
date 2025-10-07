@@ -525,26 +525,6 @@ class Database {
       await this.mysqlConnection.execute(createNotificationsTableQuery);
       console.log('✅ Notifications table created/verified');
 
-      // Create notification_views table for tracking admin views
-      const createNotificationViewsTableQuery = `
-        CREATE TABLE IF NOT EXISTS notification_views (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          notification_id INT NOT NULL,
-          admin_id VARCHAR(50) NOT NULL,
-          viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          
-          UNIQUE KEY unique_view (notification_id, admin_id),
-          FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
-          FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
-          
-          INDEX idx_notification (notification_id),
-          INDEX idx_admin (admin_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-      `;
-
-      await this.mysqlConnection.execute(createNotificationViewsTableQuery);
-      console.log('✅ Notification views table created/verified');
-
     } catch (error) {
       console.error('❌ Error creating notifications tables:', error.message);
     }
