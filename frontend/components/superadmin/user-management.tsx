@@ -1191,7 +1191,7 @@ export function UserManagement() {
               {!isMobile && (
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-900 truncate max-w-[120px]">{currentUser?.name}</p>
-                  <p className="text-xs text-gray-500 truncate max-w-[120px]">{currentUser?.email}</p>
+                  <p className="text-xs text-gray-500 break-all max-w-[200px]">{currentUser?.email}</p>
                 </div>
               )}
               <Button 
