@@ -1766,7 +1766,7 @@ export function VendorDashboard() {
                     <Button 
                       onClick={() => handleBulkClaimOrders()} 
                       disabled={selectedUnclaimedOrders.length === 0} 
-                      className="h-10 text-sm whitespace-nowrap px-6 min-w-fit"
+                      className="h-10 text-sm whitespace-nowrap px-6 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                     >
                       <Package className="w-4 h-4 mr-2" />
                       Claim Selected ({selectedUnclaimedOrders.length})
@@ -1911,16 +1911,6 @@ export function VendorDashboard() {
                                 <p className="font-medium">{order.quantity || "-"}</p>
                               </div>
                             </div>
-                            <Button 
-                              size="sm" 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleClaimOrder(order.unique_id);
-                              }}
-                              className="w-full"
-                            >
-                              Claim Order
-                            </Button>
                           </div>
                         </Card>
                       ))}
@@ -1939,23 +1929,34 @@ export function VendorDashboard() {
                             <TableHead>Size</TableHead>
                             <TableHead>Product Code</TableHead>
                             <TableHead>Quantity</TableHead>
-                            <TableHead>Action</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {getFilteredOrdersForTab("all-orders").map((order, index) => (
-                            <TableRow key={`${order.unique_id}-${index}`}>
+                            <TableRow 
+                              key={`${order.unique_id}-${index}`}
+                              className="cursor-pointer hover:bg-gray-50 transition-colors"
+                              onClick={() => {
+                                if (selectedUnclaimedOrders.includes(order.unique_id)) {
+                                  setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
+                                } else {
+                                  setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
+                                }
+                              }}
+                            >
                               <TableCell>
                                 <input
                                   type="checkbox"
                                   checked={selectedUnclaimedOrders.includes(order.unique_id)}
                                   onChange={(e) => {
+                                    e.stopPropagation();
                                     if (e.target.checked) {
                                       setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
                                     } else {
                                       setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
                                     }
                                   }}
+                                  onClick={(e) => e.stopPropagation()}
                                 />
                               </TableCell>
                               <TableCell>
@@ -1966,7 +1967,10 @@ export function VendorDashboard() {
                                         src={order.product_image || "/placeholder.svg"}
                                         alt={order.product_name}
                                         className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                        onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})
+                                        }}
                                         onError={(e) => {
                                           e.currentTarget.src = "/placeholder.svg";
                                         }}
@@ -1999,11 +2003,6 @@ export function VendorDashboard() {
                               </TableCell>
                               <TableCell>{order.product_code}</TableCell>
                               <TableCell>{order.quantity || "-"}</TableCell>
-                              <TableCell>
-                                <Button size="sm" onClick={() => handleClaimOrder(order.unique_id)}>
-                                  Claim
-                                </Button>
-                              </TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -2468,6 +2467,18 @@ export function VendorDashboard() {
                     </Button>
                   </div>
                 </div>
+              )}
+
+              {/* Fixed Move to Top Button for Desktop All Orders */}
+              {!isMobile && activeTab === "all-orders" && (
+                <Button
+                  onClick={scrollToTop}
+                  variant="outline"
+                  size="sm"
+                  className="fixed bottom-6 right-6 h-12 w-12 p-0 rounded-full border-gray-300 hover:bg-gray-50 shadow-lg z-50"
+                >
+                  <ChevronUp className="w-5 h-5" />
+                </Button>
               )}
             </Tabs>
           </CardContent>
