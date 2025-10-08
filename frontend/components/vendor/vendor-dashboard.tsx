@@ -1025,14 +1025,14 @@ export function VendorDashboard() {
             console.log('  - Total requested:', response.data.total_requested);
             
             // Show success message with details about skipped products
-            let description = response.message || `Successfully reversed ${response.data.products_processed} products in order ${orderId}`;
+            let description = response.message || `Successfully unclaimed ${response.data.products_processed} product${response.data.products_processed > 1 ? 's' : ''} in order ${orderId}`;
             
             if (response.data.skipped_products > 0) {
               description += ` (${response.data.skipped_products} products were claimed by other vendors and were not affected)`;
             }
             
             toast({
-              title: 'Order Reversed',
+              title: 'Order Unclaimed',
               description: description,
               variant: response.data.skipped_products > 0 ? 'default' : 'default'
             });
@@ -1040,16 +1040,16 @@ export function VendorDashboard() {
             console.log('❌ FRONTEND: Grouped reverse failed');
             console.log('  - Error message:', response.message);
             toast({
-              title: 'Reverse Failed',
-              description: response.message || 'Could not reverse grouped order',
+              title: 'Unclaim Failed',
+              description: response.message || 'Could not unclaim grouped order',
               variant: 'destructive',
             });
           }
         } catch (err: any) {
           console.log('💥 FRONTEND: Exception in grouped reverse:', err.message);
           toast({
-            title: 'Reverse Failed',
-            description: err.message || 'Failed to reverse grouped order',
+            title: 'Unclaim Failed',
+            description: err.message || 'Failed to unclaim grouped order',
             variant: 'destructive',
           });
         }
@@ -1069,15 +1069,15 @@ export function VendorDashboard() {
           
           // Show success message
           toast({
-            title: 'Order Reversed',
-            description: response.message || `Order ${orderId} has been reversed successfully`,
+            title: 'Order Unclaimed',
+            description: response.message || `Order ${orderId} has been unclaimed successfully`,
           });
         } else {
           console.log('❌ FRONTEND: Reverse failed');
           console.log('  - Error message:', response.message);
           toast({
-            title: 'Reverse Failed',
-            description: response.message || 'Could not reverse order',
+            title: 'Unclaim Failed',
+            description: response.message || 'Could not unclaim order',
             variant: 'destructive',
           });
         }
@@ -1099,7 +1099,7 @@ export function VendorDashboard() {
       console.log('  - Error stack:', err.stack);
       
       toast({
-        title: 'Reverse Failed',
+        title: 'Unclaim Failed',
         description: err.message || 'Network error occurred',
         variant: 'destructive',
       });
@@ -1483,6 +1483,19 @@ export function VendorDashboard() {
     }
   };
 
+  // Helper function to get quantity sum for orders with labels downloaded
+  const getReadyOrdersQuantitySum = () => {
+    const myOrders = getFilteredOrdersForTab("my-orders");
+    const readyOrders = myOrders.filter(order => 
+      order.label_downloaded === 1 || 
+      order.label_downloaded === '1' || 
+      order.label_downloaded === true
+    );
+    return readyOrders.reduce((sum, order) => {
+      return sum + (order.total_quantity || 0);
+    }, 0);
+  };
+
   const handleRefreshOrders = async () => {
     setOrdersRefreshing(true);
     try {
@@ -1554,9 +1567,9 @@ export function VendorDashboard() {
                   {isMobile ? 'Clamio - Vendor' : 'Clamio - Vendor'}
                 </h1>
                 {!isMobile && (
-                  <p className="text-sm text-gray-600 truncate">
-                    Welcome back, {user?.name}
-                  </p>
+                <p className="text-sm text-gray-600 truncate">
+                  Welcome back, {user?.name}
+                </p>
                 )}
               </div>
             </div>
@@ -1564,24 +1577,24 @@ export function VendorDashboard() {
             {/* Desktop/Tablet - Vendor Address and Logout */}
             {!isMobile && (
               <>
-                {/* Vendor Address */}
-                <div className="flex-1 flex flex-col items-end min-w-0">
-                  {addressLoading ? (
-                    <span className="text-xs text-gray-400">Loading address...</span>
-                  ) : addressError ? (
-                    <span className="text-xs text-red-500">{addressError}</span>
-                  ) : vendorAddress ? (
-                    <div className="text-right truncate">
-                      <div className="text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
-                      <div className="text-xs text-gray-700 truncate">{vendorAddress.address}</div>
-                      <div className="text-xs text-gray-700 truncate">{vendorAddress.city}, {vendorAddress.pincode}</div>
-                    </div>
-                  ) : null}
+            {/* Vendor Address */}
+            <div className="flex-1 flex flex-col items-end min-w-0">
+              {addressLoading ? (
+                <span className="text-xs text-gray-400">Loading address...</span>
+              ) : addressError ? (
+                <span className="text-xs text-red-500">{addressError}</span>
+              ) : vendorAddress ? (
+                <div className="text-right truncate">
+                  <div className="text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
+                  <div className="text-xs text-gray-700 truncate">{vendorAddress.address}</div>
+                  <div className="text-xs text-gray-700 truncate">{vendorAddress.city}, {vendorAddress.pincode}</div>
                 </div>
-                {/* Logout Button */}
-                <div className="flex-shrink-0">
-                  <Button variant="outline" onClick={logout}>
-                    <LogOut className="w-4 h-4 mr-2" />
+              ) : null}
+            </div>
+            {/* Logout Button */}
+            <div className="flex-shrink-0">
+              <Button variant="outline" onClick={logout}>
+                <LogOut className="w-4 h-4 mr-2" />
                     {isDesktop && 'Logout'}
                   </Button>
                 </div>
@@ -1633,10 +1646,10 @@ export function VendorDashboard() {
                   className="w-full flex items-center justify-center gap-2"
                 >
                   <LogOut className="w-4 h-4" />
-                  Logout
-                </Button>
-              </div>
+                Logout
+              </Button>
             </div>
+          </div>
           )}
         </div>
       </div>
@@ -1885,7 +1898,7 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <CheckCircle className="w-4 h-4 mr-2" />
-                            Mark Ready ({selectedMyOrders.length})
+                            Mark Ready ({getReadyOrdersQuantitySum()})
                           </>
                         )}
                       </Button>
@@ -1899,7 +1912,7 @@ export function VendorDashboard() {
               {/* Scrollable Content Section */}
               <div 
                 ref={scrollableContentRef}
-                className={`${isMobile ? 'max-h-[calc(100vh-280px)] pb-20' : 'max-h-[600px]'} overflow-y-auto relative`}
+                className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
               >
                 <TabsContent value="all-orders" className="mt-0">
                   {/* Mobile Card Layout */}
@@ -1919,14 +1932,14 @@ export function VendorDashboard() {
                         >
                           <div className="space-y-3">
                             <div className="flex items-start gap-3">
-                              <input
-                                type="checkbox"
+                            <input
+                              type="checkbox"
                                 checked={selectedUnclaimedOrders.includes(order.unique_id)}
-                                onChange={(e) => {
+                              onChange={(e) => {
                                   e.stopPropagation();
-                                  if (e.target.checked) {
+                                if (e.target.checked) {
                                     setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
-                                  } else {
+                                } else {
                                     setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
                                   }
                                 }}
@@ -1978,17 +1991,17 @@ export function VendorDashboard() {
                         <TableHeader className="sticky top-0 bg-white z-30">
                           <TableRow>
                             <TableHead className="w-12">Select</TableHead>
-                            <TableHead>Image</TableHead>
-                            <TableHead>Order ID</TableHead>
-                            <TableHead>Order Date</TableHead>
-                            <TableHead>Product</TableHead>
-                            <TableHead>Size</TableHead>
-                            <TableHead>Product Code</TableHead>
+                          <TableHead>Image</TableHead>
+                          <TableHead>Order ID</TableHead>
+                          <TableHead>Order Date</TableHead>
+                          <TableHead>Product</TableHead>
+                            <TableHead className="w-24">Size</TableHead>
+                          <TableHead>Product Code</TableHead>
                             <TableHead>Quantity</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {getFilteredOrdersForTab("all-orders").map((order, index) => (
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {getFilteredOrdersForTab("all-orders").map((order, index) => (
                             <TableRow 
                               key={`${order.unique_id}-${index}`}
                               className="cursor-pointer hover:bg-gray-50 transition-colors"
@@ -2000,70 +2013,70 @@ export function VendorDashboard() {
                                 }
                               }}
                             >
-                              <TableCell>
-                                <input
-                                  type="checkbox"
-                                  checked={selectedUnclaimedOrders.includes(order.unique_id)}
-                                  onChange={(e) => {
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                checked={selectedUnclaimedOrders.includes(order.unique_id)}
+                                onChange={(e) => {
                                     e.stopPropagation();
-                                    if (e.target.checked) {
-                                      setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
-                                    } else {
-                                      setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
-                                    }
-                                  }}
+                                  if (e.target.checked) {
+                                    setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
+                                  } else {
+                                    setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
+                                  }
+                                }}
                                   onClick={(e) => e.stopPropagation()}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <TooltipProvider>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <img
-                                        src={order.product_image || "/placeholder.svg"}
-                                        alt={order.product_name}
-                                        className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <img
+                                      src={order.product_image || "/placeholder.svg"}
+                                      alt={order.product_name}
+                                      className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})
                                         }}
-                                        onError={(e) => {
-                                          e.currentTarget.src = "/placeholder.svg";
-                                        }}
-                                      />
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                      <p>Click to view full image</p>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              </TableCell>
-                              <TableCell className="font-medium">{order.order_id}</TableCell>
-                              <TableCell>
-                                {order.order_date ? (
-                                  <div className="flex flex-col">
-                                    <span className="text-sm font-medium">
-                                      {new Date(order.order_date).toLocaleDateString()}
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                      {new Date(order.order_date).toLocaleTimeString()}
-                                    </span>
-                                  </div>
-                                ) : "N/A"}
-                              </TableCell>
-                              <TableCell>{order.product_name}</TableCell>
-                              <TableCell>
+                                      onError={(e) => {
+                                        e.currentTarget.src = "/placeholder.svg";
+                                      }}
+                                    />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Click to view full image</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableCell>
+                            <TableCell className="font-medium">{order.order_id}</TableCell>
+                            <TableCell>
+                              {order.order_date ? (
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-medium">
+                                    {new Date(order.order_date).toLocaleDateString()}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {new Date(order.order_date).toLocaleTimeString()}
+                                  </span>
+                                </div>
+                              ) : "N/A"}
+                            </TableCell>
+                            <TableCell>{order.product_name}</TableCell>
+                            <TableCell>
                                 <span className="text-red-600 font-medium">
                                   {order.size || "-"}
                                 </span>
-                              </TableCell>
+                            </TableCell>
                               <TableCell>{order.product_code}</TableCell>
                               <TableCell>{order.quantity || "-"}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                   )}
                 </TabsContent>
 
@@ -2082,10 +2095,16 @@ export function VendorDashboard() {
                   ) : isMobile ? (
                     /* Mobile Card Layout */
                     <div className="space-y-3">
-                      {getFilteredOrdersForTab("my-orders").map((order, index) => (
+                      {getFilteredOrdersForTab("my-orders").map((order, index) => {
+                        const hasLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === '1' || order.label_downloaded === true;
+                        return (
                         <Card 
                           key={`${order.order_id}-${index}`} 
-                          className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                          className={`p-3 cursor-pointer transition-colors ${
+                            hasLabelDownloaded 
+                              ? 'bg-green-50 hover:bg-green-100 border-green-200' 
+                              : 'hover:bg-gray-50'
+                          }`}
                           onClick={() => {
                             if (selectedMyOrders.includes(order.order_id)) {
                               setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
@@ -2094,9 +2113,11 @@ export function VendorDashboard() {
                             }
                           }}
                         >
-                          <div className="space-y-3">
-                            <div className="flex items-start justify-between">
-                              <div className="flex items-start gap-2">
+                        
+                          <div className="space-y-2">
+                            {/* Top Row: Checkbox | Order Info | Total */}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
                                 <input
                                   type="checkbox"
                                   checked={selectedMyOrders.includes(order.order_id)}
@@ -2108,20 +2129,24 @@ export function VendorDashboard() {
                                       setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
                                     }
                                   }}
-                                  className="mt-1"
+                                  className="w-4 h-4 flex-shrink-0"
                                   onClick={(e) => e.stopPropagation()}
                                 />
-                                <div>
-                                  <h4 className="font-medium text-sm">{order.order_id}</h4>
-                                  <p className="text-xs text-gray-500">
+                                
+                                {/* Order Info */}
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-medium text-sm truncate">{order.order_id}</h4>
+                                  <p className="text-xs text-gray-500 truncate">
                                     {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
                                   </p>
                                 </div>
                               </div>
-                                   <div className="text-right">
-                                     <div className="text-xs text-gray-500">Total</div>
-                                     <div className="font-medium text-green-600">{order.total_quantity || 0}</div>
-                                   </div>
+                              
+                              {/* Total Count - Right aligned */}
+                              <div className="text-right flex-shrink-0">
+                                <div className="text-xs text-gray-500">Total</div>
+                                <div className="text-lg font-bold text-green-600">{order.total_quantity || 0}</div>
+                              </div>
                             </div>
                             
                             <div className="space-y-2">
@@ -2150,9 +2175,31 @@ export function VendorDashboard() {
                                 </div>
                               ))}
                             </div>
+                            
+                            {/* Unclaim Button Row - Full Width at Bottom */}
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                              }}
+                              disabled={reverseLoading[order.order_id]}
+                              className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            >
+                              {reverseLoading[order.order_id] ? (
+                                <>
+                                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
+                                  Unclaiming...
+                                </>
+                              ) : (
+                                'Unclaim Order'
+                              )}
+                            </Button>
                           </div>
                         </Card>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
@@ -2182,22 +2229,41 @@ export function VendorDashboard() {
                             <TableHead>Products</TableHead>
                             <TableHead className="w-16 text-center">Count</TableHead>
                             <TableHead>Status</TableHead>
+                            <TableHead>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {getFilteredOrdersForTab("my-orders").map((order, index) => (
-                            <TableRow key={`${order.order_id}-${index}`} className="group">
+                          {getFilteredOrdersForTab("my-orders").map((order, index) => {
+                            const hasLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === '1' || order.label_downloaded === true;
+                            return (
+                            <TableRow 
+                              key={`${order.order_id}-${index}`} 
+                              className={`group cursor-pointer transition-colors ${
+                                hasLabelDownloaded 
+                                  ? 'bg-green-50 hover:bg-green-100' 
+                                  : 'hover:bg-gray-50'
+                              }`}
+                              onClick={() => {
+                                if (selectedMyOrders.includes(order.order_id)) {
+                                  setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                                } else {
+                                  setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                                }
+                              }}
+                            >
                               <TableCell>
                                 <input
                                   type="checkbox"
                                   checked={selectedMyOrders.includes(order.order_id)}
                                   onChange={(e) => {
+                                    e.stopPropagation();
                                     if (e.target.checked) {
                                       setSelectedMyOrders([...selectedMyOrders, order.order_id])
                                     } else {
                                       setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
                                     }
                                   }}
+                                  onClick={(e) => e.stopPropagation()}
                                 />
                               </TableCell>
                               <TableCell className="font-medium">
@@ -2226,7 +2292,10 @@ export function VendorDashboard() {
                                               src={product.image || "/placeholder.svg"}
                                               alt={product.product_name}
                                               className="w-10 h-10 rounded-md object-cover flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
-                                              onClick={() => product.image && setSelectedImageProduct({url: product.image, title: product.product_name || "Product Image"})}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                product.image && setSelectedImageProduct({url: product.image, title: product.product_name || "Product Image"})
+                                              }}
                                               onError={(e) => {
                                                 e.currentTarget.src = "/placeholder.svg";
                                               }}
@@ -2265,8 +2334,30 @@ export function VendorDashboard() {
                                 </div>
                               </TableCell>
                               <TableCell>{getStatusBadge(order.status)}</TableCell>
+                              <TableCell>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive" 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                  }}
+                                  disabled={reverseLoading[order.order_id]}
+                                  className="text-xs px-3 py-1 h-8"
+                                >
+                                  {reverseLoading[order.order_id] ? (
+                                    <>
+                                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                      Loading...
+                                    </>
+                                  ) : (
+                                    'Unclaim'
+                                  )}
+                                </Button>
+                              </TableCell>
                             </TableRow>
-                          ))}
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </div>
@@ -2316,64 +2407,64 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                    <div className="rounded-md border">
-                      <Table>
-                        <TableHeader className="sticky top-0 bg-white z-30">
-                          <TableRow>
-                            <TableHead>Image</TableHead>
-                            <TableHead>Order ID</TableHead>
-                            <TableHead>Order Date</TableHead>
-                            <TableHead>Product Name</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Actions</TableHead>
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-white z-30">
+                        <TableRow>
+                          <TableHead>Image</TableHead>
+                          <TableHead>Order ID</TableHead>
+                          <TableHead>Order Date</TableHead>
+                          <TableHead>Product Name</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {getFilteredOrdersForTab("handover").map((order, index) => (
+                          <TableRow key={`${order.order_id}-${index}`}>
+                            <TableCell>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <img
+                                      src={order.product_image || "/placeholder.svg"}
+                                      alt={order.product_name || order.product}
+                                      className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                      onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
+                                      onError={(e) => {
+                                        e.currentTarget.src = "/placeholder.svg";
+                                      }}
+                                    />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Click to view full image</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableCell>
+                            <TableCell className="font-medium">{order.order_id}</TableCell>
+                            <TableCell>
+                              {order.order_date ? (
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-medium">
+                                    {new Date(order.order_date).toLocaleDateString()}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {new Date(order.order_date).toLocaleTimeString()}
+                                  </span>
+                                </div>
+                              ) : "N/A"}
+                            </TableCell>
+                            <TableCell>{order.product_name || order.product}</TableCell>
+                            <TableCell>{getStatusBadge(order.status)}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline">Ready for Pickup</Badge>
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {getFilteredOrdersForTab("handover").map((order, index) => (
-                            <TableRow key={`${order.order_id}-${index}`}>
-                              <TableCell>
-                                <TooltipProvider>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <img
-                                        src={order.product_image || "/placeholder.svg"}
-                                        alt={order.product_name || order.product}
-                                        className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                        onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
-                                        onError={(e) => {
-                                          e.currentTarget.src = "/placeholder.svg";
-                                        }}
-                                      />
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                      <p>Click to view full image</p>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              </TableCell>
-                              <TableCell className="font-medium">{order.order_id}</TableCell>
-                              <TableCell>
-                                {order.order_date ? (
-                                  <div className="flex flex-col">
-                                    <span className="text-sm font-medium">
-                                      {new Date(order.order_date).toLocaleDateString()}
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                      {new Date(order.order_date).toLocaleTimeString()}
-                                    </span>
-                                  </div>
-                                ) : "N/A"}
-                              </TableCell>
-                              <TableCell>{order.product_name || order.product}</TableCell>
-                              <TableCell>{getStatusBadge(order.status)}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline">Ready for Pickup</Badge>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                   )}
                 </TabsContent>
               </div>
@@ -2494,7 +2585,7 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <CheckCircle className="w-5 h-5 mr-2" />
-                            Ready ({selectedMyOrders.length})
+                            Ready ({getReadyOrdersQuantitySum()})
                           </>
                         )}
                       </Button>
@@ -2569,11 +2660,11 @@ export function VendorDashboard() {
                 <div>
                   <Label htmlFor="upi-id" className={`${isMobile ? 'text-sm' : ''}`}>UPI ID for Settlement</Label>
                   <div className="relative">
-                    <Input
-                      id="upi-id"
+                  <Input
+                    id="upi-id"
                       placeholder={isMobile ? "Enter UPI ID" : "Enter your UPI ID (e.g., user@paytm)"}
-                      value={upiId}
-                      onChange={(e) => setUpiId(e.target.value)}
+                    value={upiId}
+                    onChange={(e) => setUpiId(e.target.value)}
                       className={`${isMobile ? 'text-sm' : ''} pr-10`}
                     />
                     {upiId && (
@@ -2891,27 +2982,27 @@ export function VendorDashboard() {
           ) : (
             // Desktop view
             <>
-              <DialogHeader>
-                <DialogTitle>
-                  {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
-                </DialogTitle>
-              </DialogHeader>
+          <DialogHeader>
+            <DialogTitle>
+              {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
+            </DialogTitle>
+          </DialogHeader>
               <div className="flex items-center justify-center p-4">
-                {selectedImageProduct ? (
-                  <img
-                    src={selectedImageProduct.url}
-                    alt={selectedImageProduct.title}
-                    className="max-w-full max-h-[70vh] object-contain rounded-lg"
-                    onError={(e) => {
-                      e.currentTarget.src = "/placeholder.svg";
-                    }}
-                  />
-                ) : (
+            {selectedImageProduct ? (
+              <img
+                src={selectedImageProduct.url}
+                alt={selectedImageProduct.title}
+                className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                onError={(e) => {
+                  e.currentTarget.src = "/placeholder.svg";
+                }}
+              />
+            ) : (
                   <div className="flex items-center justify-center h-[60vh] text-gray-500">
-                    No image available
-                  </div>
-                )}
+                No image available
               </div>
+            )}
+          </div>
             </>
           )}
         </DialogContent>
