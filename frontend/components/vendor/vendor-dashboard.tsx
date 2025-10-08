@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Menu,
   X,
+  ChevronUp,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -191,6 +192,9 @@ export function VendorDashboard() {
   const [ordersError, setOrdersError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [ordersRefreshing, setOrdersRefreshing] = useState(false);
+
+  // Ref for scrollable content area
+  const scrollableContentRef = useRef<HTMLDivElement>(null);
 
   // Grouped orders for My Orders tab
   const [groupedOrders, setGroupedOrders] = useState<any[]>([]);
@@ -1427,6 +1431,15 @@ export function VendorDashboard() {
     }
   }
 
+  const scrollToTop = () => {
+    if (scrollableContentRef.current) {
+      scrollableContentRef.current.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+    }
+  };
+
   const handleRefreshOrders = async () => {
     setOrdersRefreshing(true);
     try {
@@ -1749,14 +1762,14 @@ export function VendorDashboard() {
                   </div>
                   
                   {/* Tab-specific Actions */}
-                  {activeTab === "all-orders" && (
+                  {activeTab === "all-orders" && !isMobile && (
                     <Button 
                       onClick={() => handleBulkClaimOrders()} 
                       disabled={selectedUnclaimedOrders.length === 0} 
-                      className={`h-10 text-sm ${isMobile ? 'w-full' : 'whitespace-nowrap px-6 min-w-fit'}`}
+                      className="h-10 text-sm whitespace-nowrap px-6 min-w-fit"
                     >
                       <Package className="w-4 h-4 mr-2" />
-                      {isMobile ? `Claim (${selectedUnclaimedOrders.length})` : `Claim Selected (${selectedUnclaimedOrders.length})`}
+                      Claim Selected ({selectedUnclaimedOrders.length})
                     </Button>
                   )}
                   
@@ -1828,7 +1841,10 @@ export function VendorDashboard() {
               </div>
 
               {/* Scrollable Content Section */}
-              <div className={`${isMobile ? 'max-h-[500px]' : 'max-h-[600px]'} overflow-y-auto relative`}>
+              <div 
+                ref={scrollableContentRef}
+                className={`${isMobile ? 'max-h-[calc(100vh-280px)] pb-20' : 'max-h-[600px]'} overflow-y-auto relative`}
+              >
                 <TabsContent value="all-orders" className="mt-0">
                   {/* Mobile Card Layout */}
                   {isMobile ? (
@@ -2426,6 +2442,33 @@ export function VendorDashboard() {
                   )}
                 </TabsContent>
               </div>
+
+              {/* Fixed Bottom Bulk Claim Button for Mobile All Orders */}
+              {isMobile && activeTab === "all-orders" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-50">
+                  <div className="flex items-center gap-3">
+                    {/* Move to Top Button */}
+                    <Button
+                      onClick={scrollToTop}
+                      variant="outline"
+                      size="sm"
+                      className="h-10 w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50"
+                    >
+                      <ChevronUp className="w-4 h-4" />
+                    </Button>
+                    
+                    {/* Bulk Claim Button */}
+                    <Button 
+                      onClick={() => handleBulkClaimOrders()} 
+                      disabled={selectedUnclaimedOrders.length === 0} 
+                      className="flex-1 h-12 text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg"
+                    >
+                      <Package className="w-5 h-5 mr-2" />
+                      Claim Selected ({selectedUnclaimedOrders.length})
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Tabs>
           </CardContent>
         </Card>
