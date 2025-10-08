@@ -31,9 +31,12 @@ import {
   Calendar,
   Settings,
   RefreshCw,
+  Menu,
+  X,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
+import { useDeviceType } from "@/hooks/use-mobile"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DatePicker } from "@/components/ui/date-picker"
 import { apiClient } from "@/lib/api"
@@ -145,6 +148,8 @@ import { apiClient } from "@/lib/api"
 export function VendorDashboard() {
   const { user, logout } = useAuth()
   const { toast } = useToast()
+  const { isMobile, isTablet, isDesktop, deviceType } = useDeviceType()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("all-orders")
   
   // Separate filters for each tab
@@ -495,12 +500,22 @@ export function VendorDashboard() {
 
   const handleMarkReady = async (orderId: string) => {
     try {
+      const vendorToken = localStorage.getItem('vendorToken');
+      if (!vendorToken) {
+        toast({
+          title: "Authentication Error",
+          description: "Vendor token not found. Please login again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
       const response = await fetch(`${API_BASE_URL}/orders/mark-ready`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': localStorage.getItem('authHeader') || '',
+          'Authorization': vendorToken,
         },
         body: JSON.stringify({ order_id: orderId }),
       });
@@ -541,6 +556,16 @@ export function VendorDashboard() {
       return;
     }
 
+    const vendorToken = localStorage.getItem('vendorToken');
+    if (!vendorToken) {
+      toast({
+        title: "Authentication Error",
+        description: "Vendor token not found. Please login again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setBulkMarkReadyLoading(true);
     try {
       const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -548,7 +573,7 @@ export function VendorDashboard() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': localStorage.getItem('authHeader') || '',
+          'Authorization': vendorToken,
         },
         body: JSON.stringify({ order_ids: selectedMyOrders }),
       });
@@ -1458,109 +1483,175 @@ export function VendorDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - Single Row Layout */}
+      {/* Header - Mobile Responsive Layout */}
       <div className="bg-white shadow-sm border-b sticky top-0 z-50 w-full">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between py-4 gap-4">
             {/* Dashboard Name and Welcome */}
-            <div className="flex items-center gap-4 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
                 <Settings className="w-5 h-5 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-xl font-bold text-gray-900 truncate">Clamio - Vendor</h1>
-                <p className="text-sm text-gray-600 truncate">
-                  Welcome back, {user?.name}
-                </p>
+                <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-lg' : 'text-xl'}`}>
+                  {isMobile ? 'Vendor' : 'Clamio - Vendor'}
+                </h1>
+                {!isMobile && (
+                  <p className="text-sm text-gray-600 truncate">
+                    Welcome back, {user?.name}
+                  </p>
+                )}
               </div>
             </div>
-            {/* Vendor Address */}
-            <div className="flex-1 flex flex-col items-end min-w-0">
-              {addressLoading ? (
-                <span className="text-xs text-gray-400">Loading address...</span>
-              ) : addressError ? (
-                <span className="text-xs text-red-500">{addressError}</span>
-              ) : vendorAddress ? (
-                <div className="text-right truncate">
-                  <div className="text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
-                  <div className="text-xs text-gray-700 truncate">{vendorAddress.address}</div>
-                  <div className="text-xs text-gray-700 truncate">{vendorAddress.city}, {vendorAddress.pincode}</div>
+
+            {/* Desktop/Tablet - Vendor Address and Logout */}
+            {!isMobile && (
+              <>
+                {/* Vendor Address */}
+                <div className="flex-1 flex flex-col items-end min-w-0">
+                  {addressLoading ? (
+                    <span className="text-xs text-gray-400">Loading address...</span>
+                  ) : addressError ? (
+                    <span className="text-xs text-red-500">{addressError}</span>
+                  ) : vendorAddress ? (
+                    <div className="text-right truncate">
+                      <div className="text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
+                      <div className="text-xs text-gray-700 truncate">{vendorAddress.address}</div>
+                      <div className="text-xs text-gray-700 truncate">{vendorAddress.city}, {vendorAddress.pincode}</div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-            {/* Logout Button */}
-            <div className="flex-shrink-0">
-              <Button variant="outline" onClick={logout}>
-                <LogOut className="w-4 h-4 mr-2" />
-                Logout
+                {/* Logout Button */}
+                <div className="flex-shrink-0">
+                  <Button variant="outline" onClick={logout}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    {isDesktop && 'Logout'}
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {/* Mobile Menu Button */}
+            {isMobile && (
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="p-2"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </Button>
-            </div>
+            )}
           </div>
+
+          {/* Mobile Menu */}
+          {isMobile && isMobileMenuOpen && (
+            <div className="border-t bg-white py-4">
+              <div className="space-y-3">
+                <div className="px-2">
+                  <p className="text-sm text-gray-600 truncate">Welcome, {user?.name}</p>
+                  <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+                </div>
+                
+                {/* Vendor Address in Mobile Menu */}
+                {addressLoading ? (
+                  <div className="px-2">
+                    <span className="text-xs text-gray-400">Loading address...</span>
+                  </div>
+                ) : addressError ? (
+                  <div className="px-2">
+                    <span className="text-xs text-red-500">{addressError}</span>
+                  </div>
+                ) : vendorAddress ? (
+                  <div className="px-2 border-t pt-3">
+                    <div className="text-xs text-gray-900 font-semibold">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
+                    <div className="text-xs text-gray-700">{vendorAddress.address}</div>
+                    <div className="text-xs text-gray-700">{vendorAddress.city}, {vendorAddress.pincode}</div>
+                  </div>
+                ) : null}
+
+                <Button 
+                  variant="outline" 
+                  onClick={logout} 
+                  className="w-full flex items-center justify-center gap-2"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Logout
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className={`grid gap-4 md:gap-6 mb-6 md:mb-8 ${
+          isMobile ? 'grid-cols-2' : 
+          isTablet ? 'grid-cols-2' : 
+          'grid-cols-4'
+        }`}>
           <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
-            <CardContent className="p-6">
+            <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-blue-100 opacity-90">All Orders</p>
-                  <p className="text-2xl font-bold mt-1">
+                  <p className={`font-medium text-blue-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>All Orders</p>
+                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
                     {orders.filter((o) => o.status === "unclaimed").length}
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                  <Package className="w-6 h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
+                  <Package className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
-            <CardContent className="p-6">
+            <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-green-100 opacity-90">My Orders</p>
-                  <p className="text-2xl font-bold mt-1">
+                  <p className={`font-medium text-green-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>My Orders</p>
+                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
                     {orders.filter((o) => o.status === "claimed" && o.claimed_by === user?.warehouseId).length}
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                  <CheckCircle className="w-6 h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
+                  <CheckCircle className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
-            <CardContent className="p-6">
+            <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-orange-100 opacity-90">Handover</p>
-                  <p className="text-2xl font-bold mt-1">
+                  <p className={`font-medium text-orange-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Handover</p>
+                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
                     {orders.filter((o) => o.status === "ready_for_handover" && o.claimed_by === user?.warehouseId && o.is_manifest === 1).length}
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                  <Upload className="w-6 h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
+                  <Upload className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-shadow" onClick={() => setShowRevenueModal(true)}>
-            <CardContent className="p-6">
+            <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-purple-100 opacity-90">Revenue (Click to Claim)</p>
-                  <p className="text-2xl font-bold mt-1">
-                    {paymentsLoading ? "Loading..." : payments ? `₹${payments.currentPayment.toFixed(2)}` : "₹0.00"}
+                  <p className={`font-medium text-purple-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                    {isMobile ? 'Revenue' : 'Revenue (Click to Claim)'}
+                  </p>
+                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
+                    {paymentsLoading ? "..." : payments ? `₹${payments.currentPayment.toFixed(2)}` : "₹0.00"}
                   </p>
                 </div>
-                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                  <IndianRupee className="w-6 h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
+                  <IndianRupee className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1570,26 +1661,27 @@ export function VendorDashboard() {
         {/* Main Content */}
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className={`flex ${isMobile ? 'flex-col space-y-3' : 'items-center justify-between'}`}>
               <div>
-                <CardTitle>Order Management</CardTitle>
-                <CardDescription>Manage your orders across different stages</CardDescription>
+                <CardTitle className={`${isMobile ? 'text-lg' : 'text-xl'}`}>Order Management</CardTitle>
+                {!isMobile && <CardDescription>Manage your orders across different stages</CardDescription>}
               </div>
               <Button
                 onClick={handleRefreshOrders}
                 disabled={ordersRefreshing}
                 variant="outline"
-                className="h-10"
+                className={`${isMobile ? 'w-full' : ''} h-10`}
+                size={isMobile ? 'default' : 'default'}
               >
                 {ordersRefreshing ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                    Refreshing...
+                    {isMobile ? 'Refreshing...' : 'Refreshing...'}
                   </>
                 ) : (
                   <>
                     <RefreshCw className="w-4 h-4 mr-2" />
-                    Refresh Orders
+                    {isMobile ? 'Refresh' : 'Refresh Orders'}
                   </>
                 )}
               </Button>
@@ -1598,21 +1690,21 @@ export function VendorDashboard() {
           <CardContent>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Fixed Controls Section */}
-              <div className="sticky top-20 bg-white z-40 pb-4 border-b mb-4">
-                <TabsList className="grid w-full grid-cols-3 mb-6">
-                  <TabsTrigger value="all-orders">
-                    All Orders ({getFilteredOrdersForTab("all-orders").length})
+              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-4 border-b mb-4`}>
+                <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-4' : 'mb-6'}`}>
+                  <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
+                    {isMobile ? `All (${getFilteredOrdersForTab("all-orders").length})` : `All Orders (${getFilteredOrdersForTab("all-orders").length})`}
                   </TabsTrigger>
-                  <TabsTrigger value="my-orders">
-                    My Orders ({getFilteredOrdersForTab("my-orders").length})
+                  <TabsTrigger value="my-orders" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
+                    {isMobile ? `Mine (${getFilteredOrdersForTab("my-orders").length})` : `My Orders (${getFilteredOrdersForTab("my-orders").length})`}
                   </TabsTrigger>
-                  <TabsTrigger value="handover">
-                    Handover ({getFilteredOrdersForTab("handover").length})
+                  <TabsTrigger value="handover" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
+                    {isMobile ? `Hand (${getFilteredOrdersForTab("handover").length})` : `Handover (${getFilteredOrdersForTab("handover").length})`}
                   </TabsTrigger>
                 </TabsList>
 
                 {/* Filters */}
-                <div className="flex flex-col sm:flex-row gap-4 mb-6 items-center">
+                <div className={`flex flex-col gap-3 mb-4 md:mb-6 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
                   <div className="flex-1 min-w-0">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -1624,19 +1716,19 @@ export function VendorDashboard() {
                       />
                     </div>
                   </div>
-                  <div className="flex gap-3 items-center">
+                  <div className={`flex gap-2 items-center ${isMobile ? 'flex-wrap' : ''}`}>
                     <DatePicker
                       date={getCurrentTabFilters().dateFrom}
                       onDateChange={(date) => updateCurrentTabFilter('dateFrom', date)}
-                      placeholder="From date"
-                      className="w-40"
+                      placeholder={isMobile ? "From" : "From date"}
+                      className={`${isMobile ? 'flex-1 min-w-[120px]' : 'w-40'}`}
                     />
                     <span className="text-gray-500 text-sm px-1">to</span>
                     <DatePicker
                       date={getCurrentTabFilters().dateTo}
                       onDateChange={(date) => updateCurrentTabFilter('dateTo', date)}
-                      placeholder="To date"
-                      className="w-40"
+                      placeholder={isMobile ? "To" : "To date"}
+                      className={`${isMobile ? 'flex-1 min-w-[120px]' : 'w-40'}`}
                     />
                   </div>
                   
@@ -1645,17 +1737,17 @@ export function VendorDashboard() {
                     <Button 
                       onClick={() => handleBulkClaimOrders()} 
                       disabled={selectedUnclaimedOrders.length === 0} 
-                      className="h-10 whitespace-nowrap px-6 text-sm min-w-fit"
+                      className={`h-10 text-sm ${isMobile ? 'w-full' : 'whitespace-nowrap px-6 min-w-fit'}`}
                     >
                       <Package className="w-4 h-4 mr-2" />
-                      Claim Selected ({selectedUnclaimedOrders.length})
+                      {isMobile ? `Claim (${selectedUnclaimedOrders.length})` : `Claim Selected (${selectedUnclaimedOrders.length})`}
                     </Button>
                   )}
                   
                   {activeTab === "my-orders" && (
-                    <div className="flex gap-3 items-center">
+                    <div className={`flex gap-2 ${isMobile ? 'flex-col' : 'items-center'}`}>
                       <Select value={labelFormat} onValueChange={setLabelFormat}>
-                        <SelectTrigger className="w-36 h-10 text-sm">
+                        <SelectTrigger className={`h-10 text-sm ${isMobile ? 'w-full' : 'w-36'}`}>
                           <SelectValue placeholder="Label Format" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1667,17 +1759,17 @@ export function VendorDashboard() {
                       <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
                         disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
-                        className="h-10 whitespace-nowrap px-6 text-sm min-w-fit"
+                        className={`h-10 text-sm ${isMobile ? 'w-full' : 'whitespace-nowrap px-6 min-w-fit'}`}
                       >
                         {bulkDownloadLoading ? (
                           <>
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            Generating...
+                            {isMobile ? 'Generating...' : 'Generating...'}
                           </>
                         ) : (
                           <>
                             <Download className="w-4 h-4 mr-2" />
-                            Download ({selectedMyOrders.length})
+                            {isMobile ? `Download (${selectedMyOrders.length})` : `Download (${selectedMyOrders.length})`}
                           </>
                         )}
                       </Button>
@@ -1691,7 +1783,7 @@ export function VendorDashboard() {
                             .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
                         }
                         variant="outline"
-                        className="h-10 whitespace-nowrap px-6 text-sm min-w-fit"
+                        className={`h-10 text-sm ${isMobile ? 'w-full' : 'whitespace-nowrap px-6 min-w-fit'}`}
                         title={
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -1703,12 +1795,12 @@ export function VendorDashboard() {
                         {bulkMarkReadyLoading ? (
                           <>
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                            Processing...
+                            {isMobile ? 'Processing...' : 'Processing...'}
                           </>
                         ) : (
                           <>
                             <CheckCircle className="w-4 h-4 mr-2" />
-                            Mark Ready ({selectedMyOrders.length})
+                            {isMobile ? `Mark Ready (${selectedMyOrders.length})` : `Mark Ready (${selectedMyOrders.length})`}
                           </>
                         )}
                       </Button>
@@ -1720,42 +1812,34 @@ export function VendorDashboard() {
               </div>
 
               {/* Scrollable Content Section */}
-              <div className="max-h-[600px] overflow-y-auto relative">
+              <div className={`${isMobile ? 'max-h-[500px]' : 'max-h-[600px]'} overflow-y-auto relative`}>
                 <TabsContent value="all-orders" className="mt-0">
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
-                        <TableRow>
-                          <TableHead className="w-12">
-                            <input
-                              type="checkbox"
-                              onChange={(e) => {
-                                const unclaimedOrders = getFilteredOrdersForTab("all-orders")
-                                if (e.target.checked) {
-                                  setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.unique_id))
-                                } else {
-                                  setSelectedUnclaimedOrders([])
-                                }
-                              }}
-                              checked={
-                                selectedUnclaimedOrders.length > 0 &&
-                                selectedUnclaimedOrders.length === getFilteredOrdersForTab("all-orders").length
-                              }
-                            />
-                          </TableHead>
-                          <TableHead>Image</TableHead>
-                          <TableHead>Order ID</TableHead>
-                          <TableHead>Order Date</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead>Product Code</TableHead>
-                          <TableHead>Value</TableHead>
-                          <TableHead>Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredOrdersForTab("all-orders").map((order, index) => (
-                          <TableRow key={`${order.unique_id}-${index}`}>
-                            <TableCell>
+                  {/* Mobile Card Layout */}
+                  {isMobile ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center p-3 bg-gray-50 rounded-lg sticky top-0 z-30">
+                        <input
+                          type="checkbox"
+                          onChange={(e) => {
+                            const unclaimedOrders = getFilteredOrdersForTab("all-orders")
+                            if (e.target.checked) {
+                              setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.unique_id))
+                            } else {
+                              setSelectedUnclaimedOrders([])
+                            }
+                          }}
+                          checked={
+                            selectedUnclaimedOrders.length > 0 &&
+                            selectedUnclaimedOrders.length === getFilteredOrdersForTab("all-orders").length
+                          }
+                          className="mr-2"
+                        />
+                        <span className="text-sm font-medium">Select All</span>
+                      </div>
+                      {getFilteredOrdersForTab("all-orders").map((order, index) => (
+                        <Card key={`${order.unique_id}-${index}`} className="p-3">
+                          <div className="space-y-3">
+                            <div className="flex items-start gap-3">
                               <input
                                 type="checkbox"
                                 checked={selectedUnclaimedOrders.includes(order.unique_id)}
@@ -1766,54 +1850,141 @@ export function VendorDashboard() {
                                     setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
                                   }
                                 }}
+                                className="mt-1"
                               />
-                            </TableCell>
-                            <TableCell>
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <img
-                                      src={order.product_image || "/placeholder.svg"}
-                                      alt={order.product_name}
-                                      className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                      onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})}
-                                      onError={(e) => {
-                                        e.currentTarget.src = "/placeholder.svg";
-                                      }}
-                                    />
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>Click to view full image</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </TableCell>
-                            <TableCell className="font-medium">{order.order_id}</TableCell>
-                            <TableCell>
-                              {order.order_date ? (
-                                <div className="flex flex-col">
-                                  <span className="text-sm font-medium">
-                                    {new Date(order.order_date).toLocaleDateString()}
-                                  </span>
-                                  <span className="text-xs text-gray-500">
-                                    {new Date(order.order_date).toLocaleTimeString()}
-                                  </span>
-                                </div>
-                              ) : "N/A"}
-                            </TableCell>
-                            <TableCell>{order.product_name}</TableCell>
-                            <TableCell>{order.product_code}</TableCell>
-                            <TableCell>{order.value || "-"}</TableCell>
-                            <TableCell>
-                              <Button size="sm" onClick={() => handleClaimOrder(order.unique_id)}>
-                                Claim
-                              </Button>
-                            </TableCell>
+                              <img
+                                src={order.product_image || "/placeholder.svg"}
+                                alt={order.product_name}
+                                className="w-16 h-16 rounded-lg object-cover cursor-pointer"
+                                onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})}
+                                onError={(e) => {
+                                  e.currentTarget.src = "/placeholder.svg";
+                                }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-medium text-sm truncate">{order.order_id}</h4>
+                                <p className="text-xs text-gray-600 truncate">{order.product_name}</p>
+                                <p className="text-xs text-gray-500 truncate">Code: {order.product_code}</p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <span className="text-gray-500">Date:</span>
+                                <p className="font-medium">
+                                  {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                </p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Value:</span>
+                                <p className="font-medium">{order.value || "-"}</p>
+                              </div>
+                            </div>
+                            <Button 
+                              size="sm" 
+                              onClick={() => handleClaimOrder(order.unique_id)}
+                              className="w-full"
+                            >
+                              Claim Order
+                            </Button>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    /* Desktop/Tablet Table Layout */
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-white z-30">
+                          <TableRow>
+                            <TableHead className="w-12">
+                              <input
+                                type="checkbox"
+                                onChange={(e) => {
+                                  const unclaimedOrders = getFilteredOrdersForTab("all-orders")
+                                  if (e.target.checked) {
+                                    setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.unique_id))
+                                  } else {
+                                    setSelectedUnclaimedOrders([])
+                                  }
+                                }}
+                                checked={
+                                  selectedUnclaimedOrders.length > 0 &&
+                                  selectedUnclaimedOrders.length === getFilteredOrdersForTab("all-orders").length
+                                }
+                              />
+                            </TableHead>
+                            <TableHead>Image</TableHead>
+                            <TableHead>Order ID</TableHead>
+                            <TableHead>Order Date</TableHead>
+                            <TableHead>Product</TableHead>
+                            <TableHead>Product Code</TableHead>
+                            <TableHead>Value</TableHead>
+                            <TableHead>Action</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {getFilteredOrdersForTab("all-orders").map((order, index) => (
+                            <TableRow key={`${order.unique_id}-${index}`}>
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedUnclaimedOrders.includes(order.unique_id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
+                                    } else {
+                                      setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
+                                    }
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <img
+                                        src={order.product_image || "/placeholder.svg"}
+                                        alt={order.product_name}
+                                        className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                        onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})}
+                                        onError={(e) => {
+                                          e.currentTarget.src = "/placeholder.svg";
+                                        }}
+                                      />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Click to view full image</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </TableCell>
+                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell>
+                                {order.order_date ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">
+                                      {new Date(order.order_date).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(order.order_date).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+                                ) : "N/A"}
+                              </TableCell>
+                              <TableCell>{order.product_name}</TableCell>
+                              <TableCell>{order.product_code}</TableCell>
+                              <TableCell>{order.value || "-"}</TableCell>
+                              <TableCell>
+                                <Button size="sm" onClick={() => handleClaimOrder(order.unique_id)}>
+                                  Claim
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="my-orders" className="mt-0">
@@ -1828,7 +1999,127 @@ export function VendorDashboard() {
                     <div className="flex items-center justify-center p-8">
                       <p className="text-red-500">{groupedOrdersError}</p>
                     </div>
+                  ) : isMobile ? (
+                    /* Mobile Card Layout */
+                    <div className="space-y-3">
+                      <div className="flex items-center p-3 bg-gray-50 rounded-lg sticky top-0 z-30">
+                        <input
+                          type="checkbox"
+                          onChange={(e) => {
+                            const myOrders = getFilteredOrdersForTab("my-orders")
+                            if (e.target.checked) {
+                              setSelectedMyOrders(myOrders.map((o) => o.order_id))
+                            } else {
+                              setSelectedMyOrders([])
+                            }
+                          }}
+                          checked={
+                            selectedMyOrders.length > 0 &&
+                            selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
+                          }
+                          className="mr-2"
+                        />
+                        <span className="text-sm font-medium">Select All</span>
+                      </div>
+                      {getFilteredOrdersForTab("my-orders").map((order, index) => (
+                        <Card key={`${order.order_id}-${index}`} className="p-3">
+                          <div className="space-y-3">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-start gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedMyOrders.includes(order.order_id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                                    } else {
+                                      setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                                    }
+                                  }}
+                                  className="mt-1"
+                                />
+                                <div>
+                                  <h4 className="font-medium text-sm">{order.order_id}</h4>
+                                  <p className="text-xs text-gray-500">
+                                    {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                  </p>
+                                  {getStatusBadge(order.status)}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-xs text-gray-500">Total</div>
+                                <div className="font-medium text-green-600">₹{order.total_value.toFixed(2)}</div>
+                                <div className="text-xs text-blue-600 font-semibold">{order.total_products} items</div>
+                              </div>
+                            </div>
+                            
+                            <div className="space-y-2">
+                              {order.products.map((product: any) => (
+                                <div key={product.unique_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                                  <img
+                                    src={product.image || "/placeholder.svg"}
+                                    alt={product.product_name}
+                                    className="w-10 h-10 rounded-md object-cover cursor-pointer"
+                                    onClick={() => product.image && setSelectedImageProduct({url: product.image, title: product.product_name || "Product Image"})}
+                                    onError={(e) => {
+                                      e.currentTarget.src = "/placeholder.svg";
+                                    }}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium truncate">{product.product_name}</p>
+                                    <p className="text-xs text-gray-500 truncate">Code: {product.product_code || "N/A"}</p>
+                                  </div>
+                                  <div className="text-xs font-medium">₹{product.value || 0}</div>
+                                </div>
+                              ))}
+                            </div>
+                            
+                            <div className="flex flex-col gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDownloadLabel(order.order_id, labelFormat)}
+                                disabled={labelDownloadLoading[order.order_id] || bulkDownloadLoading}
+                                className="w-full text-xs"
+                              >
+                                {labelDownloadLoading[order.order_id] ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-1"></div>
+                                    Loading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3 mr-1" />
+                                    Download Label
+                                  </>
+                                )}
+                              </Button>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Button 
+                                  size="sm" 
+                                  onClick={() => handleMarkReady(order.order_id)}
+                                  disabled={!order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false}
+                                  className="text-xs"
+                                >
+                                  Mark Ready
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive" 
+                                  onClick={() => handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id))}
+                                  disabled={reverseLoading[order.order_id]}
+                                  className="text-xs"
+                                >
+                                  {reverseLoading[order.order_id] ? 'Reversing...' : 'Reverse'}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
                   ) : (
+                    /* Desktop/Tablet Table Layout */
                     <div className="rounded-md border">
                       <Table>
                         <TableHeader className="sticky top-0 bg-white z-30">
@@ -1997,64 +2288,107 @@ export function VendorDashboard() {
                 </TabsContent>
 
                 <TabsContent value="handover" className="mt-0">
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
-                        <TableRow>
-                          <TableHead>Image</TableHead>
-                          <TableHead>Order ID</TableHead>
-                          <TableHead>Order Date</TableHead>
-                          <TableHead>Product Name</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredOrdersForTab("handover").map((order, index) => (
-                          <TableRow key={`${order.order_id}-${index}`}>
-                            <TableCell>
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <img
-                                      src={order.product_image || "/placeholder.svg"}
-                                      alt={order.product_name || order.product}
-                                      className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                      onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
-                                      onError={(e) => {
-                                        e.currentTarget.src = "/placeholder.svg";
-                                      }}
-                                    />
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>Click to view full image</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </TableCell>
-                            <TableCell className="font-medium">{order.order_id}</TableCell>
-                            <TableCell>
-                              {order.order_date ? (
-                                <div className="flex flex-col">
-                                  <span className="text-sm font-medium">
-                                    {new Date(order.order_date).toLocaleDateString()}
-                                  </span>
-                                  <span className="text-xs text-gray-500">
-                                    {new Date(order.order_date).toLocaleTimeString()}
-                                  </span>
+                  {/* Mobile Card Layout */}
+                  {isMobile ? (
+                    <div className="space-y-3">
+                      {getFilteredOrdersForTab("handover").map((order, index) => (
+                        <Card key={`${order.order_id}-${index}`} className="p-3">
+                          <div className="space-y-3">
+                            <div className="flex items-start gap-3">
+                              <img
+                                src={order.product_image || "/placeholder.svg"}
+                                alt={order.product_name || order.product}
+                                className="w-16 h-16 rounded-lg object-cover cursor-pointer"
+                                onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
+                                onError={(e) => {
+                                  e.currentTarget.src = "/placeholder.svg";
+                                }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-medium text-sm truncate">{order.order_id}</h4>
+                                <p className="text-xs text-gray-600 truncate">{order.product_name || order.product}</p>
+                                <div className="mt-1">
+                                  {getStatusBadge(order.status)}
                                 </div>
-                              ) : "N/A"}
-                            </TableCell>
-                            <TableCell>{order.product_name || order.product}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline">Ready for Pickup</Badge>
-                            </TableCell>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div>
+                                <span className="text-gray-500">Date:</span>
+                                <p className="font-medium">
+                                  {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                </p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Status:</span>
+                                <Badge variant="outline" className="text-xs mt-1">Ready for Pickup</Badge>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    /* Desktop/Tablet Table Layout */
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-white z-30">
+                          <TableRow>
+                            <TableHead>Image</TableHead>
+                            <TableHead>Order ID</TableHead>
+                            <TableHead>Order Date</TableHead>
+                            <TableHead>Product Name</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Actions</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {getFilteredOrdersForTab("handover").map((order, index) => (
+                            <TableRow key={`${order.order_id}-${index}`}>
+                              <TableCell>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <img
+                                        src={order.product_image || "/placeholder.svg"}
+                                        alt={order.product_name || order.product}
+                                        className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                        onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
+                                        onError={(e) => {
+                                          e.currentTarget.src = "/placeholder.svg";
+                                        }}
+                                      />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Click to view full image</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </TableCell>
+                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell>
+                                {order.order_date ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">
+                                      {new Date(order.order_date).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(order.order_date).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+                                ) : "N/A"}
+                              </TableCell>
+                              <TableCell>{order.product_name || order.product}</TableCell>
+                              <TableCell>{getStatusBadge(order.status)}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline">Ready for Pickup</Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </TabsContent>
               </div>
             </Tabs>
@@ -2063,81 +2397,84 @@ export function VendorDashboard() {
       </div>
 
       <Dialog open={showRevenueModal} onOpenChange={setShowRevenueModal}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh]' : 'max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
           <DialogHeader>
-            <DialogTitle>Revenue Management</DialogTitle>
-            <DialogDescription>Claim your revenue and view settlement history</DialogDescription>
+            <DialogTitle className={`${isMobile ? 'text-lg' : 'text-xl'}`}>Revenue Management</DialogTitle>
+            {!isMobile && <DialogDescription>Claim your revenue and view settlement history</DialogDescription>}
           </DialogHeader>
-          <div className="space-y-6">
+          <div className={`${isMobile ? 'space-y-4' : 'space-y-6'}`}>
             {/* Payment Overview */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center text-green-600">
-                    <CreditCard className="w-5 h-5 mr-2" />
-                    Current Payment (Eligible)
+                <CardHeader className={`${isMobile ? 'p-4' : 'p-6'}`}>
+                  <CardTitle className={`flex items-center text-green-600 ${isMobile ? 'text-base' : 'text-lg'}`}>
+                    <CreditCard className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} mr-2`} />
+                    {isMobile ? 'Current' : 'Current Payment (Eligible)'}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold text-green-600">
+                <CardContent className={`${isMobile ? 'p-4 pt-0' : 'p-6 pt-0'}`}>
+                  <div className={`font-bold text-green-600 ${isMobile ? 'text-2xl' : 'text-3xl'}`}>
                     {paymentsLoading ? "Loading..." : payments ? `₹${payments.currentPayment.toFixed(2)}` : "₹0.00"}
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">From handover orders</p>
+                  <p className={`text-gray-500 mt-1 ${isMobile ? 'text-xs' : 'text-sm'}`}>From handover orders</p>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center text-blue-600">
-                    <Clock className="w-5 h-5 mr-2" />
-                    Future Payment (Pending)
+                <CardHeader className={`${isMobile ? 'p-4' : 'p-6'}`}>
+                  <CardTitle className={`flex items-center text-blue-600 ${isMobile ? 'text-base' : 'text-lg'}`}>
+                    <Clock className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} mr-2`} />
+                    {isMobile ? 'Future' : 'Future Payment (Pending)'}
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold text-blue-600">
+                <CardContent className={`${isMobile ? 'p-4 pt-0' : 'p-6 pt-0'}`}>
+                  <div className={`font-bold text-blue-600 ${isMobile ? 'text-2xl' : 'text-3xl'}`}>
                     {paymentsLoading ? "Loading..." : payments ? `₹${payments.futurePayment.toFixed(2)}` : "₹0.00"}
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">From packed orders</p>
+                  <p className={`text-gray-500 mt-1 ${isMobile ? 'text-xs' : 'text-sm'}`}>From packed orders</p>
                 </CardContent>
               </Card>
             </div>
 
             {/* Settlement Request */}
             <Card>
-              <CardHeader>
-                <CardTitle>Request Settlement</CardTitle>
-                <CardDescription>Only current payment amount is eligible for settlement</CardDescription>
+              <CardHeader className={`${isMobile ? 'p-4' : 'p-6'}`}>
+                <CardTitle className={`${isMobile ? 'text-base' : 'text-lg'}`}>Request Settlement</CardTitle>
+                {!isMobile && <CardDescription>Only current payment amount is eligible for settlement</CardDescription>}
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className={`${isMobile ? 'p-4 pt-0 space-y-3' : 'space-y-4'}`}>
                 <div>
-                  <Label htmlFor="upi-id">UPI ID for Settlement</Label>
+                  <Label htmlFor="upi-id" className={`${isMobile ? 'text-sm' : ''}`}>UPI ID for Settlement</Label>
                   <Input
                     id="upi-id"
-                    placeholder="Enter your UPI ID (e.g., user@paytm)"
+                    placeholder={isMobile ? "Enter UPI ID" : "Enter your UPI ID (e.g., user@paytm)"}
                     value={upiId}
                     onChange={(e) => setUpiId(e.target.value)}
+                    className={`${isMobile ? 'text-sm' : ''}`}
                   />
                 </div>
                 <Button 
                   onClick={handleClaimRevenue} 
                   className="w-full" 
+                  size={isMobile ? 'default' : 'default'}
                   disabled={!upiId.trim() || settlementLoading || !payments || payments.currentPayment <= 0}
                 >
                   <IndianRupee className="w-4 h-4 mr-2" />
-                  {settlementLoading ? "Processing..." : `Request Settlement (₹${payments ? payments.currentPayment.toFixed(2) : '0.00'})`}
+                  {settlementLoading ? "Processing..." : isMobile ? `Request (₹${payments ? payments.currentPayment.toFixed(2) : '0.00'})` : `Request Settlement (₹${payments ? payments.currentPayment.toFixed(2) : '0.00'})`}
                 </Button>
               </CardContent>
             </Card>
 
             {/* Settlement History */}
             <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <CardTitle>Settlement History</CardTitle>
+              <CardHeader className={`${isMobile ? 'p-4' : 'p-6'}`}>
+                <div className={`flex ${isMobile ? 'flex-col gap-3' : 'justify-between items-center'}`}>
+                  <CardTitle className={`${isMobile ? 'text-base' : 'text-lg'}`}>Settlement History</CardTitle>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setShowTransactionHistory(!showTransactionHistory)}
+                    className={`${isMobile ? 'w-full text-xs' : ''}`}
                   >
                     <History className="w-4 h-4 mr-2" />
                     {showTransactionHistory ? "Hide Transactions" : "Show Transactions"}
@@ -2259,9 +2596,9 @@ export function VendorDashboard() {
 
       {/* Payment Proof Dialog */}
       <Dialog open={showProofDialog} onOpenChange={setShowProofDialog}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className={`${isMobile ? 'max-w-[95vw]' : 'max-w-3xl'}`}>
           <DialogHeader>
-            <DialogTitle>Payment Proof</DialogTitle>
+            <DialogTitle className={`${isMobile ? 'text-base' : 'text-lg'}`}>Payment Proof</DialogTitle>
           </DialogHeader>
           <div className="flex justify-center">
             {selectedProofUrl && (
@@ -2285,10 +2622,10 @@ export function VendorDashboard() {
 
       {/* View Settlement Request Dialog */}
       <Dialog open={showViewRequestDialog} onOpenChange={setShowViewRequestDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh] overflow-y-auto' : 'max-w-2xl'}`}>
           <DialogHeader>
-            <DialogTitle>Settlement Request Details</DialogTitle>
-            <DialogDescription>Complete details of the settlement request</DialogDescription>
+            <DialogTitle className={`${isMobile ? 'text-base' : 'text-lg'}`}>Settlement Details</DialogTitle>
+            {!isMobile && <DialogDescription>Complete details of the settlement request</DialogDescription>}
           </DialogHeader>
           
           {selectedSettlementForView && (
@@ -2388,9 +2725,9 @@ export function VendorDashboard() {
 
       {/* Image Preview Modal */}
       <Dialog open={!!selectedImageProduct} onOpenChange={() => setSelectedImageProduct(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh]' : 'max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className={`${isMobile ? 'text-base truncate' : 'text-lg'}`}>
               {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
             </DialogTitle>
           </DialogHeader>
