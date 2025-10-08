@@ -2100,17 +2100,18 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
   console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
   console.log(`  - AWB: ${labelResponse.data.awb}`);
   
-  // Update orders table: mark label as downloaded
-  for (const product of claimedProducts) {
-    await database.updateOrder(product.unique_id, {
-      label_downloaded: 1  // ✅ Mark as downloaded only after successful label generation
-    });
-    
-    console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
-  }
-  
-  // Store label URL and carrier info in labels table (one entry per order_id, no duplicates)
+  // ⚠️ IMPORTANT: Only mark as downloaded and store if we have a valid shipping URL
   if (labelResponse.data.shipping_url) {
+    // Update orders table: mark label as downloaded
+    for (const product of claimedProducts) {
+      await database.updateOrder(product.unique_id, {
+        label_downloaded: 1  // ✅ Mark as downloaded only after successful label generation
+      });
+      
+      console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
+    }
+    
+    // Store label URL and carrier info in labels table (one entry per order_id, no duplicates)
     const labelDataToStore = {
       order_id: cloneOrderId,
       label_url: labelResponse.data.shipping_url,
@@ -2126,12 +2127,13 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
     
     console.log(`  ✅ Stored label and carrier info in labels table for order ${cloneOrderId}`);
     console.log(`  - Carrier: ${labelResponse.data.carrier_id} (${labelResponse.data.carrier_name})`);
+    console.log('✅ All product labels marked as downloaded and cached');
   } else {
-    console.log(`  ⚠️ No shipping URL found in label response, skipping labels table storage`);
+    console.log(`  ⚠️ No shipping URL found in label response - NOT marking as downloaded`);
+    console.log(`  ⚠️ Products will remain available for retry on next download attempt`);
   }
   
-  console.log('✅ All product labels marked as downloaded and cached');
-  return { success: true, markedProducts: claimedProducts.length };
+  return { success: true, markedProducts: labelResponse.data.shipping_url ? claimedProducts.length : 0 };
 }
 
 /**
@@ -2450,8 +2452,14 @@ router.post('/bulk-download-labels', async (req, res) => {
     const results = [];
     const errors = [];
 
-    // Process each order ID
-    for (const orderId of order_ids) {
+    // ⚡ PARALLEL PROCESSING OPTIMIZATION
+    // Process orders in parallel with controlled concurrency (6 at a time)
+    const CONCURRENCY_LIMIT = 6;
+    
+    console.log(`⚡ Processing ${order_ids.length} orders with concurrency limit of ${CONCURRENCY_LIMIT}`);
+    
+    // Helper function to process a single order (same logic as before)
+    const processSingleOrder = async (orderId) => {
       try {
         console.log(`🔄 Processing order: ${orderId}`);
         
@@ -2465,11 +2473,11 @@ router.post('/bulk-download-labels', async (req, res) => {
         );
 
         if (claimedProducts.length === 0) {
-          errors.push({
+          return {
+            success: false,
             order_id: orderId,
             error: 'No products claimed by this vendor for this order'
-          });
-          continue;
+          };
         }
 
         // ✅ OPTIMIZATION: Check if label already downloaded
@@ -2481,12 +2489,12 @@ router.post('/bulk-download-labels', async (req, res) => {
           const existingLabel = await database.getLabelByOrderId(orderId);
           if (existingLabel && existingLabel.label_url) {
             console.log(`✅ BULK: Found cached label for ${orderId}`);
-            results.push({
+            return {
+              success: true,
               order_id: orderId,
               shipping_url: existingLabel.label_url,
               awb: existingLabel.awb || 'N/A'
-            });
-            continue; // Skip to next order
+            };
           } else {
             console.log(`⚠️ BULK: label_downloaded=1 but no cached label found for ${orderId}, generating new one...`);
           }
@@ -2549,24 +2557,26 @@ router.post('/bulk-download-labels', async (req, res) => {
           labelResponse = await handleOrderCloning(orderId, claimedProducts, orderProducts, vendor);
           // Note: handleOrderCloning already stores labels via markLabelAsDownloaded
         } else {
-          errors.push({
+          return {
+            success: false,
             order_id: orderId,
             error: 'No products claimed by this vendor for this order'
-          });
-          continue;
+          };
         }
 
         if (labelResponse.success) {
-          results.push({
+          return {
+            success: true,
             order_id: orderId,
             shipping_url: labelResponse.data.shipping_url,
             awb: labelResponse.data.awb
-          });
+          };
         } else {
-          errors.push({
+          return {
+            success: false,
             order_id: orderId,
             error: labelResponse.message || 'Label generation failed'
-          });
+          };
         }
 
       } catch (error) {
@@ -2580,13 +2590,55 @@ router.post('/bulk-download-labels', async (req, res) => {
           console.error(`⚠️ BULK: Failed to create notification for ${orderId}:`, notificationError.message);
         }
         
-        // Add user-friendly error message
-        errors.push({
+        // Return error result
+        return {
+          success: false,
           order_id: orderId,
           error: error.message,
           userMessage: `Order ${orderId} not assigned, please contact admin`
-        });
+        };
       }
+    };
+
+    // Process orders in controlled parallel batches
+    for (let i = 0; i < order_ids.length; i += CONCURRENCY_LIMIT) {
+      const batch = order_ids.slice(i, i + CONCURRENCY_LIMIT);
+      console.log(`⚡ Processing batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1}: ${batch.length} orders (${i + 1}-${i + batch.length} of ${order_ids.length})`);
+      
+      // Process batch in parallel using Promise.allSettled
+      const batchResults = await Promise.allSettled(
+        batch.map(orderId => processSingleOrder(orderId))
+      );
+      
+      // Collect results and errors from batch
+      batchResults.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const orderResult = result.value;
+          if (orderResult.success) {
+            results.push({
+              order_id: orderResult.order_id,
+              shipping_url: orderResult.shipping_url,
+              awb: orderResult.awb
+            });
+          } else {
+            errors.push({
+              order_id: orderResult.order_id,
+              error: orderResult.error,
+              userMessage: orderResult.userMessage
+            });
+          }
+        } else {
+          // Promise rejected (shouldn't happen with proper error handling, but just in case)
+          const orderId = batch[index];
+          errors.push({
+            order_id: orderId,
+            error: result.reason?.message || 'Unknown error',
+            userMessage: `Order ${orderId} not assigned, please contact admin`
+          });
+        }
+      });
+      
+      console.log(`✅ Batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} complete: ${results.length} successful, ${errors.length} failed so far`);
     }
 
     console.log('📊 BULK DOWNLOAD LABELS COMPLETE:');
@@ -2759,53 +2811,99 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
     const mergedPdf = await PDFDocument.create();
     
     if (format === 'thermal') {
-      // Original behavior: just concatenate all labels
-      for (const label of labels) {
+      // ⚡ PARALLEL OPTIMIZATION: Download all PDFs concurrently
+      console.log(`⚡ Downloading ${labels.length} PDFs in parallel...`);
+      
+      // Download all PDFs in parallel
+      const downloadPromises = labels.map(async (label) => {
         try {
-          console.log(`  - Processing label for order ${label.order_id}`);
+          console.log(`  - Downloading label for order ${label.order_id}`);
           
-          // Fetch the PDF from the shipping URL
           const response = await fetch(label.shipping_url);
           if (!response.ok) {
             console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
-            continue;
+            return { label, pdfBuffer: null, error: `HTTP ${response.status}` };
           }
           
           const pdfBuffer = await response.arrayBuffer();
+          console.log(`    ✅ Downloaded label for order ${label.order_id} (${pdfBuffer.byteLength} bytes)`);
           
-          // Load the PDF
-          const pdf = await PDFDocument.load(pdfBuffer);
-          
-          // Copy all pages from this PDF to the merged PDF
-          const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-          pages.forEach(page => mergedPdf.addPage(page));
-          
-          console.log(`    ✅ Added label for order ${label.order_id}`);
-          
-        } catch (labelError) {
-          console.log(`    ❌ Error processing label for order ${label.order_id}:`, labelError.message);
+          return { label, pdfBuffer, error: null };
+        } catch (error) {
+          console.log(`    ❌ Error downloading label for order ${label.order_id}:`, error.message);
+          return { label, pdfBuffer: null, error: error.message };
+        }
+      });
+      
+      // Wait for all downloads to complete
+      const downloadResults = await Promise.allSettled(downloadPromises);
+      console.log(`✅ All PDFs downloaded, now merging...`);
+      
+      // Merge PDFs in order (sequentially to maintain order)
+      for (const result of downloadResults) {
+        if (result.status === 'fulfilled' && result.value.pdfBuffer) {
+          try {
+            const { label, pdfBuffer } = result.value;
+            console.log(`  - Merging label for order ${label.order_id}`);
+            
+            // Load the PDF
+            const pdf = await PDFDocument.load(pdfBuffer);
+            
+            // Copy all pages from this PDF to the merged PDF
+            const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+            pages.forEach(page => mergedPdf.addPage(page));
+            
+            console.log(`    ✅ Added label for order ${label.order_id}`);
+          } catch (labelError) {
+            console.log(`    ❌ Error processing label for order ${result.value.label.order_id}:`, labelError.message);
+          }
+        } else if (result.status === 'fulfilled') {
+          console.log(`    ⚠️ Skipping label for order ${result.value.label.order_id}: ${result.value.error}`);
+        } else {
+          console.log(`    ❌ Promise rejected:`, result.reason?.message);
         }
       }
     } else {
       // For A4 and four-in-one formats, process labels in batches
       console.log(`📄 Processing labels in ${format} format batches`);
       
+      // ⚡ PARALLEL OPTIMIZATION: Download all PDFs first
+      console.log(`⚡ Downloading ${labels.length} PDFs in parallel for ${format} format...`);
+      
+      const downloadPromises = labels.map(async (label) => {
+        try {
+          const response = await fetch(label.shipping_url);
+          if (!response.ok) {
+            console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
+            return { label, pdfBuffer: null, error: `HTTP ${response.status}` };
+          }
+          
+          const pdfBuffer = await response.arrayBuffer();
+          console.log(`    ✅ Downloaded label for order ${label.order_id} (${pdfBuffer.byteLength} bytes)`);
+          
+          return { label, pdfBuffer, error: null };
+        } catch (error) {
+          console.log(`    ❌ Error downloading label for order ${label.order_id}:`, error.message);
+          return { label, pdfBuffer: null, error: error.message };
+        }
+      });
+      
+      const downloadResults = await Promise.allSettled(downloadPromises);
+      console.log(`✅ All PDFs downloaded for ${format} format, now processing...`);
+      
+      // Extract successful downloads
+      const successfulDownloads = downloadResults
+        .filter(result => result.status === 'fulfilled' && result.value.pdfBuffer)
+        .map(result => result.value);
+      
       if (format === 'a4') {
         // A4 format: One label per A4 page
-        for (const label of labels) {
+        for (const { label, pdfBuffer } of successfulDownloads) {
           try {
             console.log(`  - Processing A4 label for order ${label.order_id}`);
             
             const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
             
-            // Fetch the original PDF
-            const response = await fetch(label.shipping_url);
-            if (!response.ok) {
-              console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
-              continue;
-            }
-            
-            const pdfBuffer = await response.arrayBuffer();
             const originalPdf = await PDFDocument.load(pdfBuffer);
             const [originalPage] = await mergedPdf.embedPages([originalPdf.getPage(0)]);
             
@@ -2831,8 +2929,8 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
       } else if (format === 'four-in-one') {
         // Four-in-one format: 4 labels per A4 page
         const batchSize = 4;
-        for (let i = 0; i < labels.length; i += batchSize) {
-          const batch = labels.slice(i, i + batchSize);
+        for (let i = 0; i < successfulDownloads.length; i += batchSize) {
+          const batch = successfulDownloads.slice(i, i + batchSize);
           console.log(`  - Processing four-in-one batch ${Math.floor(i / batchSize) + 1} (${batch.length} labels)`);
           
           const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
@@ -2865,18 +2963,10 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
           
           // Process each label in the batch
           for (let j = 0; j < batch.length; j++) {
-            const label = batch[j];
+            const { label, pdfBuffer } = batch[j];
             const [x, y] = positions[j];
             
             try {
-              // Fetch the original PDF
-              const response = await fetch(label.shipping_url);
-              if (!response.ok) {
-                console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
-                continue;
-              }
-              
-              const pdfBuffer = await response.arrayBuffer();
               const originalPdf = await PDFDocument.load(pdfBuffer);
               const [originalPage] = await mergedPdf.embedPages([originalPdf.getPage(0)]);
               
