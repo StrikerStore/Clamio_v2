@@ -1833,25 +1833,6 @@ export function VendorDashboard() {
                   {/* Mobile Card Layout */}
                   {isMobile ? (
                     <div className="space-y-3">
-                      <div className="flex items-center p-3 bg-gray-50 rounded-lg sticky top-0 z-30">
-                        <input
-                          type="checkbox"
-                          onChange={(e) => {
-                            const unclaimedOrders = getFilteredOrdersForTab("all-orders")
-                            if (e.target.checked) {
-                              setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.unique_id))
-                            } else {
-                              setSelectedUnclaimedOrders([])
-                            }
-                          }}
-                          checked={
-                            selectedUnclaimedOrders.length > 0 &&
-                            selectedUnclaimedOrders.length === getFilteredOrdersForTab("all-orders").length
-                          }
-                          className="mr-2"
-                        />
-                        <span className="text-sm font-medium">Select All</span>
-                      </div>
                       {getFilteredOrdersForTab("all-orders").map((order, index) => (
                         <Card 
                           key={`${order.unique_id}-${index}`} 
@@ -1898,12 +1879,16 @@ export function VendorDashboard() {
                                 <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {order.product_code}</p>
                               </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="grid grid-cols-3 gap-2 text-xs">
                               <div>
                                 <span className="text-gray-500">Date:</span>
                                 <p className="font-medium">
                                   {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
                                 </p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Size:</span>
+                                <p className="font-medium text-red-600">{order.size || "-"}</p>
                               </div>
                               <div>
                                 <span className="text-gray-500">Quantity:</span>
@@ -1930,27 +1915,12 @@ export function VendorDashboard() {
                       <Table>
                         <TableHeader className="sticky top-0 bg-white z-30">
                           <TableRow>
-                            <TableHead className="w-12">
-                              <input
-                                type="checkbox"
-                                onChange={(e) => {
-                                  const unclaimedOrders = getFilteredOrdersForTab("all-orders")
-                                  if (e.target.checked) {
-                                    setSelectedUnclaimedOrders(unclaimedOrders.map((o) => o.unique_id))
-                                  } else {
-                                    setSelectedUnclaimedOrders([])
-                                  }
-                                }}
-                                checked={
-                                  selectedUnclaimedOrders.length > 0 &&
-                                  selectedUnclaimedOrders.length === getFilteredOrdersForTab("all-orders").length
-                                }
-                              />
-                            </TableHead>
+                            <TableHead className="w-12">Select</TableHead>
                             <TableHead>Image</TableHead>
                             <TableHead>Order ID</TableHead>
                             <TableHead>Order Date</TableHead>
                             <TableHead>Product</TableHead>
+                            <TableHead>Size</TableHead>
                             <TableHead>Product Code</TableHead>
                             <TableHead>Quantity</TableHead>
                             <TableHead>Action</TableHead>
@@ -2006,6 +1976,11 @@ export function VendorDashboard() {
                                 ) : "N/A"}
                               </TableCell>
                               <TableCell>{order.product_name}</TableCell>
+                              <TableCell>
+                                <span className="text-red-600 font-medium">
+                                  {order.size || "-"}
+                                </span>
+                              </TableCell>
                               <TableCell>{order.product_code}</TableCell>
                               <TableCell>{order.quantity || "-"}</TableCell>
                               <TableCell>
@@ -2117,6 +2092,9 @@ export function VendorDashboard() {
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
                                     <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code || "N/A"}</p>
+                                    {product.size && (
+                                      <p className="text-xs font-medium text-red-600">Size: {product.size}</p>
+                                    )}
                                   </div>
                                    <div className="text-xs font-medium">{product.quantity || 0}</div>
                                 </div>
@@ -2267,6 +2245,11 @@ export function VendorDashboard() {
                                         <p className="text-xs text-gray-500">
                                           Code: {product.product_code || "N/A"}
                                         </p>
+                                        {product.size && (
+                                          <p className="text-xs font-medium text-red-600">
+                                            Size: {product.size}
+                                          </p>
+                                        )}
                                       </div>
                                       <div className="text-right flex-shrink-0">
                                         <p className="text-sm font-medium">

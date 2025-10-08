@@ -269,6 +269,7 @@ class Database {
           order_date DATETIME,
           product_name VARCHAR(500),
           product_code VARCHAR(100),
+          size VARCHAR(20),
           quantity INT,
           selling_price DECIMAL(10,2),
           order_total DECIMAL(10,2),
@@ -282,17 +283,90 @@ class Database {
           INDEX idx_unique_id (unique_id),
           INDEX idx_order_id (order_id),
           INDEX idx_pincode (pincode),
-          INDEX idx_order_date (order_date)
+          INDEX idx_order_date (order_date),
+          INDEX idx_size (size)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createTableQuery);
       console.log('✅ Fresh orders table created with clean structure');
 
+      // Add size column to existing tables if it doesn't exist (migration)
+      await this.addSizeColumnIfNotExists();
+
       // Create labels table for caching label URLs
       await this.createLabelsTable();
     } catch (error) {
       console.error('❌ Error creating orders table:', error.message);
+    }
+  }
+
+  /**
+   * Add size column to existing orders table if it doesn't exist (migration)
+   */
+  async addSizeColumnIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if size column exists
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM orders LIKE 'size'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding size column to existing orders table...');
+        
+        // Add size column
+        await this.mysqlConnection.execute(
+          `ALTER TABLE orders ADD COLUMN size VARCHAR(20) AFTER product_code`
+        );
+        
+        // Add index for size column
+        await this.mysqlConnection.execute(
+          `ALTER TABLE orders ADD INDEX idx_size (size)`
+        );
+        
+        console.log('✅ Size column added to orders table');
+        
+        // Update existing orders with extracted size
+        await this.updateExistingOrdersWithSize();
+      } else {
+        console.log('✅ Size column already exists in orders table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding size column:', error.message);
+    }
+  }
+
+  /**
+   * Update existing orders with extracted size information
+   */
+  async updateExistingOrdersWithSize() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      console.log('🔄 Updating existing orders with size information...');
+      
+      // Get all orders that don't have size information
+      const [orders] = await this.mysqlConnection.execute(
+        `SELECT unique_id, product_code FROM orders WHERE size IS NULL AND product_code IS NOT NULL`
+      );
+
+      let updatedCount = 0;
+      for (const order of orders) {
+        const extractedSize = this.extractSizeFromSku(order.product_code);
+        if (extractedSize) {
+          await this.mysqlConnection.execute(
+            `UPDATE orders SET size = ? WHERE unique_id = ?`,
+            [extractedSize, order.unique_id]
+          );
+          updatedCount++;
+        }
+      }
+
+      console.log(`✅ Updated ${updatedCount} orders with size information`);
+    } catch (error) {
+      console.error('❌ Error updating existing orders with size:', error.message);
     }
   }
 
@@ -1943,17 +2017,22 @@ class Database {
     }
 
     try {
+      // Extract size from product_code
+      const extractedSize = this.extractSizeFromSku(orderData.product_code);
+
       // Use INSERT ... ON DUPLICATE KEY UPDATE for orders table
       await this.mysqlConnection.execute(
         `INSERT INTO orders (
           id, unique_id, order_id, customer_name, order_date,
-          product_name, product_code, quantity, selling_price, order_total, payment_type,
+          product_name, product_code, size, quantity, selling_price, order_total, payment_type,
           prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
           pincode, is_in_new_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           order_date = VALUES(order_date),
           product_name = VALUES(product_name),
+          product_code = VALUES(product_code),
+          size = VALUES(size),
           quantity = VALUES(quantity),
           selling_price = VALUES(selling_price),
           order_total = VALUES(order_total),
@@ -1972,6 +2051,7 @@ class Database {
           orderData.order_date || null,
           orderData.product_name || null,
           orderData.product_code || null,
+          extractedSize || null,
           orderData.quantity || null,
           orderData.selling_price || null,
           orderData.order_total || null,
@@ -2094,6 +2174,35 @@ class Database {
       .trim();
       
     return cleanedSku;
+  }
+
+  /**
+   * Extract size information from SKU ID
+   * @param {string} skuId - SKU with size
+   * @returns {string} Extracted size or null if no size found
+   */
+  extractSizeFromSku(skuId) {
+    if (!skuId) return null;
+    
+    // Try to extract size codes (S, M, L, XL, etc.) at the end
+    const sizeMatch = skuId.match(/[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$/i);
+    if (sizeMatch) {
+      return sizeMatch[1].toUpperCase();
+    }
+    
+    // Try to extract age ranges (24-26, 25-26, etc.) at the end
+    const ageRangeMatch = skuId.match(/[-_]([0-9]+-[0-9]+)$/);
+    if (ageRangeMatch) {
+      return ageRangeMatch[1];
+    }
+    
+    // Try to extract single numbers at the end (size numbers like 32, 34, etc.)
+    const numberMatch = skuId.match(/[-_]([0-9]+)$/);
+    if (numberMatch) {
+      return numberMatch[1];
+    }
+    
+    return null;
   }
 
   /**
