@@ -257,13 +257,11 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      // Drop existing orders table to recreate with clean structure
-      console.log('🔄 Dropping existing orders table and creating fresh one...');
-      await this.mysqlConnection.execute('DROP TABLE IF EXISTS orders');
-      console.log('✅ Old orders table dropped');
+      // Create orders table if it doesn't exist (preserve existing data)
+      console.log('🔄 Creating orders table if it doesn\'t exist...');
 
       const createTableQuery = `
-        CREATE TABLE orders (
+        CREATE TABLE IF NOT EXISTS orders (
           id VARCHAR(50) PRIMARY KEY,
           unique_id VARCHAR(100) UNIQUE,
           order_id VARCHAR(100),
@@ -896,11 +894,11 @@ class Database {
     }
 
     try {
-      const { id, name, image, altText, totalImages } = productData;
+      const { id, name, image, altText, totalImages, sku_id } = productData;
       
       const [result] = await this.mysqlConnection.execute(
-        'INSERT INTO products (id, name, image, altText, totalImages) VALUES (?, ?, ?, ?, ?)',
-        [id, name, image || null, altText || null, totalImages || 0]
+        'INSERT INTO products (id, name, image, altText, totalImages, sku_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [id, name, image || null, altText || null, totalImages || 0, sku_id || null]
       );
 
       return {
@@ -949,6 +947,10 @@ class Database {
       if (updateData.totalImages !== undefined) {
         fields.push('totalImages = ?');
         values.push(updateData.totalImages);
+      }
+      if (updateData.sku_id !== undefined) {
+        fields.push('sku_id = ?');
+        values.push(updateData.sku_id);
       }
 
       if (fields.length === 0) {
@@ -2067,6 +2069,31 @@ class Database {
   }
 
   /**
+   * Remove size information from SKU for matching
+   * @param {string} skuId - SKU with size
+   * @returns {string} SKU without size
+   */
+  cleanSkuId(skuId) {
+    if (!skuId) return skuId;
+    
+    // Remove size information from the end
+    let cleanedSku = skuId
+      // Remove size codes (S, M, L, XL, etc.) at the end
+      .replace(/[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$/i, '')
+      // Remove age ranges (24-26, 25-26, etc.) at the end
+      .replace(/[-_][0-9]+-[0-9]+$/, '')
+      // Remove single numbers at the end (size numbers like 32, 34, etc.)
+      .replace(/[-_][0-9]+$/, '')
+      // Clean up any double dashes or underscores
+      .replace(/[-_]{2,}/g, '-')
+      // Remove trailing dashes/underscores
+      .replace(/[-_]+$/, '')
+      .trim();
+      
+    return cleanedSku;
+  }
+
+  /**
    * Get order by unique_id from MySQL
    * @param {string} unique_id - Order unique ID
    * @returns {Object|null} Order data or null if not found
@@ -2098,14 +2125,11 @@ class Database {
           l.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON TRIM(
-          CASE 
-            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
-              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
-            ELSE 
-              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
-          END
-        ) = p.name
+        LEFT JOIN products p ON (
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+        )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE o.unique_id = ?
@@ -2150,14 +2174,11 @@ class Database {
           l.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON TRIM(
-          CASE 
-            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
-              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
-            ELSE 
-              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
-          END
-        ) = p.name
+        LEFT JOIN products p ON (
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+        )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE o.order_id = ? 
@@ -2202,14 +2223,11 @@ class Database {
           l.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON TRIM(
-          CASE 
-            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
-              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
-            ELSE 
-              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
-          END
-        ) = p.name
+        LEFT JOIN products p ON (
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+        )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1) 
@@ -2255,14 +2273,11 @@ class Database {
           l.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON TRIM(
-          CASE 
-            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
-              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
-            ELSE 
-              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
-          END
-        ) = p.name
+        LEFT JOIN products p ON (
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+        )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE c.claimed_by = ? AND (o.is_in_new_order = 1 OR c.label_downloaded = 1) 
@@ -2309,14 +2324,11 @@ class Database {
           l.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON TRIM(
-          CASE 
-            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
-              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
-            ELSE 
-              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
-          END
-        ) = p.name
+        LEFT JOIN products p ON (
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+        )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE c.claimed_by = ? 
@@ -2524,14 +2536,11 @@ class Database {
       const [rows] = await this.mysqlConnection.execute(
         `SELECT o.*, p.image as product_image
          FROM orders o
-         LEFT JOIN products p ON TRIM(
-          CASE 
-            WHEN LOWER(o.product_name) LIKE '%kids%' THEN 
-              REGEXP_REPLACE(o.product_name, ' - [0-9]+-[0-9]+$', '')
-            ELSE 
-              REGEXP_REPLACE(o.product_name, ' - (XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')
-          END
-        ) = p.name
+         LEFT JOIN products p ON (
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+        )
          LEFT JOIN claims c ON o.unique_id = c.order_unique_id
          WHERE (o.order_id LIKE ? OR o.customer_name LIKE ? OR o.product_name LIKE ? 
          OR o.product_code LIKE ? OR o.pincode LIKE ?)

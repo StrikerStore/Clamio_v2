@@ -1,8 +1,20 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const orderEnhancementService = require('./orderEnhancementService');
 
+/**
+ * Generate stable unique_id from order and product data
+ * @param {string} orderId - Order ID
+ * @param {string} productCode - Product code
+ * @param {number} itemIndex - Item index in order (for duplicate products in same order)
+ * @returns {string} Stable unique_id
+ */
+function generateStableUniqueId(orderId, productCode, itemIndex = 0) {
+  const id = `${orderId}_${productCode}_${itemIndex}`;
+  return crypto.createHash('md5').update(id).digest('hex').substring(0, 12).toUpperCase();
+}
 
 /**
  * Shipway API Service
@@ -371,6 +383,13 @@ class ShipwayService {
     // Flatten Shipway orders to one row per product, preserving existing claim data
     const flatOrders = [];
     let uniqueIdCounter = maxUniqueId + 1;
+
+    // Function to generate stable unique_id
+    function generateStableUniqueId(orderId, productCode, itemIndex = 0) {
+      const crypto = require('crypto');
+      const id = `${orderId}_${productCode}_${itemIndex}`;
+      return crypto.createHash('md5').update(id).digest('hex').substring(0, 12).toUpperCase();
+    }
     
     for (const order of shipwayOrders) {
       if (!Array.isArray(order.products)) continue;
@@ -445,7 +464,7 @@ class ShipwayService {
            : parseFloat((orderTotalSplit - prepaidAmount).toFixed(2));
          
                                                          const orderRow = {
-          unique_id: existingClaim ? existingClaim.unique_id : uniqueIdCounter++,
+          unique_id: existingClaim ? existingClaim.unique_id : generateStableUniqueId(order.order_id, product.product_code, i),
           order_id: order.order_id,
           order_date: order.order_date,
           product_name: product.product,
@@ -822,7 +841,7 @@ class ShipwayService {
         
         const orderRow = {
           id: `${order.order_id}_${product.product_code}_${Date.now()}`,
-          unique_id: existingClaim ? existingClaim.unique_id : uniqueIdCounter++,
+          unique_id: existingClaim ? existingClaim.unique_id : generateStableUniqueId(order.order_id, product.product_code, i),
           order_id: order.order_id,
           order_date: order.order_date,
           product_name: product.product,
@@ -938,11 +957,38 @@ class ShipwayService {
             }
           }
         } else {
-          // Insert new order
-          await database.createOrder(orderRow);
-          newOrdersCount++;
-          changed = true;
-          console.log(`➕ Added new order: ${orderRow.order_id}|${orderRow.product_code}`);
+          // Insert new order with error handling for potential unique_id collision
+          try {
+            await database.createOrder(orderRow);
+            newOrdersCount++;
+            changed = true;
+            console.log(`➕ Added new order: ${orderRow.order_id}|${orderRow.product_code}`);
+          } catch (insertError) {
+            // Handle any insertion errors gracefully
+            if (insertError.message && insertError.message.includes('ER_DUP_ENTRY')) {
+              console.error(`❌ COLLISION DETECTED: Duplicate unique_id for ${orderRow.order_id}|${orderRow.product_code}`);
+              console.error(`   unique_id: ${orderRow.unique_id}`);
+              console.error(`   Error: ${insertError.message}`);
+              this.logApiActivity({
+                type: 'unique-id-collision',
+                orderId: orderRow.order_id,
+                productCode: orderRow.product_code,
+                uniqueId: orderRow.unique_id,
+                error: insertError.message
+              });
+            } else {
+              // Log other database errors but continue processing
+              console.error(`❌ Error inserting order ${orderRow.order_id}|${orderRow.product_code}:`, insertError.message);
+              this.logApiActivity({
+                type: 'order-insert-error',
+                orderId: orderRow.order_id,
+                productCode: orderRow.product_code,
+                uniqueId: orderRow.unique_id,
+                error: insertError.message
+              });
+            }
+            // Continue processing other orders (skip this one)
+          }
         }
       }
     
