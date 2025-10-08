@@ -1592,7 +1592,10 @@ export function VendorDashboard() {
           isTablet ? 'grid-cols-2' : 
           'grid-cols-4'
         }`}>
-          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
+          <Card 
+            className={`bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "all-orders" ? 'ring-2 ring-blue-300 ring-offset-2' : ''}`}
+            onClick={() => setActiveTab("all-orders")}
+          >
             <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between">
                 <div>
@@ -1608,7 +1611,10 @@ export function VendorDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
+          <Card 
+            className={`bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "my-orders" ? 'ring-2 ring-green-300 ring-offset-2' : ''}`}
+            onClick={() => setActiveTab("my-orders")}
+          >
             <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between">
                 <div>
@@ -1624,7 +1630,10 @@ export function VendorDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
+          <Card 
+            className={`bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "handover" ? 'ring-2 ring-orange-300 ring-offset-2' : ''}`}
+            onClick={() => setActiveTab("handover")}
+          >
             <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between">
                 <div>
@@ -1710,8 +1719,17 @@ export function VendorDashboard() {
                         placeholder="Search"
                         value={getCurrentTabFilters().searchTerm}
                         onChange={(e) => updateCurrentTabFilter('searchTerm', e.target.value)}
-                        className="pl-10"
+                        className="pl-10 pr-10"
                       />
+                      {getCurrentTabFilters().searchTerm && (
+                        <button
+                          onClick={() => updateCurrentTabFilter('searchTerm', '')}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                          type="button"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className={`flex gap-2 items-center ${isMobile ? 'flex-wrap' : ''}`}>
@@ -2479,13 +2497,24 @@ export function VendorDashboard() {
               <CardContent className={`${isMobile ? 'p-4 pt-0 space-y-3' : 'space-y-4'}`}>
                 <div>
                   <Label htmlFor="upi-id" className={`${isMobile ? 'text-sm' : ''}`}>UPI ID for Settlement</Label>
-                  <Input
-                    id="upi-id"
-                    placeholder={isMobile ? "Enter UPI ID" : "Enter your UPI ID (e.g., user@paytm)"}
-                    value={upiId}
-                    onChange={(e) => setUpiId(e.target.value)}
-                    className={`${isMobile ? 'text-sm' : ''}`}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="upi-id"
+                      placeholder={isMobile ? "Enter UPI ID" : "Enter your UPI ID (e.g., user@paytm)"}
+                      value={upiId}
+                      onChange={(e) => setUpiId(e.target.value)}
+                      className={`${isMobile ? 'text-sm' : ''} pr-10`}
+                    />
+                    {upiId && (
+                      <button
+                        onClick={() => setUpiId('')}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                        type="button"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <Button 
                   onClick={handleClaimRevenue} 
