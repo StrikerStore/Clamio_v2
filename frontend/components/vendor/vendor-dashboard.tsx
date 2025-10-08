@@ -460,10 +460,11 @@ export function VendorDashboard() {
           )
         );
         
-        // Show success message
+        // Show success message with order_id
+        const claimedOrderId = response.data.order_id || unique_id;
         toast({
           title: 'Order Claimed',
-          description: `Successfully claimed order row ${unique_id}`,
+          description: `Claimed order id ${claimedOrderId}`,
         });
         
                 // Refresh orders to ensure tabs are updated correctly
@@ -1494,7 +1495,7 @@ export function VendorDashboard() {
               </div>
               <div className="min-w-0">
                 <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-lg' : 'text-xl'}`}>
-                  {isMobile ? 'Vendor' : 'Clamio - Vendor'}
+                  {isMobile ? 'Clamio - Vendor' : 'Clamio - Vendor'}
                 </h1>
                 {!isMobile && (
                   <p className="text-sm text-gray-600 truncate">
@@ -1639,19 +1640,16 @@ export function VendorDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-shadow" onClick={() => setShowRevenueModal(true)}>
+          {/* Coming Soon Card - Placeholder */}
+          <Card className="bg-gradient-to-br from-gray-300 to-gray-400 text-gray-600 border-0 shadow-lg opacity-50">
             <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className={`font-medium text-purple-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>
-                    {isMobile ? 'Revenue' : 'Revenue (Click to Claim)'}
-                  </p>
-                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
-                    {paymentsLoading ? "..." : payments ? `₹${payments.currentPayment.toFixed(2)}` : "₹0.00"}
-                  </p>
+                  <p className={`font-medium text-gray-500 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Coming Soon</p>
+                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>--</p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
-                  <IndianRupee className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                  <Settings className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1661,7 +1659,7 @@ export function VendorDashboard() {
         {/* Main Content */}
         <Card>
           <CardHeader>
-            <div className={`flex ${isMobile ? 'flex-col space-y-3' : 'items-center justify-between'}`}>
+            <div className="flex items-center justify-between">
               <div>
                 <CardTitle className={`${isMobile ? 'text-lg' : 'text-xl'}`}>Order Management</CardTitle>
                 {!isMobile && <CardDescription>Manage your orders across different stages</CardDescription>}
@@ -1670,18 +1668,18 @@ export function VendorDashboard() {
                 onClick={handleRefreshOrders}
                 disabled={ordersRefreshing}
                 variant="outline"
-                className={`${isMobile ? 'w-full' : ''} h-10`}
-                size={isMobile ? 'default' : 'default'}
+                className="h-10 bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700"
+                size="default"
               >
                 {ordersRefreshing ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                    {isMobile ? 'Refreshing...' : 'Refreshing...'}
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Refreshing...
                   </>
                 ) : (
                   <>
                     <RefreshCw className="w-4 h-4 mr-2" />
-                    {isMobile ? 'Refresh' : 'Refresh Orders'}
+                    Refresh
                   </>
                 )}
               </Button>
@@ -1693,13 +1691,13 @@ export function VendorDashboard() {
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-4 border-b mb-4`}>
                 <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
-                    {isMobile ? `All (${getFilteredOrdersForTab("all-orders").length})` : `All Orders (${getFilteredOrdersForTab("all-orders").length})`}
+                    All ({getFilteredOrdersForTab("all-orders").length})
                   </TabsTrigger>
                   <TabsTrigger value="my-orders" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
-                    {isMobile ? `Mine (${getFilteredOrdersForTab("my-orders").length})` : `My Orders (${getFilteredOrdersForTab("my-orders").length})`}
+                    My Orders ({getFilteredOrdersForTab("my-orders").length})
                   </TabsTrigger>
                   <TabsTrigger value="handover" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
-                    {isMobile ? `Hand (${getFilteredOrdersForTab("handover").length})` : `Handover (${getFilteredOrdersForTab("handover").length})`}
+                    Handover ({getFilteredOrdersForTab("handover").length})
                   </TabsTrigger>
                 </TabsList>
 
@@ -1837,13 +1835,24 @@ export function VendorDashboard() {
                         <span className="text-sm font-medium">Select All</span>
                       </div>
                       {getFilteredOrdersForTab("all-orders").map((order, index) => (
-                        <Card key={`${order.unique_id}-${index}`} className="p-3">
+                        <Card 
+                          key={`${order.unique_id}-${index}`} 
+                          className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                          onClick={() => {
+                            if (selectedUnclaimedOrders.includes(order.unique_id)) {
+                              setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
+                            } else {
+                              setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
+                            }
+                          }}
+                        >
                           <div className="space-y-3">
                             <div className="flex items-start gap-3">
                               <input
                                 type="checkbox"
                                 checked={selectedUnclaimedOrders.includes(order.unique_id)}
                                 onChange={(e) => {
+                                  e.stopPropagation();
                                   if (e.target.checked) {
                                     setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
                                   } else {
@@ -1851,20 +1860,24 @@ export function VendorDashboard() {
                                   }
                                 }}
                                 className="mt-1"
+                                onClick={(e) => e.stopPropagation()}
                               />
                               <img
                                 src={order.product_image || "/placeholder.svg"}
                                 alt={order.product_name}
                                 className="w-16 h-16 rounded-lg object-cover cursor-pointer"
-                                onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})
+                                }}
                                 onError={(e) => {
                                   e.currentTarget.src = "/placeholder.svg";
                                 }}
                               />
                               <div className="flex-1 min-w-0">
                                 <h4 className="font-medium text-sm truncate">{order.order_id}</h4>
-                                <p className="text-xs text-gray-600 truncate">{order.product_name}</p>
-                                <p className="text-xs text-gray-500 truncate">Code: {order.product_code}</p>
+                                <p className="text-xs text-gray-600 break-words leading-relaxed">{order.product_name}</p>
+                                <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {order.product_code}</p>
                               </div>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1881,7 +1894,10 @@ export function VendorDashboard() {
                             </div>
                             <Button 
                               size="sm" 
-                              onClick={() => handleClaimOrder(order.unique_id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleClaimOrder(order.unique_id);
+                              }}
                               className="w-full"
                             >
                               Claim Order
@@ -2022,7 +2038,17 @@ export function VendorDashboard() {
                         <span className="text-sm font-medium">Select All</span>
                       </div>
                       {getFilteredOrdersForTab("my-orders").map((order, index) => (
-                        <Card key={`${order.order_id}-${index}`} className="p-3">
+                        <Card 
+                          key={`${order.order_id}-${index}`} 
+                          className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                          onClick={() => {
+                            if (selectedMyOrders.includes(order.order_id)) {
+                              setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                            } else {
+                              setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                            }
+                          }}
+                        >
                           <div className="space-y-3">
                             <div className="flex items-start justify-between">
                               <div className="flex items-start gap-2">
@@ -2030,6 +2056,7 @@ export function VendorDashboard() {
                                   type="checkbox"
                                   checked={selectedMyOrders.includes(order.order_id)}
                                   onChange={(e) => {
+                                    e.stopPropagation();
                                     if (e.target.checked) {
                                       setSelectedMyOrders([...selectedMyOrders, order.order_id])
                                     } else {
@@ -2037,6 +2064,7 @@ export function VendorDashboard() {
                                     }
                                   }}
                                   className="mt-1"
+                                  onClick={(e) => e.stopPropagation()}
                                 />
                                 <div>
                                   <h4 className="font-medium text-sm">{order.order_id}</h4>
@@ -2060,14 +2088,17 @@ export function VendorDashboard() {
                                     src={product.image || "/placeholder.svg"}
                                     alt={product.product_name}
                                     className="w-10 h-10 rounded-md object-cover cursor-pointer"
-                                    onClick={() => product.image && setSelectedImageProduct({url: product.image, title: product.product_name || "Product Image"})}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      product.image && setSelectedImageProduct({url: product.image, title: product.product_name || "Product Image"})
+                                    }}
                                     onError={(e) => {
                                       e.currentTarget.src = "/placeholder.svg";
                                     }}
                                   />
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium truncate">{product.product_name}</p>
-                                    <p className="text-xs text-gray-500 truncate">Code: {product.product_code || "N/A"}</p>
+                                    <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
+                                    <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code || "N/A"}</p>
                                   </div>
                                    <div className="text-xs font-medium">{product.quantity || 0}</div>
                                 </div>
@@ -2078,7 +2109,10 @@ export function VendorDashboard() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleDownloadLabel(order.order_id, labelFormat)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownloadLabel(order.order_id, labelFormat);
+                                }}
                                 disabled={labelDownloadLoading[order.order_id] || bulkDownloadLoading}
                                 className="w-full text-xs"
                               >
@@ -2097,7 +2131,10 @@ export function VendorDashboard() {
                               <div className="grid grid-cols-2 gap-2">
                                 <Button 
                                   size="sm" 
-                                  onClick={() => handleMarkReady(order.order_id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMarkReady(order.order_id);
+                                  }}
                                   disabled={!order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false}
                                   className="text-xs"
                                 >
@@ -2106,7 +2143,10 @@ export function VendorDashboard() {
                                 <Button 
                                   size="sm" 
                                   variant="destructive" 
-                                  onClick={() => handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id))}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                  }}
                                   disabled={reverseLoading[order.order_id]}
                                   className="text-xs"
                                 >
@@ -2300,7 +2340,7 @@ export function VendorDashboard() {
                               />
                               <div className="flex-1 min-w-0">
                                 <h4 className="font-medium text-sm truncate">{order.order_id}</h4>
-                                <p className="text-xs text-gray-600 truncate">{order.product_name || order.product}</p>
+                                <p className="text-xs text-gray-600 break-words leading-relaxed">{order.product_name || order.product}</p>
                                 <div className="mt-1">
                                   {getStatusBadge(order.status)}
                                 </div>
@@ -2719,28 +2759,61 @@ export function VendorDashboard() {
 
       {/* Image Preview Modal */}
       <Dialog open={!!selectedImageProduct} onOpenChange={() => setSelectedImageProduct(null)}>
-        <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh]' : 'max-w-4xl max-h-[90vh]'} overflow-y-auto`}>
-          <DialogHeader>
-            <DialogTitle className={`${isMobile ? 'text-base truncate' : 'text-lg'}`}>
-              {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex justify-center">
-            {selectedImageProduct ? (
-              <img
-                src={selectedImageProduct.url}
-                alt={selectedImageProduct.title}
-                className="max-w-full max-h-[70vh] object-contain rounded-lg"
-                onError={(e) => {
-                  e.currentTarget.src = "/placeholder.svg";
-                }}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-[70vh] text-gray-500">
-                No image available
+        <DialogContent className={`${isMobile ? 'max-w-[90vw] w-[90vw] p-0 gap-0' : 'max-w-4xl'}`} >
+          {isMobile ? (
+            // Mobile view with full control
+            <>
+              <div className="flex flex-col h-[80vh] w-full">
+                <DialogHeader className="flex items-center justify-between p-3 pr-10 border-b shrink-0 space-y-0">
+                  <DialogTitle className="text-sm font-semibold flex-1 pr-2 break-words">
+                    {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
+                  </DialogTitle>
+                  
+                </DialogHeader>
+                <div className="flex-1 flex items-center justify-center p-4 overflow-hidden bg-gray-50">
+                  {selectedImageProduct ? (
+                    <div className="w-full h-full flex items-center justify-center max-w-[75vw] max-h-[65vh]">
+                      <img
+                        src={selectedImageProduct.url}
+                        alt={selectedImageProduct.title}
+                        className="max-w-full max-h-full w-auto h-auto object-contain rounded-lg shadow-md"
+                        onError={(e) => {
+                          e.currentTarget.src = "/placeholder.svg";
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-gray-500">No image available</div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            // Desktop view
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="flex items-center justify-center p-4">
+                {selectedImageProduct ? (
+                  <img
+                    src={selectedImageProduct.url}
+                    alt={selectedImageProduct.title}
+                    className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                    onError={(e) => {
+                      e.currentTarget.src = "/placeholder.svg";
+                    }}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-[60vh] text-gray-500">
+                    No image available
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>
