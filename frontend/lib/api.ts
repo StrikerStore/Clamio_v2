@@ -394,8 +394,10 @@ class ApiClient {
     })
   }
 
-  async getGroupedOrders(): Promise<ApiResponse> {
+  async getGroupedOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: getGroupedOrders called');
+    console.log('  - page:', page);
+    console.log('  - limit:', limit);
     
     // Use vendor token for grouped orders endpoint
     const vendorToken = localStorage.getItem('vendorToken')
@@ -411,8 +413,9 @@ class ApiClient {
     console.log('📤 API CLIENT: Making request to /orders/grouped');
     console.log('  - Method: GET');
     console.log('  - Headers: Authorization');
+    console.log('  - Query params: page=' + page + ', limit=' + limit);
 
-    return this.makeRequest('/orders/grouped', {
+    return this.makeRequest(`/orders/grouped?page=${page}&limit=${limit}`, {
       method: 'GET',
       headers: {
         'Authorization': vendorToken

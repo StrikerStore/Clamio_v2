@@ -492,6 +492,11 @@ router.get('/grouped', async (req, res) => {
   console.log('📥 Request URL:', req.url);
   console.log('📥 Request IP:', req.ip);
   
+  // Extract pagination parameters
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 50;
+  console.log('📄 Pagination params:', { page, limit });
+  
   let token = req.headers['authorization'];
   console.log('\n🔑 TOKEN ANALYSIS:');
   console.log('  - Raw token:', token);
@@ -614,13 +619,36 @@ router.get('/grouped', async (req, res) => {
     });
     
     console.log('📊 Grouped orders processed:', groupedOrdersArray.length);
+    
+    // Apply pagination
+    const totalCount = groupedOrdersArray.length;
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedOrders = groupedOrdersArray.slice(startIndex, endIndex);
+    const hasMore = endIndex < totalCount;
+    
+    console.log('📄 Pagination applied:');
+    console.log('  - Total orders:', totalCount);
+    console.log('  - Page:', page);
+    console.log('  - Limit:', limit);
+    console.log('  - Start index:', startIndex);
+    console.log('  - End index:', endIndex);
+    console.log('  - Returned orders:', paginatedOrders.length);
+    console.log('  - Has more:', hasMore);
     console.log('🟢 GROUPED ORDERS SUCCESS');
     
     const responseData = { 
       success: true, 
       data: { 
-        groupedOrders: groupedOrdersArray,
-        totalOrders: groupedOrdersArray.length,
+        groupedOrders: paginatedOrders,
+        pagination: {
+          page: page,
+          limit: limit,
+          total: totalCount,
+          hasMore: hasMore,
+          returnedCount: paginatedOrders.length
+        },
+        totalOrders: totalCount,
         totalProducts: vendorOrders.length
       }
     };

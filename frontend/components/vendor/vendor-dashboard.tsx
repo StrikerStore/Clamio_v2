@@ -200,6 +200,10 @@ export function VendorDashboard() {
   const [groupedOrders, setGroupedOrders] = useState<any[]>([]);
   const [groupedOrdersLoading, setGroupedOrdersLoading] = useState(true);
   const [groupedOrdersError, setGroupedOrdersError] = useState("");
+  const [groupedOrdersPage, setGroupedOrdersPage] = useState(1);
+  const [groupedOrdersHasMore, setGroupedOrdersHasMore] = useState(true);
+  const [groupedOrdersTotalCount, setGroupedOrdersTotalCount] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -341,11 +345,19 @@ export function VendorDashboard() {
         setOrdersError("No orders found");
       }
 
-      // Also refresh grouped orders for My Orders tab
+      // Also refresh grouped orders for My Orders tab (reset pagination)
       console.log('🔄 Refreshing grouped orders data...');
-      const groupedResponse = await apiClient.getGroupedOrders();
+      setGroupedOrdersPage(1);
+      const groupedResponse = await apiClient.getGroupedOrders(1, 50);
       if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
         setGroupedOrders(groupedResponse.data.groupedOrders);
+        
+        // Update pagination metadata
+        if (groupedResponse.data.pagination) {
+          setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
+          setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
+        }
+        
         console.log('✅ Grouped orders refreshed successfully');
       } else {
         console.log('⚠️ Failed to refresh grouped orders');
@@ -387,22 +399,51 @@ export function VendorDashboard() {
     }
   }
 
-  const fetchGroupedOrders = async () => {
-    setGroupedOrdersLoading(true);
+  const fetchGroupedOrders = async (resetPagination: boolean = true) => {
+    if (resetPagination) {
+      setGroupedOrdersLoading(true);
+      setGroupedOrdersPage(1);
+    } else {
+      setIsLoadingMore(true);
+    }
+    
     setGroupedOrdersError("");
+    
     try {
-      const response = await apiClient.getGroupedOrders();
+      const pageToFetch = resetPagination ? 1 : groupedOrdersPage;
+      const response = await apiClient.getGroupedOrders(pageToFetch, 50);
+      
       if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
-        setGroupedOrders(response.data.groupedOrders);
+        if (resetPagination) {
+          // Replace orders on reset (initial load or refresh)
+          setGroupedOrders(response.data.groupedOrders);
+        } else {
+          // Append orders for infinite scroll
+          setGroupedOrders(prev => [...prev, ...response.data.groupedOrders]);
+        }
+        
+        // Update pagination metadata
+        if (response.data.pagination) {
+          setGroupedOrdersHasMore(response.data.pagination.hasMore);
+          setGroupedOrdersTotalCount(response.data.pagination.total);
+          if (!resetPagination) {
+            setGroupedOrdersPage(prev => prev + 1);
+          }
+        }
       } else {
-        setGroupedOrders([]);
+        if (resetPagination) {
+          setGroupedOrders([]);
+        }
         setGroupedOrdersError("No grouped orders found");
       }
     } catch (err: any) {
       setGroupedOrdersError(err.message || "Failed to fetch grouped orders");
-      setGroupedOrders([]);
+      if (resetPagination) {
+        setGroupedOrders([]);
+      }
     } finally {
       setGroupedOrdersLoading(false);
+      setIsLoadingMore(false);
     }
   }
 
@@ -1457,6 +1498,22 @@ export function VendorDashboard() {
     }
   };
 
+  // Infinite scroll handler for My Orders
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    // Only apply infinite scroll for My Orders tab
+    if (activeTab !== 'my-orders') return;
+    
+    const element = e.currentTarget;
+    const scrolledToBottom = 
+      element.scrollHeight - element.scrollTop <= element.clientHeight + 200;
+    
+    // Load more when scrolled near bottom and there's more data
+    if (scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
+      console.log('📜 Infinite scroll triggered - loading more orders...');
+      fetchGroupedOrders(false); // false = don't reset pagination
+    }
+  };
+
   // Helper function to trigger tab highlight animation
   const highlightTab = (tabName: string) => {
     setHighlightedTab(tabName);
@@ -1522,9 +1579,18 @@ export function VendorDashboard() {
             console.log('✅ FRONTEND: Orders refreshed successfully');
           }
           
-          const groupedResponse = await apiClient.getGroupedOrders();
+          // Reset pagination and fetch first page
+          setGroupedOrdersPage(1);
+          const groupedResponse = await apiClient.getGroupedOrders(1, 50);
           if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
             setGroupedOrders(groupedResponse.data.groupedOrders);
+            
+            // Update pagination metadata
+            if (groupedResponse.data.pagination) {
+              setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
+              setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
+            }
+            
             console.log('✅ FRONTEND: Grouped orders refreshed successfully');
           }
         } catch (refreshError) {
@@ -1912,6 +1978,7 @@ export function VendorDashboard() {
               {/* Scrollable Content Section */}
               <div 
                 ref={scrollableContentRef}
+                onScroll={handleScroll}
                 className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
               >
                 <TabsContent value="all-orders" className="mt-0">
@@ -2200,6 +2267,23 @@ export function VendorDashboard() {
                         </Card>
                         );
                       })}
+                      
+                      {/* Loading More Indicator */}
+                      {isLoadingMore && (
+                        <div className="flex items-center justify-center p-4">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                            <p className="text-xs text-gray-500">Loading more orders...</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* End of List Indicator */}
+                      {!groupedOrdersHasMore && groupedOrders.length > 0 && (
+                        <div className="flex items-center justify-center p-4">
+                          <p className="text-xs text-gray-400">All orders loaded ({groupedOrdersTotalCount} total)</p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
@@ -2360,6 +2444,23 @@ export function VendorDashboard() {
                           })}
                         </TableBody>
                       </Table>
+                      
+                      {/* Loading More Indicator for Desktop */}
+                      {isLoadingMore && (
+                        <div className="flex items-center justify-center p-6 border-t">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                            <p className="text-sm text-gray-500">Loading more orders...</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* End of List Indicator for Desktop */}
+                      {!groupedOrdersHasMore && groupedOrders.length > 0 && (
+                        <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                          <p className="text-sm text-gray-500">All orders loaded ({groupedOrdersTotalCount} total)</p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </TabsContent>
