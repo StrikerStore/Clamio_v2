@@ -469,6 +469,7 @@ class ShipwayService {
           order_date: order.order_date,
           product_name: product.product,
           product_code: product.product_code,
+          quantity: parseInt(product.amount) || 1,
           // The 7 additional columns with correct logic
           selling_price: sellingPrice,
           order_total: orderTotal,
@@ -534,7 +535,7 @@ class ShipwayService {
         type: 'excel-write-with-new-columns', 
         rows: flatOrders.length, 
         preservedClaims: existingClaimData.size,
-        newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode']
+        newColumns: ['quantity', 'selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode']
       });
 
       // Automatically enhance orders with customer names and product images
@@ -846,6 +847,7 @@ class ShipwayService {
           order_date: order.order_date,
           product_name: product.product,
           product_code: product.product_code,
+          quantity: parseInt(product.amount) || 1,
           // The 7 additional columns with correct logic
           selling_price: sellingPrice,
           order_total: orderTotal,
@@ -1012,7 +1014,7 @@ class ShipwayService {
           type: 'mysql-write-with-new-columns', 
           rows: flatOrders.length, 
           preservedClaims: existingClaimData.size,
-          newColumns: ['selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode', 'is_in_new_order']
+          newColumns: ['quantity', 'selling_price', 'order_total', 'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split', 'collectable_amount', 'customer_name', 'priority_carrier', 'pincode', 'is_in_new_order']
         });
 
         // Automatically enhance orders with customer names and product images

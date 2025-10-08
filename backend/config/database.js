@@ -269,6 +269,7 @@ class Database {
           order_date DATETIME,
           product_name VARCHAR(500),
           product_code VARCHAR(100),
+          quantity INT,
           selling_price DECIMAL(10,2),
           order_total DECIMAL(10,2),
           payment_type VARCHAR(50),
@@ -1946,13 +1947,14 @@ class Database {
       await this.mysqlConnection.execute(
         `INSERT INTO orders (
           id, unique_id, order_id, customer_name, order_date,
-          product_name, product_code, selling_price, order_total, payment_type,
+          product_name, product_code, quantity, selling_price, order_total, payment_type,
           prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
           pincode, is_in_new_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           order_date = VALUES(order_date),
           product_name = VALUES(product_name),
+          quantity = VALUES(quantity),
           selling_price = VALUES(selling_price),
           order_total = VALUES(order_total),
           payment_type = VALUES(payment_type),
@@ -1970,6 +1972,7 @@ class Database {
           orderData.order_date || null,
           orderData.product_name || null,
           orderData.product_code || null,
+          orderData.quantity || null,
           orderData.selling_price || null,
           orderData.order_total || null,
           orderData.payment_type || null,
@@ -2414,9 +2417,10 @@ class Database {
           orderValues
         );
         
-        if (orderResult.affectedRows === 0) {
-        return null;
-        }
+        // Don't return early - we still need to update claims and labels tables
+        // if (orderResult.affectedRows === 0) {
+        //   return null;
+        // }
       }
 
       // Update claims table if there are claim fields to update

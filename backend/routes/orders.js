@@ -583,6 +583,7 @@ router.get('/grouped', async (req, res) => {
           label_downloaded: order.label_downloaded, // Add label_downloaded field
           total_value: 0,
           total_products: 0,
+          total_quantity: 0,
           products: []
         };
       }
@@ -599,8 +600,10 @@ router.get('/grouped', async (req, res) => {
       
       // Update totals
       const productValue = parseFloat(order.value || order.price || 0);
+      const productQuantity = parseInt(order.quantity || 1);
       groupedOrders[orderId].total_value += productValue;
       groupedOrders[orderId].total_products += 1;
+      groupedOrders[orderId].total_quantity += productQuantity;
     });
     
     // Convert to array and sort by order_date (exact same logic as original Excel flow)
@@ -2046,14 +2049,9 @@ async function updateLocalDatabaseAfterClone(inputData) {
   console.log(`  - Setting label_downloaded = 0 (not downloaded yet)`);
   
     for (const product of claimedProducts) {
-      // Update orders table: set order_id to clone ID
+      // Update both orders and claims tables in a single call
       await database.updateOrder(product.unique_id, {
-        order_id: cloneOrderId  // ✅ Update orders table with clone ID
-      });
-      
-      // Update claims table: set claim-specific fields
-      await database.updateOrder(product.unique_id, {
-        order_id: cloneOrderId,           // ✅ Set to clone order ID
+        order_id: cloneOrderId,           // ✅ Update orders & claims tables with clone ID
         clone_status: 'cloned',           // ✅ Mark as cloned
         cloned_order_id: originalOrderId, // ✅ Store original order ID (not clone ID)
         label_downloaded: 0               // ✅ Initially 0 (not downloaded)
@@ -2160,7 +2158,7 @@ function prepareShipwayRequestBody(orderId, products, originalOrder, vendor, gen
     product: product.product_name,
     price: product.selling_price,
     product_code: product.product_code,
-    product_quantity: "1",
+    product_quantity: String(product.quantity || 1),
     discount: "0",
     tax_rate: "5",
     tax_title: "IGST"

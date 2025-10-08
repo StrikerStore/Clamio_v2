@@ -1875,8 +1875,8 @@ export function VendorDashboard() {
                                 </p>
                               </div>
                               <div>
-                                <span className="text-gray-500">Value:</span>
-                                <p className="font-medium">{order.value || "-"}</p>
+                                <span className="text-gray-500">Quantity:</span>
+                                <p className="font-medium">{order.quantity || "-"}</p>
                               </div>
                             </div>
                             <Button 
@@ -1918,7 +1918,7 @@ export function VendorDashboard() {
                             <TableHead>Order Date</TableHead>
                             <TableHead>Product</TableHead>
                             <TableHead>Product Code</TableHead>
-                            <TableHead>Value</TableHead>
+                            <TableHead>Quantity</TableHead>
                             <TableHead>Action</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -1973,7 +1973,7 @@ export function VendorDashboard() {
                               </TableCell>
                               <TableCell>{order.product_name}</TableCell>
                               <TableCell>{order.product_code}</TableCell>
-                              <TableCell>{order.value || "-"}</TableCell>
+                              <TableCell>{order.quantity || "-"}</TableCell>
                               <TableCell>
                                 <Button size="sm" onClick={() => handleClaimOrder(order.unique_id)}>
                                   Claim
@@ -2046,11 +2046,11 @@ export function VendorDashboard() {
                                   {getStatusBadge(order.status)}
                                 </div>
                               </div>
-                              <div className="text-right">
-                                <div className="text-xs text-gray-500">Total</div>
-                                <div className="font-medium text-green-600">₹{order.total_value.toFixed(2)}</div>
-                                <div className="text-xs text-blue-600 font-semibold">{order.total_products} items</div>
-                              </div>
+                                   <div className="text-right">
+                                     <div className="text-xs text-gray-500">Total</div>
+                                     <div className="font-medium text-green-600">{order.total_quantity || 0}</div>
+                                     <div className="text-xs text-blue-600 font-semibold">{order.total_quantity || 0} items</div>
+                                   </div>
                             </div>
                             
                             <div className="space-y-2">
@@ -2069,7 +2069,7 @@ export function VendorDashboard() {
                                     <p className="text-xs font-medium truncate">{product.product_name}</p>
                                     <p className="text-xs text-gray-500 truncate">Code: {product.product_code || "N/A"}</p>
                                   </div>
-                                  <div className="text-xs font-medium">₹{product.value || 0}</div>
+                                   <div className="text-xs font-medium">{product.quantity || 0}</div>
                                 </div>
                               ))}
                             </div>
@@ -2145,7 +2145,6 @@ export function VendorDashboard() {
                             <TableHead>Order Date</TableHead>
                             <TableHead>Products</TableHead>
                             <TableHead className="w-16 text-center">Count</TableHead>
-                            <TableHead>Total Value</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead>Actions</TableHead>
                           </TableRow>
@@ -2213,7 +2212,7 @@ export function VendorDashboard() {
                                       </div>
                                       <div className="text-right flex-shrink-0">
                                         <p className="text-sm font-medium">
-                                          ₹{product.value || 0}
+                                           {product.quantity || 0}
                                         </p>
                                       </div>
                                     </div>
@@ -2222,12 +2221,7 @@ export function VendorDashboard() {
                               </TableCell>
                               <TableCell className="text-center align-middle">
                                 <div className="text-lg font-semibold text-blue-600">
-                                  {order.total_products}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="font-medium text-green-600">
-                                  ₹{order.total_value.toFixed(2)}
+                                  {order.total_quantity || 0}
                                 </div>
                               </TableCell>
                               <TableCell>{getStatusBadge(order.status)}</TableCell>
