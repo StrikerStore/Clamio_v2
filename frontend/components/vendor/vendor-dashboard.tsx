@@ -221,6 +221,9 @@ export function VendorDashboard() {
   // Loading states for reverse operations
   const [reverseLoading, setReverseLoading] = useState<{[key: string]: boolean}>({})
 
+  // Tab highlight animation state
+  const [highlightedTab, setHighlightedTab] = useState<string | null>(null)
+
   useEffect(() => {
     async function fetchAddress() {
       console.log("fetchAddress: Starting address fetch...");
@@ -603,6 +606,10 @@ export function VendorDashboard() {
         
         // Clear selection and refresh orders
         setSelectedMyOrders([]);
+        
+        // Highlight Handover tab to show the change
+        highlightTab("handover");
+        
         fetchGroupedOrders();
       } else {
         toast({
@@ -1400,6 +1407,9 @@ export function VendorDashboard() {
         // Clear selected orders
         setSelectedUnclaimedOrders([]);
         
+        // Highlight My Orders tab to show the change
+        highlightTab("my-orders");
+        
         // Refresh orders to update the UI
         console.log('🔄 FRONTEND: Refreshing orders after bulk claim...');
         try {
@@ -1437,6 +1447,32 @@ export function VendorDashboard() {
         top: 0,
         behavior: 'smooth'
       });
+    }
+  };
+
+  // Helper function to trigger tab highlight animation
+  const highlightTab = (tabName: string) => {
+    setHighlightedTab(tabName);
+    // Remove highlight after 2 seconds
+    setTimeout(() => {
+      setHighlightedTab(null);
+    }, 2000);
+  };
+
+  // Helper functions to calculate quantity sums for each tab
+  const getQuantitySumForTab = (tabName: string) => {
+    const orders = getFilteredOrdersForTab(tabName);
+    
+    if (tabName === "my-orders") {
+      // For My Orders, sum up the total_quantity from grouped orders
+      return orders.reduce((sum, order) => {
+        return sum + (order.total_quantity || 0);
+      }, 0);
+    } else {
+      // For All Orders and Handover, sum up individual order quantities
+      return orders.reduce((sum, order) => {
+        return sum + (order.quantity || 0);
+      }, 0);
     }
   };
 
@@ -1614,7 +1650,7 @@ export function VendorDashboard() {
                 <div>
                   <p className={`font-medium text-blue-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>All Orders</p>
                   <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
-                    {orders.filter((o) => o.status === "unclaimed").length}
+                    {getQuantitySumForTab("all-orders")}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
@@ -1633,7 +1669,7 @@ export function VendorDashboard() {
                 <div>
                   <p className={`font-medium text-green-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>My Orders</p>
                   <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
-                    {orders.filter((o) => o.status === "claimed" && o.claimed_by === user?.warehouseId).length}
+                    {getQuantitySumForTab("my-orders")}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
@@ -1652,7 +1688,7 @@ export function VendorDashboard() {
                 <div>
                   <p className={`font-medium text-orange-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Handover</p>
                   <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
-                    {orders.filter((o) => o.status === "ready_for_handover" && o.claimed_by === user?.warehouseId && o.is_manifest === 1).length}
+                    {getQuantitySumForTab("handover")}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
@@ -1713,13 +1749,27 @@ export function VendorDashboard() {
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-4 border-b mb-4`}>
                 <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
-                    All ({getFilteredOrdersForTab("all-orders").length})
+                    All ({getQuantitySumForTab("all-orders")})
                   </TabsTrigger>
-                  <TabsTrigger value="my-orders" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
-                    My Orders ({getFilteredOrdersForTab("my-orders").length})
+                  <TabsTrigger 
+                    value="my-orders" 
+                    className={`${isMobile ? 'text-xs px-2 py-3' : ''} ${
+                      highlightedTab === "my-orders" 
+                        ? 'bg-green-100 text-green-700 border-green-300 shadow-lg scale-105 transition-all duration-300' 
+                        : ''
+                    }`}
+                  >
+                    My Orders ({getQuantitySumForTab("my-orders")})
                   </TabsTrigger>
-                  <TabsTrigger value="handover" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
-                    Handover ({getFilteredOrdersForTab("handover").length})
+                  <TabsTrigger 
+                    value="handover" 
+                    className={`${isMobile ? 'text-xs px-2 py-3' : ''} ${
+                      highlightedTab === "handover" 
+                        ? 'bg-orange-100 text-orange-700 border-orange-300 shadow-lg scale-105 transition-all duration-300' 
+                        : ''
+                    }`}
+                  >
+                    Handover ({getQuantitySumForTab("handover")})
                   </TabsTrigger>
                 </TabsList>
 
@@ -1773,10 +1823,10 @@ export function VendorDashboard() {
                     </Button>
                   )}
                   
-                  {activeTab === "my-orders" && (
-                    <div className={`flex gap-2 ${isMobile ? 'flex-col' : 'items-center'}`}>
+                  {activeTab === "my-orders" && !isMobile && (
+                    <div className="flex gap-2 items-center">
                       <Select value={labelFormat} onValueChange={setLabelFormat}>
-                        <SelectTrigger className={`h-10 text-sm ${isMobile ? 'w-full' : 'w-36'}`}>
+                        <SelectTrigger className="h-10 text-sm w-36">
                           <SelectValue placeholder="Label Format" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1788,17 +1838,17 @@ export function VendorDashboard() {
                       <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
                         disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
-                        className={`h-10 text-sm ${isMobile ? 'w-full' : 'whitespace-nowrap px-6 min-w-fit'}`}
+                        className="h-10 text-sm whitespace-nowrap px-6 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                       >
                         {bulkDownloadLoading ? (
                           <>
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            {isMobile ? 'Generating...' : 'Generating...'}
+                            Generating...
                           </>
                         ) : (
                           <>
                             <Download className="w-4 h-4 mr-2" />
-                            {isMobile ? `Download (${selectedMyOrders.length})` : `Download (${selectedMyOrders.length})`}
+                            Download ({selectedMyOrders.length})
                           </>
                         )}
                       </Button>
@@ -1811,8 +1861,7 @@ export function VendorDashboard() {
                             .filter(order => selectedMyOrders.includes(order.order_id))
                             .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
                         }
-                        variant="outline"
-                        className={`h-10 text-sm ${isMobile ? 'w-full' : 'whitespace-nowrap px-6 min-w-fit'}`}
+                        className="h-10 text-sm whitespace-nowrap px-6 min-w-fit bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg text-white"
                         title={
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -1823,13 +1872,13 @@ export function VendorDashboard() {
                       >
                         {bulkMarkReadyLoading ? (
                           <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                            {isMobile ? 'Processing...' : 'Processing...'}
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Processing...
                           </>
                         ) : (
                           <>
                             <CheckCircle className="w-4 h-4 mr-2" />
-                            {isMobile ? `Mark Ready (${selectedMyOrders.length})` : `Mark Ready (${selectedMyOrders.length})`}
+                            Mark Ready ({selectedMyOrders.length})
                           </>
                         )}
                       </Button>
@@ -2026,25 +2075,6 @@ export function VendorDashboard() {
                   ) : isMobile ? (
                     /* Mobile Card Layout */
                     <div className="space-y-3">
-                      <div className="flex items-center p-3 bg-gray-50 rounded-lg sticky top-0 z-30">
-                        <input
-                          type="checkbox"
-                          onChange={(e) => {
-                            const myOrders = getFilteredOrdersForTab("my-orders")
-                            if (e.target.checked) {
-                              setSelectedMyOrders(myOrders.map((o) => o.order_id))
-                            } else {
-                              setSelectedMyOrders([])
-                            }
-                          }}
-                          checked={
-                            selectedMyOrders.length > 0 &&
-                            selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
-                          }
-                          className="mr-2"
-                        />
-                        <span className="text-sm font-medium">Select All</span>
-                      </div>
                       {getFilteredOrdersForTab("my-orders").map((order, index) => (
                         <Card 
                           key={`${order.order_id}-${index}`} 
@@ -2079,13 +2109,11 @@ export function VendorDashboard() {
                                   <p className="text-xs text-gray-500">
                                     {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
                                   </p>
-                                  {getStatusBadge(order.status)}
                                 </div>
                               </div>
                                    <div className="text-right">
                                      <div className="text-xs text-gray-500">Total</div>
                                      <div className="font-medium text-green-600">{order.total_quantity || 0}</div>
-                                     <div className="text-xs text-blue-600 font-semibold">{order.total_quantity || 0} items</div>
                                    </div>
                             </div>
                             
@@ -2114,56 +2142,6 @@ export function VendorDashboard() {
                                    <div className="text-xs font-medium">{product.quantity || 0}</div>
                                 </div>
                               ))}
-                            </div>
-                            
-                            <div className="flex flex-col gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDownloadLabel(order.order_id, labelFormat);
-                                }}
-                                disabled={labelDownloadLoading[order.order_id] || bulkDownloadLoading}
-                                className="w-full text-xs"
-                              >
-                                {labelDownloadLoading[order.order_id] ? (
-                                  <>
-                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-1"></div>
-                                    Loading...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Download className="w-3 h-3 mr-1" />
-                                    Download Label
-                                  </>
-                                )}
-                              </Button>
-                              <div className="grid grid-cols-2 gap-2">
-                                <Button 
-                                  size="sm" 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleMarkReady(order.order_id);
-                                  }}
-                                  disabled={!order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false}
-                                  className="text-xs"
-                                >
-                                  Mark Ready
-                                </Button>
-                                <Button 
-                                  size="sm" 
-                                  variant="destructive" 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
-                                  }}
-                                  disabled={reverseLoading[order.order_id]}
-                                  className="text-xs"
-                                >
-                                  {reverseLoading[order.order_id] ? 'Reversing...' : 'Reverse'}
-                                </Button>
-                              </div>
                             </div>
                           </div>
                         </Card>
@@ -2197,7 +2175,6 @@ export function VendorDashboard() {
                             <TableHead>Products</TableHead>
                             <TableHead className="w-16 text-center">Count</TableHead>
                             <TableHead>Status</TableHead>
-                            <TableHead>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2281,54 +2258,6 @@ export function VendorDashboard() {
                                 </div>
                               </TableCell>
                               <TableCell>{getStatusBadge(order.status)}</TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-1 min-w-fit">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleDownloadLabel(order.order_id, labelFormat)}
-                                    disabled={labelDownloadLoading[order.order_id] || bulkDownloadLoading}
-                                    className="text-xs px-2 py-1 h-8"
-                                  >
-                                    {labelDownloadLoading[order.order_id] ? (
-                                      <>
-                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-1"></div>
-                                        Loading...
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Download className="w-3 h-3 mr-1" />
-                                        Label
-                                      </>
-                                    )}
-                                  </Button>
-                                  <Button 
-                                    size="sm" 
-                                    onClick={() => handleMarkReady(order.order_id)}
-                                    disabled={!order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false}
-                                    className="text-xs px-2 py-1 h-8"
-                                    title={!order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false ? "Label must be downloaded first" : "Mark order as ready for handover"}
-                                  >
-                                    Ready
-                                  </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="destructive" 
-                                    onClick={() => handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id))}
-                                    disabled={reverseLoading[order.order_id]}
-                                    className="text-xs px-2 py-1 h-8"
-                                  >
-                                    {reverseLoading[order.order_id] ? (
-                                      <>
-                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                                        Reversing...
-                                      </>
-                                    ) : (
-                                      'Reverse'
-                                    )}
-                                  </Button>
-                                </div>
-                              </TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -2465,6 +2394,104 @@ export function VendorDashboard() {
                       <Package className="w-5 h-5 mr-2" />
                       Claim Selected ({selectedUnclaimedOrders.length})
                     </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Bottom Buttons for Mobile My Orders */}
+              {isMobile && activeTab === "my-orders" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-50">
+                  <div className="flex flex-col gap-3">
+                    {/* Label Format Selector and Select All */}
+                    <div className="flex items-center gap-3">
+                      <Select value={labelFormat} onValueChange={setLabelFormat}>
+                        <SelectTrigger className="h-10 text-sm flex-1">
+                          <SelectValue placeholder="Label Format" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="thermal">Thermal (4x6)</SelectItem>
+                          <SelectItem value="a4">A4 Format</SelectItem>
+                          <SelectItem value="four-in-one">Four in One</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      
+                      {/* Select All Checkbox */}
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          onChange={(e) => {
+                            const myOrders = getFilteredOrdersForTab("my-orders")
+                            if (e.target.checked) {
+                              setSelectedMyOrders(myOrders.map((o) => o.order_id))
+                            } else {
+                              setSelectedMyOrders([])
+                            }
+                          }}
+                          checked={
+                            selectedMyOrders.length > 0 &&
+                            selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
+                          }
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm font-medium">All</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      {/* Move to Top Button */}
+                      <Button
+                        onClick={scrollToTop}
+                        variant="outline"
+                        size="sm"
+                        className="h-10 w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50"
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                      </Button>
+                      
+                      {/* Download Label Button */}
+                      <Button 
+                        onClick={() => handleBulkDownloadLabels("my-orders")}
+                        disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
+                        className="flex-1 h-12 text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg"
+                      >
+                        {bulkDownloadLoading ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-5 h-5 mr-2" />
+                            Download ({selectedMyOrders.length})
+                          </>
+                        )}
+                      </Button>
+                      
+                      {/* Mark Ready Button */}
+                      <Button 
+                        onClick={() => handleBulkMarkReady()}
+                        disabled={
+                          selectedMyOrders.length === 0 || 
+                          bulkMarkReadyLoading ||
+                          getFilteredOrdersForTab("my-orders")
+                            .filter(order => selectedMyOrders.includes(order.order_id))
+                            .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
+                        }
+                        className="flex-1 h-12 text-base font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg"
+                      >
+                        {bulkMarkReadyLoading ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-5 h-5 mr-2" />
+                            Ready ({selectedMyOrders.length})
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
