@@ -2990,6 +2990,7 @@ export function AdminDashboard() {
         </Card>
       </div>
 
+
       {/* Notification Detail Dialog */}
       <Dialog open={showNotificationDialog} onOpenChange={setShowNotificationDialog}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">

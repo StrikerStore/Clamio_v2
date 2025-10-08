@@ -1612,17 +1612,30 @@ async function generateFormattedLabelPDF(shippingUrl, format) {
       const a4Page = formattedPdf.addPage([595, 842]); // A4 size in points
       const [originalPage] = await formattedPdf.embedPages([originalPdf.getPage(0)]);
       
-      // Calculate positions for 4 labels (2x2 grid)
-      const labelWidth = 288; // 4x6 label width in points
-      const labelHeight = 432; // 4x6 label height in points
-      const margin = 10; // Margin between labels
+      // Original label dimensions
+      const originalLabelWidth = 288; // 4x6 label width in points
+      const originalLabelHeight = 432; // 4x6 label height in points
+      
+      // Layout parameters
+      const horizontalMargin = 8; // Side margins
+      const topBottomMargin = 3; // Top and bottom margins (reduced)
+      const verticalGap = 12; // Gap between top and bottom rows
+      
+      // Calculate available space
+      const availableHeight = 842 - (2 * topBottomMargin) - verticalGap;
+      const scaledLabelHeight = availableHeight / 2; // Fit 2 rows perfectly
+      const scaledLabelWidth = (scaledLabelHeight / originalLabelHeight) * originalLabelWidth;
+      
+      // Calculate vertical positions for proper spacing
+      const topRowY = 842 - topBottomMargin - scaledLabelHeight;
+      const bottomRowY = topBottomMargin;
       
       // Positions for 4 labels: top-left, top-right, bottom-left, bottom-right
       const positions = [
-        [margin, 842 - labelHeight - margin], // top-left
-        [595 - labelWidth - margin, 842 - labelHeight - margin], // top-right
-        [margin, margin], // bottom-left
-        [595 - labelWidth - margin, margin] // bottom-right
+        [horizontalMargin, topRowY], // top-left
+        [595 - scaledLabelWidth - horizontalMargin, topRowY], // top-right
+        [horizontalMargin, bottomRowY], // bottom-left
+        [595 - scaledLabelWidth - horizontalMargin, bottomRowY] // bottom-right
       ];
       
       // Draw the same label 4 times
@@ -1630,8 +1643,8 @@ async function generateFormattedLabelPDF(shippingUrl, format) {
         a4Page.drawPage(originalPage, {
           x: x,
           y: y,
-          width: labelWidth,
-          height: labelHeight
+          width: scaledLabelWidth,
+          height: scaledLabelHeight
         });
       }
     }
@@ -2826,17 +2839,30 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
           
           const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
           
-          // Calculate positions for 4 labels (2x2 grid)
-          const labelWidth = 288; // 4x6 label width in points
-          const labelHeight = 432; // 4x6 label height in points
-          const margin = 10; // Margin between labels
+          // Original label dimensions
+          const originalLabelWidth = 288; // 4x6 label width in points
+          const originalLabelHeight = 432; // 4x6 label height in points
+          
+          // Layout parameters
+          const horizontalMargin = 8; // Side margins
+          const topBottomMargin = 3; // Top and bottom margins (reduced)
+          const verticalGap = 12; // Gap between top and bottom rows
+          
+          // Calculate available space
+          const availableHeight = 842 - (2 * topBottomMargin) - verticalGap;
+          const scaledLabelHeight = availableHeight / 2; // Fit 2 rows perfectly
+          const scaledLabelWidth = (scaledLabelHeight / originalLabelHeight) * originalLabelWidth;
+          
+          // Calculate vertical positions for proper spacing
+          const topRowY = 842 - topBottomMargin - scaledLabelHeight;
+          const bottomRowY = topBottomMargin;
           
           // Positions for 4 labels: top-left, top-right, bottom-left, bottom-right
           const positions = [
-            [margin, 842 - labelHeight - margin], // top-left
-            [595 - labelWidth - margin, 842 - labelHeight - margin], // top-right
-            [margin, margin], // bottom-left
-            [595 - labelWidth - margin, margin] // bottom-right
+            [horizontalMargin, topRowY], // top-left
+            [595 - scaledLabelWidth - horizontalMargin, topRowY], // top-right
+            [horizontalMargin, bottomRowY], // bottom-left
+            [595 - scaledLabelWidth - horizontalMargin, bottomRowY] // bottom-right
           ];
           
           // Process each label in the batch
@@ -2859,8 +2885,8 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
               a4Page.drawPage(originalPage, {
                 x: x,
                 y: y,
-                width: labelWidth,
-                height: labelHeight
+                width: scaledLabelWidth,
+                height: scaledLabelHeight
               });
               
               console.log(`    ✅ Added label for order ${label.order_id} at position ${j + 1}`);
