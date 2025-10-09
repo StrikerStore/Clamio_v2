@@ -719,7 +719,7 @@ export function VendorDashboard() {
     }
 
     return (
-      <Badge className={colors[status as keyof typeof colors]}>
+      <Badge className={`${colors[status as keyof typeof colors]} text-xs sm:text-sm truncate max-w-full`}>
         {displayNames[status as keyof typeof displayNames] || status.toUpperCase()}
       </Badge>
     )
@@ -1621,19 +1621,19 @@ export function VendorDashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header - Mobile Responsive Layout */}
       <div className="bg-white shadow-sm border-b sticky top-0 z-50 w-full">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between py-4 gap-4">
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
+          <div className="flex items-center justify-between py-3 sm:py-4 gap-2 sm:gap-4">
             {/* Dashboard Name and Welcome */}
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Settings className="w-5 h-5 text-white" />
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-lg' : 'text-xl'}`}>
+                <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
                   {isMobile ? 'Clamio - Vendor' : 'Clamio - Vendor'}
                 </h1>
                 {!isMobile && (
-                <p className="text-sm text-gray-600 truncate">
+                <p className="text-sm sm:text-base text-gray-600 truncate">
                   Welcome back, {user?.name}
                 </p>
                 )}
@@ -1682,36 +1682,36 @@ export function VendorDashboard() {
 
           {/* Mobile Menu */}
           {isMobile && isMobileMenuOpen && (
-            <div className="border-t bg-white py-4">
-              <div className="space-y-3">
+            <div className="border-t bg-white py-3">
+              <div className="space-y-2">
                 <div className="px-2">
-                  <p className="text-sm text-gray-600 truncate">Welcome, {user?.name}</p>
-                  <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+                  <p className="text-xs sm:text-sm text-gray-600 truncate">Welcome, {user?.name}</p>
+                  <p className="text-[10px] sm:text-xs text-gray-400 truncate break-all">{user?.email}</p>
                 </div>
                 
                 {/* Vendor Address in Mobile Menu */}
                 {addressLoading ? (
                   <div className="px-2">
-                    <span className="text-xs text-gray-400">Loading address...</span>
+                    <span className="text-[10px] sm:text-xs text-gray-400">Loading address...</span>
                   </div>
                 ) : addressError ? (
                   <div className="px-2">
-                    <span className="text-xs text-red-500">{addressError}</span>
+                    <span className="text-[10px] sm:text-xs text-red-500 break-all">{addressError}</span>
                   </div>
                 ) : vendorAddress ? (
-                  <div className="px-2 border-t pt-3">
-                    <div className="text-xs text-gray-900 font-semibold">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
-                    <div className="text-xs text-gray-700">{vendorAddress.address}</div>
-                    <div className="text-xs text-gray-700">{vendorAddress.city}, {vendorAddress.pincode}</div>
+                  <div className="px-2 border-t pt-2">
+                    <div className="text-[10px] sm:text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
+                    <div className="text-[10px] sm:text-xs text-gray-700 truncate">{vendorAddress.address}</div>
+                    <div className="text-[10px] sm:text-xs text-gray-700 truncate">{vendorAddress.city}, {vendorAddress.pincode}</div>
                   </div>
                 ) : null}
 
                 <Button 
                   variant="outline" 
                   onClick={logout} 
-                  className="w-full flex items-center justify-center gap-2"
+                  className="w-full flex items-center justify-center gap-2 text-sm"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-3 h-3 sm:w-4 sm:h-4" />
                 Logout
               </Button>
             </div>
@@ -1720,9 +1720,9 @@ export function VendorDashboard() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-3 sm:py-4 md:py-8">
         {/* Stats Cards */}
-        <div className={`grid gap-4 md:gap-6 mb-6 md:mb-8 ${
+        <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${
           isMobile ? 'grid-cols-2' : 
           isTablet ? 'grid-cols-2' : 
           'grid-cols-4'
@@ -1731,16 +1731,16 @@ export function VendorDashboard() {
             className={`bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "all-orders" ? 'ring-2 ring-blue-300 ring-offset-2' : ''}`}
             onClick={() => setActiveTab("all-orders")}
           >
-            <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={`font-medium text-blue-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>All Orders</p>
-                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className={`font-medium text-blue-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>All Orders</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
                     {getQuantitySumForTab("all-orders")}
                   </p>
                 </div>
-                <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
-                  <Package className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Package className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1750,16 +1750,16 @@ export function VendorDashboard() {
             className={`bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "my-orders" ? 'ring-2 ring-green-300 ring-offset-2' : ''}`}
             onClick={() => setActiveTab("my-orders")}
           >
-            <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={`font-medium text-green-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>My Orders</p>
-                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className={`font-medium text-green-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>My Orders</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
                     {getQuantitySumForTab("my-orders")}
                   </p>
                 </div>
-                <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
-                  <CheckCircle className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <CheckCircle className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1769,16 +1769,16 @@ export function VendorDashboard() {
             className={`bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "handover" ? 'ring-2 ring-orange-300 ring-offset-2' : ''}`}
             onClick={() => setActiveTab("handover")}
           >
-            <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={`font-medium text-orange-100 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Handover</p>
-                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className={`font-medium text-orange-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Handover</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
                     {getQuantitySumForTab("handover")}
                   </p>
                 </div>
-                <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
-                  <Upload className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Upload className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1786,14 +1786,14 @@ export function VendorDashboard() {
 
           {/* Coming Soon Card - Placeholder */}
           <Card className="bg-gradient-to-br from-gray-300 to-gray-400 text-gray-600 border-0 shadow-lg opacity-50">
-            <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={`font-medium text-gray-500 opacity-90 ${isMobile ? 'text-xs' : 'text-sm'}`}>Coming Soon</p>
-                  <p className={`font-bold mt-1 ${isMobile ? 'text-xl' : 'text-2xl'}`}>--</p>
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className={`font-medium text-gray-500 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Coming Soon</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>--</p>
                 </div>
-                <div className={`bg-white/20 rounded-lg flex items-center justify-center ${isMobile ? 'w-10 h-10' : 'w-12 h-12'}`}>
-                  <Settings className={`${isMobile ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Settings className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1802,44 +1802,53 @@ export function VendorDashboard() {
 
         {/* Main Content */}
         <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className={`${isMobile ? 'text-lg' : 'text-xl'}`}>Order Management</CardTitle>
-                {!isMobile && <CardDescription>Manage your orders across different stages</CardDescription>}
+          <CardHeader className="p-3 sm:p-4 md:p-6">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <CardTitle className={`${isMobile ? 'text-lg sm:text-xl' : 'text-2xl'} ${isMobile ? 'leading-tight' : ''}`}>
+                  {isMobile ? (
+                    <>
+                      Order<br />
+                      Management
+                    </>
+                  ) : (
+                    'Order Management'
+                  )}
+                </CardTitle>
+                {!isMobile && <CardDescription className="text-sm sm:text-base truncate">Manage your orders across different stages</CardDescription>}
               </div>
               <Button
                 onClick={handleRefreshOrders}
                 disabled={ordersRefreshing}
                 variant="outline"
-                className="h-10 bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700"
+                className={`${isMobile ? 'h-8 sm:h-10 text-sm sm:text-base px-2 sm:px-4' : 'h-10'} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700 flex-shrink-0`}
                 size="default"
               >
                 {ordersRefreshing ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Refreshing...
+                    <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
+                    {isMobile ? 'Loading' : 'Refreshing...'}
                   </>
                 ) : (
                   <>
-                    <RefreshCw className="w-4 h-4 mr-2" />
+                    <RefreshCw className={`${isMobile ? 'w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2' : 'w-4 h-4 mr-2'}`} />
                     Refresh
                   </>
                 )}
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-2 sm:p-4 md:p-6">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Fixed Controls Section */}
-              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-4 border-b mb-4`}>
-                <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-4' : 'mb-6'}`}>
-                  <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
+              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
+                <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
+                  <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     All ({getQuantitySumForTab("all-orders")})
                   </TabsTrigger>
                   <TabsTrigger 
                     value="my-orders" 
-                    className={`${isMobile ? 'text-xs px-2 py-3' : ''} ${
+                    className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''} ${
                       highlightedTab === "my-orders" 
                         ? 'bg-green-100 text-green-700 border-green-300 shadow-lg scale-105 transition-all duration-300' 
                         : ''
@@ -1849,7 +1858,7 @@ export function VendorDashboard() {
                   </TabsTrigger>
                   <TabsTrigger 
                     value="handover" 
-                    className={`${isMobile ? 'text-xs px-2 py-3' : ''} ${
+                    className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''} ${
                       highlightedTab === "handover" 
                         ? 'bg-orange-100 text-orange-700 border-orange-300 shadow-lg scale-105 transition-all duration-300' 
                         : ''
@@ -1868,13 +1877,27 @@ export function VendorDashboard() {
                         placeholder="Search"
                         value={getCurrentTabFilters().searchTerm}
                         onChange={(e) => updateCurrentTabFilter('searchTerm', e.target.value)}
-                        className="pl-10 pr-10"
+                        className={`pl-10 ${getCurrentTabFilters().searchTerm && isMobile ? 'pr-20' : 'pr-10'}`}
+                        id="vendor-search-input"
                       />
+                      {getCurrentTabFilters().searchTerm && isMobile && (
+                        <button
+                          onClick={() => {
+                            document.getElementById('vendor-search-input')?.blur();
+                          }}
+                          className="absolute right-11 top-1/2 transform -translate-y-1/2 text-green-500 hover:text-green-700 transition-colors"
+                          type="button"
+                          title="Done"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                      )}
                       {getCurrentTabFilters().searchTerm && (
                         <button
                           onClick={() => updateCurrentTabFilter('searchTerm', '')}
                           className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                           type="button"
+                          title="Clear"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -1984,11 +2007,11 @@ export function VendorDashboard() {
                 <TabsContent value="all-orders" className="mt-0">
                   {/* Mobile Card Layout */}
                   {isMobile ? (
-                    <div className="space-y-3">
+                    <div className="space-y-2.5 sm:space-y-3">
                       {getFilteredOrdersForTab("all-orders").map((order, index) => (
                         <Card 
                           key={`${order.unique_id}-${index}`} 
-                          className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                          className="p-2.5 sm:p-3 cursor-pointer hover:bg-gray-50 transition-colors"
                           onClick={() => {
                             if (selectedUnclaimedOrders.includes(order.unique_id)) {
                               setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
@@ -1997,8 +2020,8 @@ export function VendorDashboard() {
                             }
                           }}
                         >
-                          <div className="space-y-3">
-                            <div className="flex items-start gap-3">
+                          <div className="space-y-2 sm:space-y-3">
+                            <div className="flex items-start gap-2 sm:gap-3">
                             <input
                               type="checkbox"
                                 checked={selectedUnclaimedOrders.includes(order.unique_id)}
@@ -2010,13 +2033,13 @@ export function VendorDashboard() {
                                     setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
                                   }
                                 }}
-                                className="mt-1"
+                                className="mt-1 w-3.5 h-3.5 sm:w-4 sm:h-4"
                                 onClick={(e) => e.stopPropagation()}
                               />
                               <img
                                 src={order.product_image || "/placeholder.svg"}
                                 alt={order.product_name}
-                                className="w-16 h-16 rounded-lg object-cover cursor-pointer"
+                                className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})
@@ -2026,25 +2049,25 @@ export function VendorDashboard() {
                                 }}
                               />
                               <div className="flex-1 min-w-0">
-                                <h4 className="font-medium text-sm truncate">{order.order_id}</h4>
-                                <p className="text-xs text-gray-600 break-words leading-relaxed">{order.product_name}</p>
-                                <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {order.product_code}</p>
+                                <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                <p className="text-xs sm:text-sm text-gray-600 break-words leading-relaxed">{order.product_name}</p>
+                                <p className="text-xs sm:text-sm text-gray-500 break-words leading-relaxed">Code: {order.product_code}</p>
                               </div>
                             </div>
-                            <div className="grid grid-cols-3 gap-2 text-xs">
+                            <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-xs sm:text-sm">
                               <div>
                                 <span className="text-gray-500">Date:</span>
-                                <p className="font-medium">
+                                <p className="font-medium truncate">
                                   {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
                                 </p>
                               </div>
                               <div>
                                 <span className="text-gray-500">Size:</span>
-                                <p className="font-medium text-red-600">{order.size || "-"}</p>
+                                <p className="font-medium text-red-600 truncate">{order.size || "-"}</p>
                               </div>
                               <div>
-                                <span className="text-gray-500">Quantity:</span>
-                                <p className="font-medium">{order.quantity || "-"}</p>
+                                <span className="text-gray-500">Qty:</span>
+                                <p className="font-medium truncate">{order.quantity || "-"}</p>
                               </div>
                             </div>
                           </div>
@@ -2161,13 +2184,13 @@ export function VendorDashboard() {
                     </div>
                   ) : isMobile ? (
                     /* Mobile Card Layout */
-                    <div className="space-y-3">
+                    <div className="space-y-2.5 sm:space-y-3">
                       {getFilteredOrdersForTab("my-orders").map((order, index) => {
                         const hasLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === '1' || order.label_downloaded === true;
                         return (
                         <Card 
                           key={`${order.order_id}-${index}`} 
-                          className={`p-3 cursor-pointer transition-colors ${
+                          className={`p-2.5 sm:p-3 cursor-pointer transition-colors ${
                             hasLabelDownloaded 
                               ? 'bg-green-50 hover:bg-green-100 border-green-200' 
                               : 'hover:bg-gray-50'
@@ -2181,10 +2204,10 @@ export function VendorDashboard() {
                           }}
                         >
                         
-                          <div className="space-y-2">
+                          <div className="space-y-1.5 sm:space-y-2">
                             {/* Top Row: Checkbox | Order Info | Total */}
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                              <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
                                 <input
                                   type="checkbox"
                                   checked={selectedMyOrders.includes(order.order_id)}
@@ -2196,14 +2219,14 @@ export function VendorDashboard() {
                                       setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
                                     }
                                   }}
-                                  className="w-4 h-4 flex-shrink-0"
+                                  className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0"
                                   onClick={(e) => e.stopPropagation()}
                                 />
                                 
                                 {/* Order Info */}
                                 <div className="flex-1 min-w-0">
-                                  <h4 className="font-medium text-sm truncate">{order.order_id}</h4>
-                                  <p className="text-xs text-gray-500 truncate">
+                                  <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                  <p className="text-xs sm:text-sm text-gray-500 truncate">
                                     {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
                                   </p>
                                 </div>
@@ -2211,8 +2234,8 @@ export function VendorDashboard() {
                               
                               {/* Total Count - Right aligned */}
                               <div className="text-right flex-shrink-0">
-                                <div className="text-xs text-gray-500">Total</div>
-                                <div className="text-lg font-bold text-green-600">{order.total_quantity || 0}</div>
+                                <div className="text-sm text-gray-500">Total</div>
+                                <div className="text-xl font-bold text-green-600">{order.total_quantity || 0}</div>
                               </div>
                             </div>
                             
@@ -2468,29 +2491,29 @@ export function VendorDashboard() {
                 <TabsContent value="handover" className="mt-0">
                   {/* Mobile Card Layout */}
                   {isMobile ? (
-                    <div className="space-y-3">
+                    <div className="space-y-2.5 sm:space-y-3">
                       {getFilteredOrdersForTab("handover").map((order, index) => (
-                        <Card key={`${order.order_id}-${index}`} className="p-3">
-                          <div className="space-y-3">
-                            <div className="flex items-start gap-3">
+                        <Card key={`${order.order_id}-${index}`} className="p-2.5 sm:p-3">
+                          <div className="space-y-2 sm:space-y-3">
+                            <div className="flex items-start gap-2 sm:gap-3">
                               <img
                                 src={order.product_image || "/placeholder.svg"}
                                 alt={order.product_name || order.product}
-                                className="w-16 h-16 rounded-lg object-cover cursor-pointer"
+                                className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0"
                                 onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
                                 onError={(e) => {
                                   e.currentTarget.src = "/placeholder.svg";
                                 }}
                               />
                               <div className="flex-1 min-w-0">
-                                <h4 className="font-medium text-sm truncate">{order.order_id}</h4>
-                                <p className="text-xs text-gray-600 break-words leading-relaxed">{order.product_name || order.product}</p>
+                                <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                <p className="text-xs sm:text-sm text-gray-600 break-words leading-relaxed">{order.product_name || order.product}</p>
                                 <div className="mt-1">
                                   {getStatusBadge(order.status)}
                                 </div>
                               </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="grid grid-cols-2 gap-1.5 sm:gap-2 text-xs sm:text-sm">
                               <div>
                                 <span className="text-gray-500">Date:</span>
                                 <p className="font-medium">
@@ -2572,26 +2595,26 @@ export function VendorDashboard() {
 
               {/* Fixed Bottom Bulk Claim Button for Mobile All Orders */}
               {isMobile && activeTab === "all-orders" && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-50">
-                  <div className="flex items-center gap-3">
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex items-center gap-2 sm:gap-3">
                     {/* Move to Top Button */}
                     <Button
                       onClick={scrollToTop}
                       variant="outline"
                       size="sm"
-                      className="h-10 w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50"
+                      className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
                     >
-                      <ChevronUp className="w-4 h-4" />
+                      <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </Button>
                     
                     {/* Bulk Claim Button */}
                     <Button 
                       onClick={() => handleBulkClaimOrders()} 
                       disabled={selectedUnclaimedOrders.length === 0} 
-                      className="flex-1 h-12 text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg"
+                      className="flex-1 h-10 sm:h-12 text-base sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
                     >
-                      <Package className="w-5 h-5 mr-2" />
-                      Claim Selected ({selectedUnclaimedOrders.length})
+                      <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="truncate">Claim ({selectedUnclaimedOrders.length})</span>
                     </Button>
                   </div>
                 </div>
@@ -2599,12 +2622,12 @@ export function VendorDashboard() {
 
               {/* Fixed Bottom Buttons for Mobile My Orders */}
               {isMobile && activeTab === "my-orders" && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-50">
-                  <div className="flex flex-col gap-3">
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex flex-col gap-2 sm:gap-3">
                     {/* Label Format Selector and Select All */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
                       <Select value={labelFormat} onValueChange={setLabelFormat}>
-                        <SelectTrigger className="h-10 text-sm flex-1">
+                        <SelectTrigger className="h-9 sm:h-10 text-sm sm:text-base flex-1">
                           <SelectValue placeholder="Label Format" />
                         </SelectTrigger>
                         <SelectContent>
@@ -2615,7 +2638,7 @@ export function VendorDashboard() {
                       </Select>
                       
                       {/* Select All Checkbox */}
-                      <div className="flex items-center gap-2 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0">
                         <input
                           type="checkbox"
                           onChange={(e) => {
@@ -2630,38 +2653,38 @@ export function VendorDashboard() {
                             selectedMyOrders.length > 0 &&
                             selectedMyOrders.length === getFilteredOrdersForTab("my-orders").length
                           }
-                          className="w-4 h-4"
+                          className="w-3.5 h-3.5 sm:w-4 sm:h-4"
                         />
-                        <span className="text-sm font-medium">All</span>
+                        <span className="text-sm sm:text-base font-medium">All</span>
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
                       {/* Move to Top Button */}
                       <Button
                         onClick={scrollToTop}
                         variant="outline"
                         size="sm"
-                        className="h-10 w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50"
+                        className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
                       >
-                        <ChevronUp className="w-4 h-4" />
+                        <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                       </Button>
                       
                       {/* Download Label Button */}
                       <Button 
                         onClick={() => handleBulkDownloadLabels("my-orders")}
                         disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
-                        className="flex-1 h-12 text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg"
+                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
                       >
                         {bulkDownloadLoading ? (
                           <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            Generating...
+                            <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
+                            <span className="truncate">{isMobile ? 'Loading' : 'Generating...'}</span>
                           </>
                         ) : (
                           <>
-                            <Download className="w-5 h-5 mr-2" />
-                            Download ({selectedMyOrders.length})
+                            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                            <span className="truncate">Download ({selectedMyOrders.length})</span>
                           </>
                         )}
                       </Button>
@@ -2676,17 +2699,17 @@ export function VendorDashboard() {
                             .filter(order => selectedMyOrders.includes(order.order_id))
                             .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
                         }
-                        className="flex-1 h-12 text-base font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg"
+                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
                       >
                         {bulkMarkReadyLoading ? (
                           <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            Processing...
+                            <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
+                            <span className="truncate">{isMobile ? 'Loading' : 'Processing...'}</span>
                           </>
                         ) : (
                           <>
-                            <CheckCircle className="w-5 h-5 mr-2" />
-                            Ready ({getReadyOrdersQuantitySum()})
+                            <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                            <span className="truncate">Ready ({getReadyOrdersQuantitySum()})</span>
                           </>
                         )}
                       </Button>
@@ -2695,8 +2718,8 @@ export function VendorDashboard() {
                 </div>
               )}
 
-              {/* Fixed Move to Top Button for Desktop All Orders */}
-              {!isMobile && activeTab === "all-orders" && (
+              {/* Fixed Move to Top Button for Desktop All Orders, My Orders, and Handover */}
+              {!isMobile && (activeTab === "all-orders" || activeTab === "my-orders" || activeTab === "handover") && (
                 <Button
                   onClick={scrollToTop}
                   variant="outline"

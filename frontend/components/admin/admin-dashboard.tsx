@@ -54,7 +54,10 @@ import {
   Info,
   RefreshCw,
   ChevronDown,
+  ChevronUp,
   ExternalLink,
+  Menu,
+  X,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -176,6 +179,8 @@ export function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("orders")
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined)
+  const [dateTo, setDateTo] = useState<Date | undefined>(undefined)
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
   const [selectedVendors, setSelectedVendors] = useState<string[]>([])
   const [selectedCarriers, setSelectedCarriers] = useState<string[]>([])
@@ -326,6 +331,7 @@ export function AdminDashboard() {
   const [carrierEditState, setCarrierEditState] = useState<{ open: boolean; carrierId: string | null; carrier_id: string; status: string }>({ open: false, carrierId: null, carrier_id: "", status: "active" })
 
   const { isMobile } = useDeviceType()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const getStatusBadge = (status: string) => {
     const colors = {
@@ -347,10 +353,10 @@ export function AdminDashboard() {
 
     // Handle undefined or null status
     if (!status) {
-      return <Badge className="bg-gray-100 text-gray-800">UNKNOWN</Badge>
+      return <Badge className="bg-gray-100 text-gray-800 text-xs sm:text-sm truncate">UNKNOWN</Badge>
     }
 
-    return <Badge className={colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"}>{status.replace("_", " ").toUpperCase()}</Badge>
+    return <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full`}>{status.replace("_", " ").toUpperCase()}</Badge>
   }
 
   const getPriorityBadge = (priority: string) => {
@@ -384,7 +390,7 @@ export function AdminDashboard() {
   const getFilteredOrdersForTab = (tab: string) => {
     const baseOrders = orders
 
-    // Apply search and status filters
+    // Apply search, status, and date filters
     return baseOrders.filter((order) => {
       const matchesSearch =
         order.order_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -392,7 +398,24 @@ export function AdminDashboard() {
         order.vendor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.product_name?.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesStatus = statusFilter === "all" || order.status === statusFilter
-      return matchesSearch && matchesStatus
+      
+      // Date filtering
+      let matchesDate = true;
+      if (order.created_at) {
+        const orderDate = new Date(order.created_at);
+        if (dateFrom) {
+          const fromDate = new Date(dateFrom);
+          fromDate.setHours(0, 0, 0, 0);
+          matchesDate = matchesDate && orderDate >= fromDate;
+        }
+        if (dateTo) {
+          const toDate = new Date(dateTo);
+          toDate.setHours(23, 59, 59, 999);
+          matchesDate = matchesDate && orderDate <= toDate;
+        }
+      }
+      
+      return matchesSearch && matchesStatus && matchesDate
     })
   }
 
@@ -802,11 +825,33 @@ export function AdminDashboard() {
       const response = await apiClient.getAdminOrders();
       
       if (response.success) {
-        setOrders(response.data.orders);
+        const ordersData = response.data.orders;
+        setOrders(ordersData);
+        
+        // Calculate stats by summing quantities instead of counting orders
+        const totalQuantity = ordersData.reduce((sum: number, order: any) => {
+          const qty = parseInt(order.quantity) || 1;
+          return sum + qty;
+        }, 0);
+        
+        const unclaimedQuantity = ordersData
+          .filter((order: any) => (order.status || '').toString().toLowerCase() === 'unclaimed')
+          .reduce((sum: number, order: any) => {
+            const qty = parseInt(order.quantity) || 1;
+            return sum + qty;
+          }, 0);
+        
+        const claimedQuantity = ordersData
+          .filter((order: any) => (order.status || '').toString().toLowerCase() !== 'unclaimed')
+          .reduce((sum: number, order: any) => {
+            const qty = parseInt(order.quantity) || 1;
+            return sum + qty;
+          }, 0);
+        
         setOrdersStats({
-          totalOrders: response.data.totalOrders,
-          claimedOrders: response.data.claimedOrders,
-          unclaimedOrders: response.data.unclaimedOrders
+          totalOrders: totalQuantity,
+          claimedOrders: claimedQuantity,
+          unclaimedOrders: unclaimedQuantity
         });
       } else {
         toast({
@@ -823,6 +868,23 @@ export function AdminDashboard() {
       });
     } finally {
       setOrdersLoading(false);
+    }
+  };
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  };
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    // Reset status filter to "all" when switching to orders tab
+    if (value === 'orders') {
+      setStatusFilter('all');
+      setDateFrom(undefined);
+      setDateTo(undefined);
     }
   };
 
@@ -1188,97 +1250,202 @@ export function AdminDashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header - Fixed */}
       <div className="bg-white shadow-sm border-b sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                <Settings className="w-5 h-5 text-white" />
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
+          <div className="flex justify-between items-center py-3 sm:py-4">
+            <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">Clamio - Admin</h1>
-                <p className="text-sm text-gray-600">Welcome back, {user?.name}</p>
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">Claimio - Admin</h1>
+                {!isMobile && <p className="text-base text-gray-600 truncate">Welcome back, {user?.name}</p>}
               </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <div className="text-right">
-                <p className="text-sm font-medium text-gray-900 truncate max-w-[120px]">{user?.name}</p>
-                <p className="text-xs text-gray-500 break-all max-w-[200px]">{user?.email}</p>
+
+            {/* Desktop: Show notification bell, user info and logout */}
+            {!isMobile && (
+              <div className="flex items-center space-x-2">
+                {/* Notification Bell */}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setActiveTab('notifications')}
+                  className="p-2 relative"
+                >
+                  <Bell className="w-5 h-5" />
+                  {notificationStats && notificationStats.pending > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-semibold">
+                      {notificationStats.pending > 99 ? '99+' : notificationStats.pending}
+                    </span>
+                  )}
+                </Button>
+                
+                <div className="text-right">
+                  <p className="text-base font-medium text-gray-900 truncate max-w-[120px]">{user?.name}</p>
+                  <p className="text-sm text-gray-500 break-all max-w-[200px]">{user?.email}</p>
+                </div>
+                <Button 
+                  variant="outline" 
+                  onClick={logout}
+                  className="flex items-center gap-2 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Logout
+                </Button>
               </div>
-              <Button 
-                variant="outline" 
-                onClick={logout}
-                className="flex items-center gap-2 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-              >
-                <LogOut className="w-4 h-4" />
-                Logout
-              </Button>
-            </div>
+            )}
+
+            {/* Mobile: Notification Bell and Menu Button */}
+            {isMobile && (
+              <div className="flex items-center space-x-2">
+                {/* Notification Bell */}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    setActiveTab('notifications');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="p-2 relative"
+                >
+                  <Bell className="w-5 h-5" />
+                  {notificationStats && notificationStats.pending > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-semibold">
+                      {notificationStats.pending > 99 ? '99+' : notificationStats.pending}
+                    </span>
+                  )}
+                </Button>
+                
+                {/* Menu Button */}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                  className="p-2"
+                >
+                  {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                </Button>
+              </div>
+            )}
           </div>
+
+          {/* Mobile Menu */}
+          {isMobile && isMobileMenuOpen && (
+            <div className="border-t bg-white py-3">
+              <div className="space-y-2">
+                <div className="px-2">
+                  <p className="text-sm sm:text-base text-gray-600 truncate">Welcome, {user?.name}</p>
+                  <p className="text-xs sm:text-sm text-gray-400 truncate break-all">{user?.email}</p>
+                </div>
+                
+                <Button 
+                  variant="outline" 
+                  onClick={logout} 
+                  className="w-full flex items-center justify-center gap-2 text-sm"
+                >
+                  <LogOut className="w-3 h-3 sm:w-4 sm:h-4" />
+                  Logout
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 sm:py-6">
         {/* Stats Cards - compact, colorful, 2x2 on mobile */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6 mb-4 md:mb-8">
-          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
-            <CardContent className="p-4 md:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm font-medium text-blue-100 opacity-90">Total Orders</p>
-                  <p className="text-xl md:text-2xl font-bold mt-1">{ordersStats.totalOrders}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-6 mb-4 md:mb-8">
+          <Card 
+            className={`bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg ${isMobile ? 'cursor-pointer hover:shadow-xl transition-all duration-200 active:scale-95' : ''}`}
+            onClick={() => {
+              if (isMobile) {
+                setActiveTab('orders');
+                setStatusFilter('all');
+              }
+            }}
+          >
+            <CardContent className="p-2.5 sm:p-4 md:p-6">
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-blue-100 opacity-90 truncate">Total Orders</p>
+                  <p className="text-base sm:text-xl md:text-2xl font-bold mt-0.5 sm:mt-1 truncate">{ordersStats.totalOrders}</p>
                 </div>
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                  <Package className="w-5 h-5 md:w-6 md:h-6" />
+                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Package className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
 
-          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
-            <CardContent className="p-4 md:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm font-medium text-green-100 opacity-90">Claimed Orders</p>
-                  <p className="text-xl md:text-2xl font-bold mt-1">
+          <Card 
+            className={`bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg ${isMobile ? 'cursor-pointer hover:shadow-xl transition-all duration-200 active:scale-95' : ''}`}
+            onClick={() => {
+              if (isMobile) {
+                setActiveTab('orders');
+                setStatusFilter('claimed');
+              }
+            }}
+          >
+            <CardContent className="p-2.5 sm:p-4 md:p-6">
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-green-100 opacity-90 truncate">Claimed</p>
+                  <p className="text-base sm:text-xl md:text-2xl font-bold mt-0.5 sm:mt-1 truncate">
                     {ordersStats.claimedOrders}
                   </p>
                 </div>
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                  <Package className="w-5 h-5 md:w-6 md:h-6" />
+                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Package className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
-            <CardContent className="p-4 md:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm font-medium text-orange-100 opacity-90">Unclaimed Orders</p>
-                  <p className="text-xl md:text-2xl font-bold mt-1">
+          <Card 
+            className={`bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg ${isMobile ? 'cursor-pointer hover:shadow-xl transition-all duration-200 active:scale-95' : ''}`}
+            onClick={() => {
+              if (isMobile) {
+                setActiveTab('orders');
+                setStatusFilter('unclaimed');
+              }
+            }}
+          >
+            <CardContent className="p-2.5 sm:p-4 md:p-6">
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-orange-100 opacity-90 truncate">Unclaimed</p>
+                  <p className="text-base sm:text-xl md:text-2xl font-bold mt-0.5 sm:mt-1 truncate">
                     {ordersStats.unclaimedOrders}
                   </p>
                 </div>
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                  <Clock className="w-5 h-5 md:w-6 md:h-6" />
+                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Clock className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
 
-          <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg">
-            <CardContent className="p-4 md:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs md:text-sm font-medium text-purple-100 opacity-90">Active Vendors</p>
-                  <p className="text-xl md:text-2xl font-bold mt-1">
+          <Card 
+            className={`bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg ${isMobile ? 'cursor-pointer hover:shadow-xl transition-all duration-200 active:scale-95' : ''}`}
+            onClick={() => {
+              if (isMobile) {
+                setActiveTab('vendors');
+                setStatusFilter('active');
+              }
+            }}
+          >
+            <CardContent className="p-2.5 sm:p-4 md:p-6">
+              <div className="flex items-center justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-purple-100 opacity-90 truncate">Vendors</p>
+                  <p className="text-base sm:text-xl md:text-2xl font-bold mt-0.5 sm:mt-1 truncate">
                     {vendors.filter((v) => (v.status || '').toString().trim().toLowerCase() === 'active').length}
                   </p>
                 </div>
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                  <Users className="w-5 h-5 md:w-6 md:h-6" />
+                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <Users className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
                 </div>
               </div>
             </CardContent>
@@ -1289,42 +1456,46 @@ export function AdminDashboard() {
         {/* Main Content */}
         <Card>
           <CardHeader>
-            <CardTitle>Admin Management</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>Admin Management</CardTitle>
+              <Button
+                onClick={fetchOrders}
+                disabled={ordersLoading}
+                size="sm"
+                className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg hover:shadow-xl hover:from-blue-600 hover:to-blue-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${ordersLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
               {/* Fixed Controls Section */}
               <div className={isMobile ? "pb-3 border-b mb-3" : "sticky top-20 bg-white z-40 pb-6 border-b mb-6"}>
                 <TabsList className="flex flex-wrap items-center gap-3 md:gap-4 p-0 bg-transparent border-0 h-auto">
-                  <TabsTrigger value="orders" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                  <TabsTrigger value="orders" className={isMobile ? "px-0 py-2 text-base text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
                     <span className={isMobile ? "" : "font-semibold"}>Orders</span>
-                    <span className={isMobile ? "ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{ordersStats.totalOrders}</span>
+                    <span className={isMobile ? "ml-2 text-sm px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{ordersStats.totalOrders}</span>
                   </TabsTrigger>
-                  <TabsTrigger value="vendors" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                  <TabsTrigger value="vendors" className={isMobile ? "px-0 py-2 text-base text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
                     <span className={isMobile ? "" : "font-semibold"}>Vendors</span>
-                    <span className={isMobile ? "ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{vendors.length}</span>
+                    <span className={isMobile ? "ml-2 text-sm px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{vendors.length}</span>
                   </TabsTrigger>
-                  <TabsTrigger value="carrier" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                  <TabsTrigger value="carrier" className={isMobile ? "px-0 py-2 text-base text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
                     <span className={isMobile ? "" : "font-semibold"}>Carrier</span>
-                    <span className={isMobile ? "ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{carriers.length}</span>
+                    <span className={isMobile ? "ml-2 text-sm px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{carriers.length}</span>
                   </TabsTrigger>
-                  <TabsTrigger value="settlement-management" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
+                  {/* Settlement Management Tab - Hidden for now */}
+                  {/* <TabsTrigger value="settlement-management" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
                     <span className={isMobile ? "" : "font-semibold"}>Settlement Management</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="notifications" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
-                    <Bell className="w-4 h-4 mr-2" />
-                    <span className={isMobile ? "" : "font-semibold"}>Notifications</span>
-                    {notificationStats && notificationStats.pending > 0 && (
-                      <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                        {notificationStats.pending}
-                      </span>
-                    )}
-                  </TabsTrigger>
+                  </TabsTrigger> */}
                 </TabsList>
 
                 {/* Filters - Only show for orders, vendors, and carriers tabs */}
                 {(activeTab === "orders" || activeTab === "vendors" || activeTab === "carrier") && (
-                  <div className={isMobile ? "flex flex-col sm:flex-row gap-4 mb-6" : "mt-3 flex flex-col sm:flex-row gap-4 mb-6"}>
+                  <div className={isMobile ? "flex flex-col gap-3 mb-2" : "mt-3 flex flex-col sm:flex-row gap-4 mb-6"}>
+                    {/* Search Input Row */}
                     <div className="flex-1">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -1332,64 +1503,134 @@ export function AdminDashboard() {
                           placeholder={`Search ${activeTab}...`}
                           value={searchTerm}
                           onChange={(e) => setSearchTerm(e.target.value)}
-                          className="pl-10"
+                          className={`pl-10 ${searchTerm && isMobile ? 'pr-20' : 'pr-10'}`}
+                          id="admin-search-input"
                         />
+                        {searchTerm && isMobile && (
+                          <button
+                            onClick={() => {
+                              document.getElementById('admin-search-input')?.blur();
+                            }}
+                            className="absolute right-11 top-1/2 transform -translate-y-1/2 text-green-500 hover:text-green-700 transition-colors"
+                            type="button"
+                            title="Done"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                        {searchTerm && (
+                          <button
+                            onClick={() => setSearchTerm('')}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                            type="button"
+                            title="Clear"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger className="w-full sm:w-48">
-                        <Filter className="w-4 h-4 mr-2" />
-                        <SelectValue placeholder="Filter by status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        {activeTab === "orders" && (
-                          <>
+                    
+                    {/* Filter and Date Row - Only for orders tab on mobile */}
+                    {activeTab === "orders" && isMobile && (
+                      <div className="flex gap-1.5 sm:gap-2 items-center">
+                        {/* Status Filter - Icon Only */}
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                          <SelectTrigger className="w-9 sm:w-12 h-9 sm:h-10 p-0 justify-center flex-shrink-0">
+                            <Filter className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Status</SelectItem>
                             <SelectItem value="unclaimed">Unclaimed</SelectItem>
                             <SelectItem value="claimed">Claimed</SelectItem>
                             <SelectItem value="ready_for_handover">Ready for Handover</SelectItem>
                             <SelectItem value="handover">Handover</SelectItem>
                             <SelectItem value="delivered">Delivered</SelectItem>
-                          </>
-                        )}
-                        {activeTab === "vendors" && (
-                          <>
-                            <SelectItem value="active">Active</SelectItem>
-                            <SelectItem value="pending">Pending</SelectItem>
-                            <SelectItem value="inactive">Inactive</SelectItem>
-                          </>
-                        )}
-                        {activeTab === "carrier" && (
-                          <>
-                            <SelectItem value="active">Active</SelectItem>
-                            <SelectItem value="pending">Pending</SelectItem>
-                            <SelectItem value="inactive">Inactive</SelectItem>
-                          </>
-                        )}
-                      </SelectContent>
-                    </Select>
-                {activeTab === "orders" && (
-                  <>
-                    <Button
-                      onClick={() => setShowBulkAssignModal(true)}
-                      disabled={selectedOrders.length === 0}
-                      variant="default"
-                      size="sm"
-                    >
-                      Bulk Assign ({selectedOrders.length})
-                    </Button>
-                    <Button
-                      onClick={fetchOrders}
-                      disabled={ordersLoading}
-                      variant="outline"
-                      size="sm"
-                    >
-                      <Search className="w-4 h-4 mr-2" />
-                      {ordersLoading ? "Refreshing..." : "Refresh Orders"}
-                    </Button>
-                  </>
-                )}
-                    {activeTab === "carrier" && (
+                          </SelectContent>
+                        </Select>
+
+                        {/* Date Range */}
+                        <DatePicker
+                          date={dateFrom}
+                          onDateChange={(date) => {
+                            setDateFrom(date);
+                            if (date && dateTo && date > dateTo) {
+                              setDateTo(undefined);
+                              toast({
+                                title: "Date Range Adjusted",
+                                description: "To date was cleared as From date is after it",
+                              });
+                            }
+                          }}
+                          placeholder="From"
+                          className="flex-1 min-w-0 text-xs sm:text-sm"
+                        />
+                        <span className="text-gray-500 text-[10px] sm:text-sm flex-shrink-0">to</span>
+                        <DatePicker
+                          date={dateTo}
+                          onDateChange={(date) => {
+                            setDateTo(date);
+                            if (date && dateFrom && date < dateFrom) {
+                              setDateFrom(undefined);
+                              toast({
+                                title: "Date Range Adjusted",
+                                description: "From date was cleared as To date is before it",
+                              });
+                            }
+                          }}
+                          placeholder="To"
+                          className="flex-1 min-w-0 text-xs sm:text-sm"
+                        />
+                      </div>
+                    )}
+
+                    {/* Status Filter for Non-Orders tabs and Desktop */}
+                    {(activeTab !== "orders" || !isMobile) && (
+                      <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="w-full sm:w-48">
+                          <Filter className="w-4 h-4 mr-2" />
+                          <SelectValue placeholder="Filter by status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Status</SelectItem>
+                          {activeTab === "orders" && (
+                            <>
+                              <SelectItem value="unclaimed">Unclaimed</SelectItem>
+                              <SelectItem value="claimed">Claimed</SelectItem>
+                              <SelectItem value="ready_for_handover">Ready for Handover</SelectItem>
+                              <SelectItem value="handover">Handover</SelectItem>
+                              <SelectItem value="delivered">Delivered</SelectItem>
+                            </>
+                          )}
+                          {activeTab === "vendors" && (
+                            <>
+                              <SelectItem value="active">Active</SelectItem>
+                              <SelectItem value="pending">Pending</SelectItem>
+                              <SelectItem value="inactive">Inactive</SelectItem>
+                            </>
+                          )}
+                          {activeTab === "carrier" && (
+                            <>
+                              <SelectItem value="active">Active</SelectItem>
+                              <SelectItem value="pending">Pending</SelectItem>
+                              <SelectItem value="inactive">Inactive</SelectItem>
+                            </>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    {activeTab === "orders" && !isMobile && (
+                      <Button
+                        onClick={() => setShowBulkAssignModal(true)}
+                        disabled={selectedOrders.length === 0}
+                        variant="default"
+                        size="sm"
+                      >
+                        Bulk Assign ({selectedOrders.length})
+                      </Button>
+                    )}
+                    {activeTab === "carrier" && !isMobile && (
                       <>
                         <Button
                           onClick={handleDownloadCarriers}
@@ -1407,35 +1648,40 @@ export function AdminDashboard() {
                           <Upload className="w-4 h-4 mr-2" />
                           Upload Priority
                         </Button>
-                        <input
-                          id="carrier-csv-upload"
-                          type="file"
-                          accept=".csv"
-                          style={{ display: 'none' }}
-                          onChange={handleUploadCarrierPriorities}
-                        />
                       </>
                     )}
+                    {/* Hidden file input for carrier CSV upload - accessible from both desktop and mobile */}
+                    <input
+                      id="carrier-csv-upload"
+                      type="file"
+                      accept=".csv"
+                      style={{ display: 'none' }}
+                      onChange={handleUploadCarrierPriorities}
+                    />
                       </div>
                 )}
 
                 {/* Tab-specific Actions */}
 
-                {activeTab === "vendors" && (
+                {activeTab === "vendors" && !isMobile && (
                   <Card>
                     <CardHeader>
                       <CardTitle>Vendor Actions</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="flex flex-wrap gap-2">
-                        <Dialog open={showVendorModal} onOpenChange={setShowVendorModal}>
-                          <DialogTrigger asChild>
-                            <Button>
-                              <UserPlus className="w-4 h-4 mr-2" />
-                              Add New Vendor
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
+                        <Button onClick={() => setShowVendorModal(true)}>
+                          <UserPlus className="w-4 h-4 mr-2" />
+                          Add New Vendor
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Add Vendor Dialog - Accessible from both desktop and mobile */}
+                <Dialog open={showVendorModal} onOpenChange={setShowVendorModal}>
+                  <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[85vh]' : 'max-w-2xl max-h-[85vh]'} overflow-y-auto`}>
                             <DialogHeader>
                               <DialogTitle>Add New Vendor</DialogTitle>
                               <DialogDescription>Enter vendor details to add them to the system</DialogDescription>
@@ -1544,13 +1790,8 @@ export function AdminDashboard() {
                                 Add Vendor
                               </Button>
                             </div>
-                          </DialogContent>
-                        </Dialog>
-                        
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
+                  </DialogContent>
+                </Dialog>
 
 
               </div>
@@ -1600,8 +1841,18 @@ export function AdminDashboard() {
                            </TableRow>
                         ) : getFilteredOrdersForTab("orders").length > 0 ? (
                           getFilteredOrdersForTab("orders").map((order) => (
-                            <TableRow key={order.unique_id}>
-                            <TableCell>
+                            <TableRow 
+                              key={order.unique_id}
+                              className="cursor-pointer hover:bg-gray-50"
+                              onClick={() => {
+                                if (selectedOrders.includes(order.unique_id)) {
+                                  setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
+                                } else {
+                                  setSelectedOrders([...selectedOrders, order.unique_id])
+                                }
+                              }}
+                            >
+                            <TableCell onClick={(e) => e.stopPropagation()}>
                               <input
                                 type="checkbox"
                                   checked={selectedOrders.includes(order.unique_id)}
@@ -1614,12 +1865,13 @@ export function AdminDashboard() {
                                 }}
                               />
                             </TableCell>
-                            <TableCell>
+                            <TableCell onClick={(e) => e.stopPropagation()}>
                               <img
                                 src={order.image || "/placeholder.svg"}
                                   alt={order.product_name}
                                   className="w-12 h-12 rounded-lg object-cover cursor-pointer"
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setSelectedImageUrl(order.image || null);
                                     setSelectedImageProduct(order.product_name || null);
                                     setShowImageModal(true);
@@ -1648,13 +1900,16 @@ export function AdminDashboard() {
                                    </div>
                                  ) : "N/A"}
                                </TableCell>
-                            <TableCell>
+                            <TableCell onClick={(e) => e.stopPropagation()}>
                               <div className="flex gap-1">
                                   {order.status === 'unclaimed' ? (
                                     <Button 
                                       size="sm" 
                                       variant="default"
-                                      onClick={() => openAssignModal(order)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openAssignModal(order);
+                                      }}
                                     >
                                       Assign
                                 </Button>
@@ -1662,7 +1917,10 @@ export function AdminDashboard() {
                                     <Button 
                                       size="sm" 
                                       variant="destructive"
-                                      onClick={() => handleUnassignOrder(order)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleUnassignOrder(order);
+                                      }}
                                     >
                                       Unassign
                                     </Button>
@@ -1681,56 +1939,106 @@ export function AdminDashboard() {
                       </TableBody>
                       </Table>
                     ) : (
-                      <div className="space-y-3 p-2">
+                      <div className="space-y-3 p-2 pb-24">
                         {ordersLoading ? (
                           <Card className="p-4 text-center">Loading orders...</Card>
                         ) : (
                           getFilteredOrdersForTab("orders").map((order: any) => (
-                            <Card key={order.unique_id} className="p-3">
-                              <div className="flex items-start gap-3">
+                            <Card 
+                              key={order.unique_id} 
+                              className="p-2 sm:p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors border-l-4"
+                              style={{ 
+                                borderLeftColor: 
+                                  order.status === 'unclaimed' ? '#f59e0b' : 
+                                  order.status === 'claimed' ? '#3b82f6' : 
+                                  order.status === 'ready_for_handover' ? '#8b5cf6' :
+                                  order.status === 'handover' ? '#eab308' :
+                                  order.status === 'delivered' ? '#10b981' : '#6b7280'
+                              }}
+                              onClick={() => {
+                                if (selectedOrders.includes(order.unique_id)) {
+                                  setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
+                                } else {
+                                  setSelectedOrders([...selectedOrders, order.unique_id])
+                                }
+                              }}
+                            >
+                              {/* Top Row: Checkbox and Status */}
+                              <div className="flex items-start justify-between mb-1.5 sm:mb-2">
+                                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedOrders.includes(order.unique_id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedOrders([...selectedOrders, order.unique_id])
+                                      } else {
+                                        setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
+                                      }
+                                    }}
+                                    className="w-4 h-4"
+                                  />
+                                </div>
+                                {getStatusBadge(order.status)}
+                              </div>
+
+                              {/* Order ID and Image Row */}
+                              <div className="flex items-start gap-2 sm:gap-3 mb-2">
                                 <img
                                   src={order.image || "/placeholder.svg"}
                                   alt={order.product_name}
-                                  className="w-14 h-14 rounded object-cover cursor-pointer"
-                                  onClick={() => { setSelectedImageUrl(order.image || null); setSelectedImageProduct(order.product_name || null); setShowImageModal(true); }}
+                                  className="w-12 sm:w-16 h-12 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0 border border-gray-200"
+                                  onClick={(e) => { 
+                                    e.stopPropagation();
+                                    setSelectedImageUrl(order.image || null); 
+                                    setSelectedImageProduct(order.product_name || null); 
+                                    setShowImageModal(true); 
+                                  }}
                                   onError={(e) => { const t = e.target as HTMLImageElement; t.src = "/placeholder.svg"; }}
                                 />
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-center justify-between">
-                                    <p className="font-medium truncate">{order.order_id}</p>
-                                    {getStatusBadge(order.status)}
-                                  </div>
-                                  <p className="text-xs font-medium text-gray-800 whitespace-normal break-words leading-snug">
+                                  <p className="font-bold text-sm sm:text-base text-gray-900 mb-1 truncate">{order.order_id}</p>
+                                  <p className="text-xs sm:text-sm font-medium text-gray-800 line-clamp-2 leading-relaxed">
                                     {order.product_name}
                                   </p>
-                                  <div className="mt-2 space-y-1 text-xs text-gray-700">
-                                    <div>
-                                      <span className="text-gray-600">Vendor: </span>
-                                      <span className={String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-700' : 'text-blue-700'}>
-                                        {order.vendor_name || 'Unclaimed'}
-                                      </span>
-                                    </div>
-                                    <div><span className="text-gray-600">Value:</span> ₹{order.value}</div>
-                                    <div><span className="text-gray-600">Created:</span> {order.created_at}</div>
-                                  </div>
-                                  <div className="mt-2 flex gap-2 items-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedOrders.includes(order.unique_id)}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setSelectedOrders([...selectedOrders, order.unique_id])
-                                        } else {
-                                          setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
-                                        }
-                                      }}
-                                    />
-                                    {order.status === 'unclaimed' ? (
-                                      <Button size="sm" onClick={() => openAssignModal(order)}>Assign</Button>
-                                    ) : (
-                                      <Button size="sm" variant="destructive" onClick={() => handleUnassignOrder(order)}>Unassign</Button>
-                                    )}
-                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Details Grid */}
+                              <div className="grid grid-cols-2 gap-x-2 sm:gap-x-4 gap-y-1 sm:gap-y-1.5 text-xs sm:text-sm border-t pt-2">
+                                <div className="truncate">
+                                  <span className="text-gray-500">SKU:</span>
+                                  <span className="ml-1 font-medium text-gray-900 truncate">{order.product_code || 'N/A'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-500">Qty:</span>
+                                  <span className="ml-1 font-medium text-gray-900">{order.quantity || '1'}</span>
+                                </div>
+                                <div className="col-span-2 truncate">
+                                  <span className="text-gray-500">Customer:</span>
+                                  <span className="ml-1 font-medium text-gray-900 truncate">{order.customer_name || 'N/A'}</span>
+                                </div>
+                                <div className="col-span-2 truncate">
+                                  <span className="text-gray-500">Vendor:</span>
+                                  <span className={`ml-1 font-medium truncate ${String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-600' : 'text-blue-600'}`}>
+                                    {order.vendor_name || 'Unclaimed'}
+                                  </span>
+                                </div>
+                                <div className="col-span-2 truncate">
+                                  <span className="text-gray-500">Created:</span>
+                                  <span className="ml-1 font-medium text-gray-900 truncate">
+                                    {order.created_at ? 
+                                      (() => {
+                                        const date = new Date(order.created_at);
+                                        const year = date.getFullYear();
+                                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                                        const day = String(date.getDate()).padStart(2, '0');
+                                        const hours = String(date.getHours()).padStart(2, '0');
+                                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                                        return `${year}-${month}-${day} ${hours}:${minutes}`;
+                                      })()
+                                    : 'N/A'}
+                                  </span>
                                 </div>
                               </div>
                             </Card>
@@ -1862,17 +2170,17 @@ export function AdminDashboard() {
                       </TableBody>
                       </Table>
                     ) : (
-                      <div className="space-y-3 p-2">
+                      <div className="space-y-3 p-2 pb-24">
                         {getFilteredVendors().map((vendor) => (
                           <Card key={vendor.id} className="p-3">
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
                                 <p className="font-medium truncate">{vendor.name}</p>
-                                <p className="text-xs text-gray-600 truncate">{vendor.email}</p>
+                                <p className="text-sm text-gray-600 truncate">{vendor.email}</p>
                               </div>
                               {getStatusBadge(vendor.status)}
                             </div>
-                            <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-700">
+                            <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-gray-700">
                               <span>Warehouse: {vendor.warehouseId || '—'}</span>
                               <span>City: {vendor.city || '—'}</span>
                               <span>Phone: {vendor.phone || '—'}</span>
@@ -2100,32 +2408,128 @@ export function AdminDashboard() {
                           </Table>
                         ) : (
                           // Mobile card layout
-                          <div className="space-y-3 p-2">
-                            {getFilteredCarriers().map((carrier) => (
-                              <Card key={carrier.carrier_id} className="p-3">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <p className="font-medium truncate">{carrier.carrier_name}</p>
-                                    <p className="text-xs text-gray-600 truncate">ID: {carrier.carrier_id}</p>
-                                  </div>
-                                  {getStatusBadge(carrier.status)}
-                                </div>
-                                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-700">
-                                  <span>Priority: {carrier.priority || '—'}</span>
-                                  <span>Weight: {carrier.weight_in_kg ? `${carrier.weight_in_kg}kg` : 'N/A'}</span>
-                                </div>
-                                <div className="mt-2 flex gap-2">
-                                  <Button size="sm" variant="outline" disabled={movingCarrier === carrier.carrier_id} onClick={() => handleMoveCarrier(carrier.carrier_id, 'up')} title="Move Up">
-                                    {movingCarrier === carrier.carrier_id ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : '▲'}
-                                  </Button>
-                                  <Button size="sm" variant="outline" disabled={movingCarrier === carrier.carrier_id} onClick={() => handleMoveCarrier(carrier.carrier_id, 'down')} title="Move Down">
-                                    {movingCarrier === carrier.carrier_id ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : '▼'}
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => { setCarrierEditState({ open: true, carrierId: carrier.carrier_id, carrier_id: carrier.carrier_id, status: carrier.status || 'active' }) }}><Edit className="w-3 h-3" /></Button>
-                                  <Button size="sm" variant="destructive" onClick={async () => { try { const res = await apiClient.deleteCarrier(carrier.carrier_id); if (res.success) { toast({ title: 'Carrier Deleted', description: `Carrier ${carrier.carrier_id} removed` }); await fetchCarriers() } else { toast({ title: 'Error', description: res.message, variant: 'destructive' }) } } catch (err: any) { toast({ title: 'Error', description: err?.message || 'Failed to delete carrier', variant: 'destructive' }) } }}><Trash2 className="w-3 h-3" /></Button>
-                                </div>
-                              </Card>
-                            ))}
+                          <div className="space-y-3 p-2 pb-24">
+                             {getFilteredCarriers().map((carrier) => (
+                               <Card key={carrier.carrier_id} className="p-3 space-y-3">
+                                 {/* Header Section */}
+                                 <div className="flex items-start justify-between gap-3">
+                                   <div className="min-w-0 flex-1">
+                                     <div className="flex flex-col gap-1 mb-2">
+                                       <h3 className="font-semibold text-base text-gray-900 break-words leading-tight">{carrier.carrier_name}</h3>
+                                       <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full self-start">
+                                         ID: {carrier.carrier_id}
+                                       </span>
+                                     </div>
+                                     <div className="flex items-center gap-2">
+                                       {getStatusBadge(carrier.status)}
+                                       <span className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                                         Priority: {carrier.priority || '—'}
+                                       </span>
+                                     </div>
+                                   </div>
+                                 </div>
+
+                                 {/* Details Section */}
+                                 <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                                   <div className="grid grid-cols-1 gap-2">
+                                     <div className="flex justify-between items-center">
+                                       <span className="text-sm text-gray-600">Weight Limit:</span>
+                                       <span className="text-sm font-medium text-gray-900">
+                                         {carrier.weight_in_kg ? `${carrier.weight_in_kg} kg` : 'N/A'}
+                                       </span>
+                                     </div>
+                                   </div>
+                                 </div>
+
+                                 {/* Actions Section */}
+                                 <div className="space-y-2">
+                                   {/* Priority Control */}
+                                   <div className="flex items-center justify-between">
+                                     <span className="text-sm font-medium text-gray-700">Priority Control:</span>
+                                     <div className="flex gap-1">
+                                       <Button 
+                                         size="sm" 
+                                         variant="outline" 
+                                         disabled={movingCarrier === carrier.carrier_id} 
+                                         onClick={() => handleMoveCarrier(carrier.carrier_id, 'up')} 
+                                         className="h-8 w-8 p-0"
+                                         title="Move Up"
+                                       >
+                                         {movingCarrier === carrier.carrier_id ? 
+                                           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : 
+                                           <span className="text-sm">▲</span>
+                                         }
+                                       </Button>
+                                       <Button 
+                                         size="sm" 
+                                         variant="outline" 
+                                         disabled={movingCarrier === carrier.carrier_id} 
+                                         onClick={() => handleMoveCarrier(carrier.carrier_id, 'down')} 
+                                         className="h-8 w-8 p-0"
+                                         title="Move Down"
+                                       >
+                                         {movingCarrier === carrier.carrier_id ? 
+                                           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600"></div> : 
+                                           <span className="text-sm">▼</span>
+                                         }
+                                       </Button>
+                                     </div>
+                                   </div>
+
+                                   {/* Management Actions */}
+                                   <div className="flex gap-2">
+                                     <Button 
+                                       size="sm" 
+                                       variant="outline" 
+                                       onClick={() => { 
+                                         setCarrierEditState({ 
+                                           open: true, 
+                                           carrierId: carrier.carrier_id, 
+                                           carrier_id: carrier.carrier_id, 
+                                           status: carrier.status || 'active' 
+                                         }) 
+                                       }}
+                                       className="flex-1 h-9 text-sm"
+                                     >
+                                       <Edit className="w-4 h-4 mr-2" />
+                                       Edit
+                                     </Button>
+                                     <Button 
+                                       size="sm" 
+                                       variant="destructive" 
+                                       onClick={async () => { 
+                                         try { 
+                                           const res = await apiClient.deleteCarrier(carrier.carrier_id); 
+                                           if (res.success) { 
+                                             toast({ 
+                                               title: 'Carrier Deleted', 
+                                               description: `Carrier ${carrier.carrier_id} removed` 
+                                             }); 
+                                             await fetchCarriers() 
+                                           } else { 
+                                             toast({ 
+                                               title: 'Error', 
+                                               description: res.message, 
+                                               variant: 'destructive' 
+                                             }) 
+                                           } 
+                                         } catch (err: any) { 
+                                           toast({ 
+                                             title: 'Error', 
+                                             description: err?.message || 'Failed to delete carrier', 
+                                             variant: 'destructive' 
+                                           }) 
+                                         } 
+                                       }}
+                                       className="flex-1 h-9 text-sm"
+                                     >
+                                       <Trash2 className="w-4 h-4 mr-2" />
+                                       Delete
+                                     </Button>
+                                   </div>
+                                 </div>
+                               </Card>
+                             ))}
                           </div>
                         )}
                       </>
@@ -2133,7 +2537,7 @@ export function AdminDashboard() {
                   </div>
                 </TabsContent>
 
-                {/* Settlement Management Tab */}
+                {/* Settlement Management Tab - Hidden for now (tab trigger is commented out, content kept for future use) */}
                 <TabsContent value="settlement-management" className="mt-0">
                   <div className="space-y-4">
                     {/* Settlement Filters */}
@@ -2394,13 +2798,37 @@ export function AdminDashboard() {
                             {/* Order ID Filter */}
                             <div>
                               <Label htmlFor="filter-order-id" className={`${isMobile ? 'text-xs' : 'text-xs'} text-gray-600 mb-1`}>Order ID</Label>
-                              <Input
-                                id="filter-order-id"
-                                placeholder={isMobile ? "Order ID..." : "Search by order ID..."}
-                                value={notificationFilters.search}
-                                onChange={(e) => setNotificationFilters({...notificationFilters, search: e.target.value})}
-                                className={isMobile ? "h-10" : "h-9"}
-                              />
+                              <div className="relative">
+                                <Input
+                                  id="filter-order-id"
+                                  placeholder={isMobile ? "Order ID..." : "Search by order ID..."}
+                                  value={notificationFilters.search}
+                                  onChange={(e) => setNotificationFilters({...notificationFilters, search: e.target.value})}
+                                  className={`${isMobile ? 'h-10' : 'h-9'} ${notificationFilters.search && isMobile ? 'pr-20' : 'pr-3'}`}
+                                />
+                                {notificationFilters.search && isMobile && (
+                                  <button
+                                    onClick={() => {
+                                      document.getElementById('filter-order-id')?.blur();
+                                    }}
+                                    className="absolute right-11 top-1/2 transform -translate-y-1/2 text-green-500 hover:text-green-700 transition-colors"
+                                    type="button"
+                                    title="Done"
+                                  >
+                                    <CheckCircle className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {notificationFilters.search && (
+                                  <button
+                                    onClick={() => setNotificationFilters({...notificationFilters, search: ''})}
+                                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                                    type="button"
+                                    title="Clear"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {/* Status Filter */}
@@ -2610,13 +3038,25 @@ export function AdminDashboard() {
                               {/* Order ID Filter */}
                               <div>
                                 <Label htmlFor="filter-order-id-desktop" className="text-xs text-gray-600 mb-1">Order ID</Label>
-                                <Input
-                                  id="filter-order-id-desktop"
-                                  placeholder="Search by order ID..."
-                                  value={notificationFilters.search}
-                                  onChange={(e) => setNotificationFilters({...notificationFilters, search: e.target.value})}
-                                  className="h-9"
-                                />
+                                <div className="relative">
+                                  <Input
+                                    id="filter-order-id-desktop"
+                                    placeholder="Search by order ID..."
+                                    value={notificationFilters.search}
+                                    onChange={(e) => setNotificationFilters({...notificationFilters, search: e.target.value})}
+                                    className={`h-9 ${notificationFilters.search ? 'pr-10' : 'pr-3'}`}
+                                  />
+                                  {notificationFilters.search && (
+                                    <button
+                                      onClick={() => setNotificationFilters({...notificationFilters, search: ''})}
+                                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                                      type="button"
+                                      title="Clear"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
 
                               {/* Status Filter */}
@@ -2985,6 +3425,94 @@ export function AdminDashboard() {
                   </div>
                 </TabsContent>
               </div>
+
+              {/* Fixed Bottom Bulk Assign Button for Mobile Orders */}
+              {isMobile && activeTab === "orders" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    {/* Move to Top Button */}
+                    <Button
+                      onClick={scrollToTop}
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                    >
+                      <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    </Button>
+                    
+                    {/* Bulk Assign Button */}
+                    <Button 
+                      onClick={() => setShowBulkAssignModal(true)}
+                      disabled={selectedOrders.length === 0} 
+                      className="flex-1 h-10 sm:h-12 text-sm sm:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
+                    >
+                      <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="truncate">Bulk Assign ({selectedOrders.length})</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Bottom Add Vendor Button for Mobile Vendors */}
+              {isMobile && activeTab === "vendors" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    {/* Move to Top Button */}
+                    <Button
+                      onClick={scrollToTop}
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                    >
+                      <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    </Button>
+                    
+                    {/* Add Vendor Button */}
+                    <Button 
+                      onClick={() => setShowVendorModal(true)}
+                      className="flex-1 h-10 sm:h-12 text-sm sm:text-base font-medium bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 border-0 shadow-lg min-w-0"
+                    >
+                      <UserPlus className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="truncate">Add Vendor</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Bottom Carrier Actions for Mobile Carrier */}
+              {isMobile && activeTab === "carrier" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex items-center gap-1.5 sm:gap-3">
+                    {/* Move to Top Button */}
+                    <Button
+                      onClick={scrollToTop}
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                    >
+                      <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    </Button>
+                    
+                    {/* Download CSV Button */}
+                    <Button 
+                      onClick={handleDownloadCarriers}
+                      className="flex-1 h-10 sm:h-12 text-xs sm:text-sm font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
+                    >
+                      <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="truncate">Download</span>
+                    </Button>
+
+                    {/* Upload Priority Button */}
+                    <Button 
+                      onClick={() => document.getElementById('carrier-csv-upload')?.click()}
+                      className="flex-1 h-10 sm:h-12 text-xs sm:text-sm font-medium bg-gradient-to-br from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 border-0 shadow-lg min-w-0"
+                    >
+                      <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="truncate">Priority</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Tabs>
           </CardContent>
         </Card>
