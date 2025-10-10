@@ -274,6 +274,7 @@ class Database {
           selling_price DECIMAL(10,2),
           order_total DECIMAL(10,2),
           payment_type VARCHAR(50),
+          is_partial_paid BOOLEAN DEFAULT 0,
           prepaid_amount DECIMAL(10,2),
           order_total_ratio DECIMAL(10,2),
           order_total_split DECIMAL(10,2),
@@ -2025,9 +2026,9 @@ class Database {
         `INSERT INTO orders (
           id, unique_id, order_id, customer_name, order_date,
           product_name, product_code, size, quantity, selling_price, order_total, payment_type,
-          prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
+          is_partial_paid, prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
           pincode, is_in_new_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           order_date = VALUES(order_date),
           product_name = VALUES(product_name),
@@ -2037,6 +2038,7 @@ class Database {
           selling_price = VALUES(selling_price),
           order_total = VALUES(order_total),
           payment_type = VALUES(payment_type),
+          is_partial_paid = VALUES(is_partial_paid),
           prepaid_amount = VALUES(prepaid_amount),
           order_total_ratio = VALUES(order_total_ratio),
           order_total_split = VALUES(order_total_split),
@@ -2056,6 +2058,7 @@ class Database {
           orderData.selling_price || null,
           orderData.order_total || null,
           orderData.payment_type || null,
+          orderData.is_partial_paid !== undefined ? orderData.is_partial_paid : false,
           orderData.prepaid_amount || null,
           orderData.order_total_ratio || null,
           orderData.order_total_split || null,
@@ -2481,7 +2484,7 @@ class Database {
       const allowedOrderFields = [
         'order_id', 'customer_name', 'order_date',
         'product_name', 'product_code', 'selling_price', 'order_total',
-        'payment_type', 'prepaid_amount', 'order_total_ratio', 'order_total_split',
+        'payment_type', 'is_partial_paid', 'prepaid_amount', 'order_total_ratio', 'order_total_split',
         'collectable_amount', 'pincode', 'is_in_new_order'
       ];
 
