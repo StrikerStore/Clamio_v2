@@ -491,6 +491,7 @@ class Database {
           cloned_order_id VARCHAR(100),
           is_cloned_row BOOLEAN DEFAULT FALSE,
           label_downloaded BOOLEAN DEFAULT FALSE,
+          priority_carrier TEXT,
           INDEX idx_order_unique_id (order_unique_id),
           INDEX idx_order_id (order_id),
           INDEX idx_claimed_by (claimed_by),
@@ -500,6 +501,9 @@ class Database {
       
       await this.mysqlConnection.execute(createClaimsTableQuery);
       console.log('✅ Claims table created/verified');
+      
+      // Add priority_carrier column if it doesn't exist (migration for existing tables)
+      await this.addPriorityCarrierColumnToClaims();
       
       // Migrate existing claims data from orders table if claims table is empty
       await this.migrateClaimsData();
@@ -530,6 +534,35 @@ class Database {
 
     } catch (error) {
       console.error('❌ Error migrating claims data:', error.message);
+    }
+  }
+
+  /**
+   * Add priority_carrier column to existing claims table if it doesn't exist (migration)
+   */
+  async addPriorityCarrierColumnToClaims() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if priority_carrier column exists
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM claims LIKE 'priority_carrier'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding priority_carrier column to existing claims table...');
+        
+        // Add priority_carrier column
+        await this.mysqlConnection.execute(
+          `ALTER TABLE claims ADD COLUMN priority_carrier TEXT AFTER label_downloaded`
+        );
+        
+        console.log('✅ priority_carrier column added to claims table');
+      } else {
+        console.log('✅ priority_carrier column already exists in claims table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding priority_carrier column to claims:', error.message);
     }
   }
 
@@ -2237,7 +2270,7 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier,
+          c.priority_carrier,
           l.is_manifest
         FROM orders o
         LEFT JOIN products p ON (
@@ -2286,7 +2319,7 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier,
+          c.priority_carrier,
           l.is_manifest
         FROM orders o
         LEFT JOIN products p ON (
@@ -2335,7 +2368,7 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier,
+          c.priority_carrier,
           l.is_manifest
         FROM orders o
         LEFT JOIN products p ON (
@@ -2385,7 +2418,7 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier,
+          c.priority_carrier,
           l.is_manifest
         FROM orders o
         LEFT JOIN products p ON (
@@ -2436,7 +2469,7 @@ class Database {
           l.carrier_id,
           l.carrier_name,
           l.handover_at,
-          l.priority_carrier,
+          c.priority_carrier,
           l.is_manifest
         FROM orders o
         LEFT JOIN products p ON (
@@ -2491,12 +2524,12 @@ class Database {
       // Claims table fields
       const allowedClaimFields = [
         'order_id', 'status', 'claimed_by', 'claimed_at', 'last_claimed_by', 'last_claimed_at',
-        'clone_status', 'cloned_order_id', 'is_cloned_row', 'label_downloaded'
+        'clone_status', 'cloned_order_id', 'is_cloned_row', 'label_downloaded', 'priority_carrier'
       ];
 
       // Labels table fields
       const allowedLabelFields = [
-        'label_url', 'awb', 'carrier_name', 'handover_at', 'priority_carrier'
+        'label_url', 'awb', 'carrier_name', 'handover_at'
       ];
 
       // Separate the fields
