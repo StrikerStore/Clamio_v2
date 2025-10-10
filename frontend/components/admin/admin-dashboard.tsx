@@ -1472,29 +1472,26 @@ export function AdminDashboard() {
           <CardContent>
             <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
               {/* Fixed Controls Section */}
-              <div className={isMobile ? "pb-3 border-b mb-3" : "sticky top-20 bg-white z-40 pb-6 border-b mb-6"}>
-                <TabsList className="flex flex-wrap items-center gap-3 md:gap-4 p-0 bg-transparent border-0 h-auto">
-                  <TabsTrigger value="orders" className={isMobile ? "px-0 py-2 text-base text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
-                    <span className={isMobile ? "" : "font-semibold"}>Orders</span>
-                    <span className={isMobile ? "ml-2 text-sm px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{ordersStats.totalOrders}</span>
+              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
+                <TabsList className={`grid w-full grid-cols-3 ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
+                  <TabsTrigger value="orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
+                    Orders ({ordersStats.totalOrders})
                   </TabsTrigger>
-                  <TabsTrigger value="vendors" className={isMobile ? "px-0 py-2 text-base text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
-                    <span className={isMobile ? "" : "font-semibold"}>Vendors</span>
-                    <span className={isMobile ? "ml-2 text-sm px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{vendors.length}</span>
+                  <TabsTrigger value="vendors" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
+                    Vendors ({vendors.length})
                   </TabsTrigger>
-                  <TabsTrigger value="carrier" className={isMobile ? "px-0 py-2 text-base text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
-                    <span className={isMobile ? "" : "font-semibold"}>Carrier</span>
-                    <span className={isMobile ? "ml-2 text-sm px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700" : "ml-2 text-[10px] md:text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"}>{carriers.length}</span>
+                  <TabsTrigger value="carrier" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
+                    Carrier ({carriers.length})
                   </TabsTrigger>
                   {/* Settlement Management Tab - Hidden for now */}
-                  {/* <TabsTrigger value="settlement-management" className={isMobile ? "px-0 py-2 text-sm text-gray-600 rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:font-semibold" : "px-3 py-3 md:py-4 md:px-4 rounded-lg shadow-sm border bg-white text-gray-700 md:text-lg data-[state=active]:border-blue-600 data-[state=active]:shadow data-[state=active]:text-blue-700"}>
-                    <span className={isMobile ? "" : "font-semibold"}>Settlement Management</span>
+                  {/* <TabsTrigger value="settlement-management" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
+                    Settlement Management
                   </TabsTrigger> */}
                 </TabsList>
 
                 {/* Filters - Only show for orders, vendors, and carriers tabs */}
                 {(activeTab === "orders" || activeTab === "vendors" || activeTab === "carrier") && (
-                  <div className={isMobile ? "flex flex-col gap-3 mb-2" : "mt-3 flex flex-col sm:flex-row gap-4 mb-6"}>
+                  <div className={`flex flex-col gap-3 mb-4 md:mb-6 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
                     {/* Search Input Row */}
                     <div className="flex-1">
                       <div className="relative">
@@ -1797,12 +1794,12 @@ export function AdminDashboard() {
               </div>
 
               {/* Scrollable Content Section */}
-              <div className={isMobile ? "" : "max-h-[600px] overflow-y-auto"}>
+              <div className={isMobile ? "" : ""}>
                 <TabsContent value="orders" className="mt-0">
-                  <div className="rounded-md border">
+                  <div className={`rounded-md border ${!isMobile ? 'overflow-y-auto max-h-[600px]' : ''}`}>
                     {!isMobile ? (
                       <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
+                      <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
                           <TableHead className="w-12">
                             <input
@@ -2050,10 +2047,10 @@ export function AdminDashboard() {
                 </TabsContent>
 
                 <TabsContent value="vendors" className="mt-0">
-                  <div className="rounded-md border">
+                  <div className={`rounded-md border ${!isMobile ? 'overflow-y-auto max-h-[600px]' : ''}`}>
                     {!isMobile ? (
                       <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
+                      <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
                           <TableHead className="w-12">
                             <input
@@ -2361,7 +2358,7 @@ export function AdminDashboard() {
                 )}
 
                 <TabsContent value="carrier" className="mt-0">
-                  <div className="rounded-md border">
+                  <div className={`rounded-md border ${!isMobile ? 'overflow-y-auto max-h-[600px]' : ''}`}>
                     {carriersLoading ? (
                       <div className="p-8 text-center">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -2372,7 +2369,7 @@ export function AdminDashboard() {
                         {/* Desktop table */}
                         {!isMobile ? (
                           <Table>
-                            <TableHeader className="sticky top-0 bg-white z-30">
+                            <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                               <TableRow>
                                 <TableHead>Carrier ID</TableHead>
                                 <TableHead>Carrier Name</TableHead>
@@ -2608,10 +2605,10 @@ export function AdminDashboard() {
                     </Card>
 
                     {/* Settlements: table on desktop, cards on mobile */}
-                    <div className="rounded-md border">
+                    <div className={`rounded-md border ${!isMobile ? 'overflow-y-auto max-h-[600px]' : ''}`}>
                       {!isMobile ? (
                       <Table>
-                        <TableHeader>
+                        <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                           <TableRow>
                             <TableHead>Settlement ID</TableHead>
                             <TableHead>Vendor Name</TableHead>

@@ -2076,9 +2076,9 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                    <div className="rounded-md border">
+                    <div className="rounded-md border overflow-y-auto max-h-[600px]">
                       <Table>
-                        <TableHeader className="sticky top-0 bg-white z-30">
+                        <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                           <TableRow>
                             <TableHead className="w-12">Select</TableHead>
                           <TableHead>Image</TableHead>
@@ -2310,9 +2310,9 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                    <div className="rounded-md border">
+                    <div className="rounded-md border overflow-y-auto max-h-[600px]">
                       <Table>
-                        <TableHeader className="sticky top-0 bg-white z-30">
+                        <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                           <TableRow>
                             <TableHead className="w-12">
                               <input
@@ -2531,9 +2531,9 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                  <div className="rounded-md border">
+                  <div className="rounded-md border overflow-y-auto max-h-[600px]">
                     <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30">
+                      <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
                           <TableHead>Image</TableHead>
                           <TableHead>Order ID</TableHead>
