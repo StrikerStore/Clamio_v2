@@ -2278,8 +2278,9 @@ function prepareShipwayRequestBody(orderId, products, originalOrder, vendor, gen
     }
   }, 0);
   
-  // Calculate order weight
-  const orderWeight = 350 * products.length;
+  // Calculate order weight based on total quantity
+  const totalQuantity = products.reduce((sum, product) => sum + (product.quantity || 1), 0);
+  const orderWeight = 200 * totalQuantity;
   
   // Prepare products array
   const shipwayProducts = products.map(product => ({
