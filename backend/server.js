@@ -41,10 +41,35 @@ app.use(helmet({
  * CORS Configuration
  */
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'https://clamiofrontend-production.up.railway.app',
+      'https://clamio-frontend-nu.vercel.app',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001'
+    ];
+    
+    // Add environment variable origin if provided
+    if (process.env.CORS_ORIGIN) {
+      allowedOrigins.push(process.env.CORS_ORIGIN);
+    }
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200
 }));
 
 /**
@@ -89,6 +114,59 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 /**
+ * Database Connection Health Middleware
+ * Automatically reconnects if connection is lost after idle periods
+ */
+app.use(async (req, res, next) => {
+  // Skip database check for health and test endpoints
+  if (req.path === '/health' || req.path === '/test' || req.path === '/env-check') {
+    return next();
+  }
+
+  try {
+    // Check if database is available
+    if (!database.isMySQLAvailable()) {
+      console.log('🔄 Database not available, attempting to initialize...');
+      await database.initializeMySQL();
+    }
+
+    // Test connection health (detects stale connections)
+    const isHealthy = await database.testConnection();
+    if (!isHealthy) {
+      console.log('🔄 Database connection unhealthy, attempting to reconnect...');
+      const reconnected = await database.reconnect();
+      
+      if (!reconnected) {
+        // Reconnection failed, return error
+        return res.status(503).json({
+          success: false,
+          message: 'Database temporarily unavailable',
+          error: 'Unable to establish database connection. Please try again in a moment.'
+        });
+      }
+    }
+
+    next();
+  } catch (error) {
+    console.error('❌ Database connection failed in middleware:', error.message);
+    
+    // For API routes, return error
+    if (req.path.startsWith('/api/') || req.path.startsWith('/auth') || 
+        req.path.startsWith('/users') || req.path.startsWith('/orders') || 
+        req.path.startsWith('/settlements') || req.path.startsWith('/shipway')) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database temporarily unavailable',
+        error: 'Service temporarily unavailable. Please try again in a moment.'
+      });
+    }
+    
+    // For other routes, continue
+    next();
+  }
+});
+
+/**
  * Health Check Endpoint
  */
 app.get('/health', (req, res) => {
@@ -99,6 +177,105 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     version: '1.0.0'
   });
+});
+
+/**
+ * Simple Test Endpoint (no database required)
+ */
+app.get('/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Simple test endpoint working',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+/**
+ * Environment Check Endpoint (for debugging)
+ */
+app.get('/env-check', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Environment variables check',
+    database: {
+      host: process.env.DB_HOST ? process.env.DB_HOST : 'Missing',
+      user: process.env.DB_USER ? process.env.DB_USER : 'Missing',
+      password: process.env.DB_PASSWORD ? process.env.DB_PASSWORD : 'Missing',
+      database: process.env.DB_NAME ? process.env.DB_NAME : 'Missing',
+      port: process.env.DB_PORT ? process.env.DB_PORT : 'Missing',
+      ssl: process.env.DB_SSL ? process.env.DB_SSL : 'Missing'
+    },
+    cors: {
+      origin: process.env.CORS_ORIGIN || 'Not set'
+    }
+  });
+});
+
+/**
+ * Database Connection Test Endpoint
+ */
+app.get('/db-test', async (req, res) => {
+  try {
+    const database = require('./config/database');
+    
+    // Test connection health
+    const isHealthy = await database.testConnection();
+    
+    if (isHealthy) {
+      // Try a simple query
+      const users = await database.getAllUsers();
+      res.json({
+        success: true,
+        message: 'Database connection successful',
+        data: {
+          connected: true,
+          healthy: true,
+          userCount: users.length,
+          sampleUser: users[0] || null
+        }
+      });
+    } else {
+      // Try to reconnect
+      console.log('🔄 Attempting to reconnect to database...');
+      const reconnected = await database.reconnect();
+      
+      if (reconnected) {
+        const users = await database.getAllUsers();
+        res.json({
+          success: true,
+          message: 'Database reconnected successfully',
+          data: {
+            connected: true,
+            healthy: true,
+            reconnected: true,
+            userCount: users.length,
+            sampleUser: users[0] || null
+          }
+        });
+      } else {
+        res.json({
+          success: false,
+          message: 'Database connection failed and reconnection unsuccessful',
+          data: {
+            connected: false,
+            healthy: false,
+            reconnected: false
+          }
+        });
+      }
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Database connection test failed',
+      error: error.message,
+      data: {
+        connected: false,
+        healthy: false
+      }
+    });
+  }
 });
 
 /**
@@ -247,6 +424,26 @@ app.listen(PORT, async () => {
   
   // Log database initialization
   console.log('📁 Database initialized successfully');
+
+  // Start periodic database health check (every 15 minutes)
+  setInterval(async () => {
+    try {
+      const isHealthy = await database.testConnection();
+      if (!isHealthy) {
+        console.log('⚠️ Database connection unhealthy, attempting to reconnect...');
+        const reconnected = await database.reconnect();
+        if (reconnected) {
+          console.log('✅ Database reconnected successfully via health check');
+        } else {
+          console.error('❌ Database reconnection failed via health check');
+        }
+      } else {
+        console.log('✅ Database health check passed');
+      }
+    } catch (error) {
+      console.error('❌ Database health check failed:', error.message);
+    }
+  }, 15 * 60 * 1000); // Every 15 minutes
   
   // Initialize user sessions (run once on startup)
   const userSessionService = require('./services/userSessionService');
@@ -280,7 +477,7 @@ app.listen(PORT, async () => {
       console.error('[Shipway Sync] Failed:', err.message);
     }
   });
-  // Run once immediately on startup (incremental sync - only recent orders)
+  // Run once immediately on startup
   (async () => {
     try {
       await shipwayService.syncOrdersToMySQL();
@@ -309,40 +506,6 @@ app.listen(PORT, async () => {
       console.error('[Carrier Sync] Startup sync failed:', err.message);
     }
   })();
-
-  // Start Auto-Reversal service
-  const autoReversalService = require('./services/autoReversalService');
-  
-  // Run auto-reversal once immediately on startup
-  console.log('🔄 Starting auto-reversal service...');
-  (async () => {
-    try {
-      // Wait a bit for database to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      const result = await autoReversalService.executeAutoReversal();
-      if (result.success) {
-        console.log(`[Auto-Reversal] Startup execution completed: ${result.data.auto_reversed} orders auto-reversed`);
-      } else {
-        console.log(`[Auto-Reversal] Startup execution: ${result.message}`);
-      }
-    } catch (err) {
-      console.error('[Auto-Reversal] Startup execution failed:', err.message);
-    }
-  })();
-
-  // Start Auto-Reversal cron job (every 2 hours)
-  cron.schedule('0 */2 * * *', async () => {
-    try {
-      const result = await autoReversalService.executeAutoReversal();
-      if (result.success) {
-        console.log(`[Auto-Reversal] Scheduled execution completed: ${result.data.auto_reversed} orders auto-reversed`);
-      } else {
-        console.log(`[Auto-Reversal] Scheduled execution: ${result.message}`);
-      }
-    } catch (err) {
-      console.error('[Auto-Reversal] Scheduled execution failed:', err.message);
-    }
-  });
 });
 
 module.exports = app; 

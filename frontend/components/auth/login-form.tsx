@@ -323,13 +323,6 @@ export function LoginForm() {
               </Dialog>
             </div>
           </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600 mb-2">Demo Credentials:</p>
-            <div className="text-xs space-y-1 text-gray-500">
-              <p>Super Admin: superadmin@example.com / password123</p>
-            </div>
-          </div>
         </CardContent>
       </Card>
     </>
