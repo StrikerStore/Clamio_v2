@@ -2003,9 +2003,9 @@ export function AdminDashboard() {
 
                               {/* Details Grid */}
                               <div className="grid grid-cols-2 gap-x-2 sm:gap-x-4 gap-y-1 sm:gap-y-1.5 text-xs sm:text-sm border-t pt-2">
-                                <div className="truncate">
+                                <div className="break-all">
                                   <span className="text-gray-500">SKU:</span>
-                                  <span className="ml-1 font-medium text-gray-900 truncate">{order.product_code || 'N/A'}</span>
+                                  <span className="ml-1 font-medium text-gray-900 break-all">{order.product_code || 'N/A'}</span>
                                 </div>
                                 <div>
                                   <span className="text-gray-500">Qty:</span>

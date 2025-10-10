@@ -42,15 +42,16 @@ class Database {
       await connection.execute(`CREATE DATABASE IF NOT EXISTS ${dbConfig.database}`);
       await connection.end();
 
-      // Now connect to the specific database
+      // Now connect to the specific database with IST timezone
       this.mysqlConnection = await mysql.createConnection({
         host: dbConfig.host,
         user: dbConfig.user,
         password: dbConfig.password,
-        database: dbConfig.database
+        database: dbConfig.database,
+        timezone: '+05:30' // Set to IST (Indian Standard Time)
       });
       
-      console.log('✅ MySQL connection established');
+      console.log('✅ MySQL connection established with IST timezone (+05:30)');
       await this.createCarriersTable();
       await this.createProductsTable();
       await this.createUsersTable();

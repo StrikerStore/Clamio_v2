@@ -880,7 +880,7 @@ class ShipwayService {
           id: `${order.order_id}_${product.product_code}_${Date.now()}`,
           unique_id: existingClaim ? existingClaim.unique_id : generateStableUniqueId(order.order_id, product.product_code, i),
           order_id: order.order_id,
-          order_date: order.order_date,
+          order_date: order.order_date, // Shipway sends IST time; MySQL connection is configured with IST timezone
           product_name: product.product,
           product_code: product.product_code,
           quantity: parseInt(product.amount) || 1,
