@@ -51,10 +51,10 @@ export function InventoryAggregation() {
   const fetchInventory = async () => {
     setLoading(true);
     try {
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
       const authHeader = localStorage.getItem("authHeader");
       const response = await fetch(
-        `${API_BASE_URL}/api/admin/inventory/aggregate`,
+        `${API_BASE_URL}/admin/inventory/aggregate`,
         {
           headers: {
             Authorization: authHeader || "",

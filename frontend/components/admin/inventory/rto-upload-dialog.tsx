@@ -56,10 +56,10 @@ export function RTOUploadDialog({ onRTODataUploaded }: RTOUploadDialogProps) {
       const formData = new FormData();
       formData.append("rto_file", selectedFile);
 
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
       const authHeader = localStorage.getItem("authHeader");
       const response = await fetch(
-        `${API_BASE_URL}/api/admin/inventory/rto-upload`,
+        `${API_BASE_URL}/admin/inventory/rto-upload`,
         {
           method: "POST",
           headers: {
