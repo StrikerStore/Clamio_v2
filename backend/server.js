@@ -13,6 +13,7 @@ const shipwayRoutes = require('./routes/shipway');
 const ordersRoutes = require('./routes/orders');
 const settlementRoutes = require('./routes/settlements');
 const notificationRoutes = require('./routes/notifications');
+const inventoryRoutes = require('./routes/inventory');
 
 // Import database to initialize it
 const database = require('./config/database');
@@ -46,6 +47,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
     
     const allowedOrigins = [
+      'https://frontend-dev-production-5a8c.up.railway.app',
       'https://clamiofrontend-production.up.railway.app',
       'https://clamio-frontend-nu.vercel.app',
       'http://localhost:3000',
@@ -287,6 +289,7 @@ app.use('/api/shipway', shipwayRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/settlements', settlementRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin/inventory', inventoryRoutes);
 
 
 /**
