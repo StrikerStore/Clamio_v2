@@ -12,6 +12,8 @@ const userRoutes = require('./routes/users');
 const shipwayRoutes = require('./routes/shipway');
 const ordersRoutes = require('./routes/orders');
 const settlementRoutes = require('./routes/settlements');
+const notificationRoutes = require('./routes/notifications');
+const inventoryRoutes = require('./routes/inventory');
 
 // Import database (will be initialized lazily)
 const database = require('./config/database');
@@ -45,6 +47,8 @@ app.use(cors({
     if (!origin) return callback(null, true);
     
     const allowedOrigins = [
+      'https://frontend-dev-production-5a8c.up.railway.app',
+      'https://clamiofrontend-production.up.railway.app',
       'https://clamio-frontend-nu.vercel.app',
       'http://localhost:3000',
       'http://localhost:3001',
@@ -129,11 +133,20 @@ app.use(async (req, res, next) => {
       await database.initializeMySQL();
     }
 
-    // Test connection health (pool will auto-refresh stale connections)
+    // Test connection health (detects stale connections)
     const isHealthy = await database.testConnection();
     if (!isHealthy) {
       console.log('🔄 Database connection unhealthy, attempting to reconnect...');
-      await database.reconnect();
+      const reconnected = await database.reconnect();
+      
+      if (!reconnected) {
+        // Reconnection failed, return error
+        return res.status(503).json({
+          success: false,
+          message: 'Database temporarily unavailable',
+          error: 'Unable to establish database connection. Please try again in a moment.'
+        });
+      }
     }
 
     next();
@@ -141,7 +154,9 @@ app.use(async (req, res, next) => {
     console.error('❌ Database connection failed in middleware:', error.message);
     
     // For API routes, return error
-    if (req.path.startsWith('/api/')) {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/auth') || 
+        req.path.startsWith('/users') || req.path.startsWith('/orders') || 
+        req.path.startsWith('/settlements') || req.path.startsWith('/shipway')) {
       return res.status(503).json({
         success: false,
         message: 'Database temporarily unavailable',
@@ -149,7 +164,7 @@ app.use(async (req, res, next) => {
       });
     }
     
-    // For other routes, continue (might be static files)
+    // For other routes, continue
     next();
   }
 });
@@ -180,49 +195,6 @@ app.get('/test', (req, res) => {
 });
 
 /**
- * Auth Test Endpoint (tests database connection in auth context)
- */
-app.get('/auth-test', async (req, res) => {
-  try {
-    const database = require('./config/database');
-    
-    // Test if database is available
-    const isAvailable = database.isMySQLAvailable();
-    if (!isAvailable) {
-      return res.status(500).json({
-        success: false,
-        message: 'Database not available',
-        data: { available: false }
-      });
-    }
-
-    // Test a simple user query (like auth does)
-    const users = await database.getAllUsers();
-    
-    res.json({
-      success: true,
-      message: 'Auth context database test successful',
-      data: {
-        available: true,
-        userCount: users.length,
-        sampleUser: users[0] ? {
-          id: users[0].id,
-          email: users[0].email,
-          role: users[0].role
-        } : null
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Auth context database test failed',
-      error: error.message,
-      data: { available: false }
-    });
-  }
-});
-
-/**
  * Environment Check Endpoint (for debugging)
  */
 app.get('/env-check', (req, res) => {
@@ -240,20 +212,6 @@ app.get('/env-check', (req, res) => {
     cors: {
       origin: process.env.CORS_ORIGIN || 'Not set'
     }
-  });
-});
-
-/**
- * Connection Pool Statistics Endpoint
- */
-app.get('/pool-stats', (req, res) => {
-  const database = require('./config/database');
-  const stats = database.getPoolStats();
-  
-  res.json({
-    success: true,
-    message: 'Connection pool statistics',
-    data: stats
   });
 });
 
@@ -331,15 +289,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/shipway', shipwayRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/settlements', settlementRoutes);
-
-/**
- * Legacy Routes (without /api prefix) - for backward compatibility
- */
-app.use('/auth', authRoutes);
-app.use('/users', userRoutes);
-app.use('/shipway', shipwayRoutes);
-app.use('/orders', ordersRoutes);
-app.use('/settlements', settlementRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin/inventory', inventoryRoutes);
 
 
 /**
@@ -477,6 +428,26 @@ app.listen(PORT, async () => {
   
   // Log database initialization
   console.log('📁 Database initialized successfully');
+
+  // Start periodic database health check (every 15 minutes)
+  setInterval(async () => {
+    try {
+      const isHealthy = await database.testConnection();
+      if (!isHealthy) {
+        console.log('⚠️ Database connection unhealthy, attempting to reconnect...');
+        const reconnected = await database.reconnect();
+        if (reconnected) {
+          console.log('✅ Database reconnected successfully via health check');
+        } else {
+          console.error('❌ Database reconnection failed via health check');
+        }
+      } else {
+        console.log('✅ Database health check passed');
+      }
+    } catch (error) {
+      console.error('❌ Database health check failed:', error.message);
+    }
+  }, 15 * 60 * 1000); // Every 15 minutes
   
   // Initialize user sessions (run once on startup)
   const userSessionService = require('./services/userSessionService');
