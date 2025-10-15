@@ -321,10 +321,6 @@ export function AdminDashboard() {
   // Individual assign/unassign loading states (similar to vendor claim/unclaim)
   const [assignLoading, setAssignLoading] = useState<{[key: string]: boolean}>({})
   const [unassignLoading, setUnassignLoading] = useState<{[key: string]: boolean}>({})
-  
-  // Label download states
-  const [labelFormat, setLabelFormat] = useState<string>('thermal')
-  const [bulkLabelDownloadLoading, setBulkLabelDownloadLoading] = useState(false)
 
   // Derived selection state for bulk actions
   const selectedOrderObjects = orders.filter((o) => selectedOrders.includes(o.unique_id))
@@ -1189,99 +1185,6 @@ export function AdminDashboard() {
     setShowAssignModal(true);
   };
 
-  // Handle bulk label download
-  const handleBulkLabelDownload = async () => {
-    if (selectedOrders.length === 0) {
-      toast({
-        title: "No Orders Selected",
-        description: "Please select orders to download labels",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Filter to only claimed orders
-    const claimedOrders = selectedOrderObjects.filter(order => 
-      order.status === 'claimed' && order.claimed_by && order.claimed_by.trim() !== ''
-    );
-
-    if (claimedOrders.length === 0) {
-      toast({
-        title: "No Claimed Orders",
-        description: "Please select orders that are claimed by vendors",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const orderIds = claimedOrders.map(order => order.order_id);
-    const unclaimedCount = selectedOrders.length - claimedOrders.length;
-
-    try {
-      setBulkLabelDownloadLoading(true);
-      
-      toast({
-        title: "Bulk Download Started",
-        description: `Generating ${labelFormat} labels for ${claimedOrders.length} orders...`,
-      });
-
-      console.log('🔵 ADMIN: Starting bulk download labels process');
-      console.log('  - selected orders:', claimedOrders.length);
-      console.log('  - format:', labelFormat);
-
-      // Call the bulk download labels API
-      const blob = await apiClient.bulkDownloadLabelsAsAdmin(orderIds, labelFormat);
-      
-      console.log('📥 ADMIN: Bulk download labels response received');
-      console.log('  - blob size:', blob.size);
-      console.log('  - blob type:', blob.type);
-      
-      // Create download link for the combined PDF
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      
-      // Generate filename
-      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const filename = `admin_labels_${currentDate}.pdf`;
-      link.download = filename;
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-      
-      console.log('✅ ADMIN: Bulk labels PDF downloaded successfully');
-      
-      // Show success message with warnings if any
-      if (unclaimedCount > 0) {
-        toast({
-          title: "Bulk Download Complete",
-          description: `Successfully downloaded labels for ${claimedOrders.length} orders. ${unclaimedCount} orders were unclaimed and skipped.`,
-          className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
-        });
-      } else {
-        toast({
-          title: "Bulk Download Complete",
-          description: `Successfully downloaded labels for ${claimedOrders.length} orders`,
-        });
-      }
-
-      // Refresh orders to update the UI
-      await fetchOrders();
-      
-    } catch (error) {
-      console.error('❌ ADMIN: Bulk download labels error:', error);
-      toast({
-        title: 'Bulk Download Failed',
-        description: error instanceof Error ? error.message : 'An error occurred while downloading labels',
-        variant: 'destructive',
-      });
-    } finally {
-      setBulkLabelDownloadLoading(false);
-    }
-  };
-
   // Download carriers CSV
   const handleDownloadCarriers = async () => {
     try {
@@ -1745,48 +1648,14 @@ export function AdminDashboard() {
                     )}
 
                     {activeTab === "orders" && !isMobile && (
-                      <>
-                        <Button
-                          onClick={() => setShowBulkAssignModal(true)}
-                          disabled={selectedOrders.length === 0}
-                          variant="default"
-                          size="sm"
-                        >
-                          Bulk Assign ({selectedOrders.length})
-                        </Button>
-                        
-                        {/* Label Format Selection */}
-                        <Select value={labelFormat} onValueChange={setLabelFormat}>
-                          <SelectTrigger className="w-24 h-9 text-sm">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="thermal">Thermal</SelectItem>
-                            <SelectItem value="a4">A4</SelectItem>
-                            <SelectItem value="four-in-one">Four in One</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        
-                        {/* Bulk Label Download Button */}
-                        <Button
-                          onClick={handleBulkLabelDownload}
-                          disabled={selectedOrders.length === 0 || bulkLabelDownloadLoading}
-                          variant="outline"
-                          size="sm"
-                        >
-                          {bulkLabelDownloadLoading ? (
-                            <>
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
-                              Downloading...
-                            </>
-                          ) : (
-                            <>
-                              <Download className="w-4 h-4 mr-2" />
-                              Download Labels ({selectedOrders.length})
-                            </>
-                          )}
-                        </Button>
-                      </>
+                      <Button
+                        onClick={() => setShowBulkAssignModal(true)}
+                        disabled={selectedOrders.length === 0}
+                        variant="default"
+                        size="sm"
+                      >
+                        Bulk Assign ({selectedOrders.length})
+                      </Button>
                     )}
                     {activeTab === "carrier" && !isMobile && (
                       <>
@@ -3653,50 +3522,25 @@ export function AdminDashboard() {
               {/* Fixed Bottom Bulk Assign Button for Mobile Orders */}
               {isMobile && activeTab === "orders" && (
                 <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
-                  <div className="flex items-center gap-1.5 sm:gap-2">
+                  <div className="flex items-center gap-2 sm:gap-3">
                     {/* Move to Top Button */}
                     <Button
                       onClick={scrollToTop}
                       variant="outline"
                       size="sm"
-                      className="h-8 w-8 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                      className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
                     >
-                      <ChevronUp className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </Button>
                     
                     {/* Bulk Assign Button */}
                     <Button 
                       onClick={() => setShowBulkAssignModal(true)}
                       disabled={selectedOrders.length === 0} 
-                      className="flex-1 h-8 sm:h-10 text-xs sm:text-sm font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
+                      className="flex-1 h-10 sm:h-12 text-sm sm:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
                     >
-                      <Package className="w-3 h-3 sm:w-4 sm:h-4 mr-1 flex-shrink-0" />
-                      <span className="truncate">Assign ({selectedOrders.length})</span>
-                    </Button>
-                    
-                    {/* Label Format Selection */}
-                    <Select value={labelFormat} onValueChange={setLabelFormat}>
-                      <SelectTrigger className="w-24 h-8 sm:h-10 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="thermal">Thermal</SelectItem>
-                        <SelectItem value="a4">A4</SelectItem>
-                        <SelectItem value="four-in-one">Four in One</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    
-                    {/* Bulk Label Download Button - Mobile: Icon only, reduced width */}
-                    <Button 
-                      onClick={handleBulkLabelDownload}
-                      disabled={selectedOrders.length === 0 || bulkLabelDownloadLoading} 
-                      className="w-12 h-8 sm:h-10 text-xs sm:text-sm font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg flex-shrink-0"
-                    >
-                      {bulkLabelDownloadLoading ? (
-                        <div className="animate-spin rounded-full h-3 w-3 sm:h-4 sm:w-4 border-b-2 border-white"></div>
-                      ) : (
-                        <Download className="w-3 h-3 sm:w-4 sm:h-4" />
-                      )}
+                      <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="truncate">Bulk Assign ({selectedOrders.length})</span>
                     </Button>
                   </div>
                 </div>
