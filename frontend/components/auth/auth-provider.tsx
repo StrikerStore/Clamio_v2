@@ -44,21 +44,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const storedVendorToken = localStorage.getItem("vendorToken")
     const userData = localStorage.getItem("user_data")
 
+    console.log("🔑 Auth Provider: Checking stored auth on mount")
+    console.log("  - authHeader exists:", !!storedAuthHeader)
+    console.log("  - vendorToken exists:", !!storedVendorToken)
+    console.log("  - userData exists:", !!userData)
+
     if (storedAuthHeader && userData) {
       try {
         const parsedUser = JSON.parse(userData)
+        console.log("✅ Auth Provider: Restoring user session", parsedUser.role)
         setUser(parsedUser)
         setAuthHeader(storedAuthHeader)
         setVendorToken(storedVendorToken)
+        
+        // Auto-redirect to appropriate dashboard if on login page
+        const currentPath = window.location.pathname
+        if (currentPath === '/' || currentPath === '') {
+          console.log("🔄 Auth Provider: Auto-redirecting to dashboard")
+          switch (parsedUser.role) {
+            case "vendor":
+              router.replace("/vendor/dashboard")
+              break
+            case "admin":
+              router.replace("/admin/orders")
+              break
+            case "superadmin":
+              router.replace("/superadmin/settings")
+              break
+          }
+        }
       } catch (error) {
-        console.error("Error parsing stored user data:", error)
+        console.error("❌ Auth Provider: Error parsing stored user data:", error)
         localStorage.removeItem("authHeader")
         localStorage.removeItem("vendorToken")
         localStorage.removeItem("user_data")
       }
+    } else {
+      console.log("ℹ️ Auth Provider: No stored auth found")
     }
     setLoading(false)
-  }, [isClient])
+  }, [isClient, router])
 
   const login = async (email: string, password: string) => {
     try {

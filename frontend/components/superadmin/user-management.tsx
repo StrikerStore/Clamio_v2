@@ -204,25 +204,47 @@ export function UserManagement() {
   const validateWarehouse = async (warehouseId: string) => {
     if (!warehouseId.trim()) {
       setWarehouseValid(null)
+      setWarehouseInfo(null)
+      setWarehouseVerified(false)
+      setWarehouseVerifyError("")
       return
     }
 
     setWarehouseValidating(true)
+    setWarehouseValid(null)
+    setWarehouseInfo(null)
+    setWarehouseVerified(false)
+    setWarehouseVerifyError("")
+    
     try {
       // Get auth header from localStorage
       const authHeader = localStorage.getItem('authHeader')
       
       if (!authHeader) {
         setWarehouseValid(false)
-        setError('Authentication required. Please login again.')
+        setWarehouseVerifyError('Authentication required. Please login again.')
         return
       }
 
+      console.log('🔍 Frontend: Validating warehouse ID:', warehouseId)
       const response = await apiClient.validateWarehouseForUser(warehouseId)
-      setWarehouseValid(response.success)
+      
+      console.log('📦 Frontend: Warehouse validation response:', response)
+      
+      if (response.success) {
+        setWarehouseValid(true)
+        setWarehouseInfo(response.data.warehouse)
+        setWarehouseVerified(true)
+        setWarehouseVerifyError("")
+      } else {
+        setWarehouseValid(false)
+        setWarehouseVerifyError(response.message || 'Warehouse validation failed')
+      }
     } catch (error) {
-      console.error('Warehouse validation error:', error)
+      console.error('❌ Frontend: Warehouse validation error:', error)
       setWarehouseValid(false)
+      setWarehouseVerified(false)
+      setWarehouseVerifyError(error instanceof Error ? error.message : 'Failed to validate warehouse')
     } finally {
       setWarehouseValidating(false)
     }
@@ -233,18 +255,31 @@ export function UserManagement() {
     setWarehouseVerifyError("")
     setWarehouseInfo(null)
     setWarehouseVerified(false)
+    
+    // Determine which form is active and get the appropriate warehouse ID
+    const warehouseId = editDialogOpen ? editFormData.warehouseId : formData.warehouseId
+    
     try {
-      const response = await apiClient.verifyWarehouse(formData.warehouseId)
+      console.log('🔍 Frontend: Manual warehouse verification for:', warehouseId)
+      const response = await apiClient.verifyWarehouse(warehouseId)
+      
+      console.log('📦 Frontend: Manual verification response:', response)
+      
       if (response.success) {
         setWarehouseInfo(response.data)
         setWarehouseVerified(true)
+        setWarehouseValid(true)
+        setWarehouseVerifyError("")
       } else {
-        setWarehouseVerifyError(response.message)
+        setWarehouseVerifyError(response.message || 'Warehouse verification failed')
         setWarehouseVerified(false)
+        setWarehouseValid(false)
       }
     } catch (err) {
+      console.error('❌ Frontend: Manual warehouse verification error:', err)
       setWarehouseVerifyError(err instanceof Error ? err.message : "Failed to verify warehouse")
       setWarehouseVerified(false)
+      setWarehouseValid(false)
     } finally {
       setWarehouseVerifyLoading(false)
     }
@@ -253,20 +288,45 @@ export function UserManagement() {
   const handleInputChange = (field: keyof CreateUserForm, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     if (field === 'warehouseId') {
+      // Reset validation states when warehouse ID changes, but don't validate automatically
       setWarehouseValid(null)
       setWarehouseInfo(null)
       setWarehouseVerified(false)
       setWarehouseVerifyError("")
-      validateWarehouse(value)
     }
   }
 
   const handleEditInputChange = (field: keyof EditUserForm, value: string) => {
-    setEditFormData(prev => ({ ...prev, [field]: value }))
+    setEditFormData(prev => {
+      const newData = { ...prev, [field]: value }
+      
+      // Handle role changes
+      if (field === 'role') {
+        if (value === 'admin') {
+          // Clear warehouse ID when changing to admin
+          newData.warehouseId = ''
+          setWarehouseValid(null)
+          setWarehouseInfo(null)
+          setWarehouseVerified(false)
+          setWarehouseVerifyError("")
+        } else if (value === 'vendor') {
+          // Reset warehouse validation when changing to vendor
+          setWarehouseValid(null)
+          setWarehouseInfo(null)
+          setWarehouseVerified(false)
+          setWarehouseVerifyError("")
+        }
+      }
+      
+      return newData
+    })
     
-    // Auto-validate warehouse ID when it changes
+    // Reset validation states when warehouse ID changes, but don't validate automatically
     if (field === 'warehouseId') {
-      validateWarehouse(value)
+      setWarehouseValid(null)
+      setWarehouseInfo(null)
+      setWarehouseVerified(false)
+      setWarehouseVerifyError("")
     }
   }
 
@@ -290,7 +350,13 @@ export function UserManagement() {
     }
 
     if (formData.role === 'vendor' && warehouseValid === false) {
-      setError("Invalid warehouse ID")
+      setError("Invalid warehouse ID. Please verify the warehouse ID is correct.")
+      setCreating(false)
+      return
+    }
+
+    if (formData.role === 'vendor' && !warehouseVerified && warehouseValid !== true) {
+      setError("Please verify the warehouse ID before creating the user.")
       setCreating(false)
       return
     }
@@ -303,9 +369,14 @@ export function UserManagement() {
         password: formData.password,
         role: formData.role,
         status: 'active',
-        ...(formData.role === 'vendor' && { warehouseId: formData.warehouseId }),
+        ...(formData.role === 'vendor' && { warehouseId: formData.warehouseId.trim() }),
         ...(formData.contactNumber && { contactNumber: formData.contactNumber })
       }
+
+      console.log('🔍 Frontend: Creating user with data:', {
+        ...userData,
+        password: '***hidden***'
+      })
 
       const response = await apiClient.createUser(userData)
       
@@ -367,7 +438,13 @@ export function UserManagement() {
     }
 
     if (editFormData.role === 'vendor' && warehouseValid === false) {
-      setError("Invalid warehouse ID")
+      setError("Invalid warehouse ID. Please verify the warehouse ID is correct.")
+      setEditing(false)
+      return
+    }
+
+    if (editFormData.role === 'vendor' && !warehouseVerified && warehouseValid !== true) {
+      setError("Please verify the warehouse ID before updating the user.")
       setEditing(false)
       return
     }
@@ -803,7 +880,7 @@ export function UserManagement() {
                             size="sm"
                             variant="outline"
                             onClick={handleVerifyWarehouse}
-                            disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating}
+                            disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating || editDialogOpen}
                           >
                             {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
                           </Button>
@@ -822,6 +899,20 @@ export function UserManagement() {
                       <Label htmlFor="contactNumber">Contact Number</Label>
                       <Input id="contactNumber" value={formData.contactNumber} onChange={(e) => handleInputChange('contactNumber', e.target.value)} disabled={creating} />
                     </div>
+                    {/* Password Requirements Alert */}
+                    <Alert className="border-blue-200 bg-blue-50">
+                      <Shield className="h-4 w-4 text-blue-600" />
+                      <AlertDescription className="text-blue-800 text-xs">
+                        <strong>Password Requirements:</strong>
+                        <ul className="list-disc list-inside mt-1 space-y-0.5">
+                          <li>Min 6 characters</li>
+                          <li>One uppercase (A-Z)</li>
+                          <li>One lowercase (a-z)</li>
+                          <li>One number (0-9)</li>
+                        </ul>
+                      </AlertDescription>
+                    </Alert>
+
                     <div className="space-y-2">
                       <Label htmlFor="password">Password *</Label>
                       <Input id="password" type="password" value={formData.password} onChange={(e) => handleInputChange('password', e.target.value)} required disabled={creating} />
@@ -843,7 +934,7 @@ export function UserManagement() {
                     </Alert>
                   )}
 
-                  <Button type="submit" className="w-full" disabled={creating || (formData.role === 'vendor' && !warehouseVerified)}>
+                  <Button type="submit" className="w-full" disabled={creating || (formData.role === 'vendor' && !warehouseVerified && warehouseValid !== true)}>
                     {creating ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -876,7 +967,7 @@ export function UserManagement() {
 
         {/* Edit and Password Dialogs for Mobile */}
         <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Edit className="h-5 w-5 text-blue-600" />
@@ -887,7 +978,7 @@ export function UserManagement() {
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleEditSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit-name" className="text-sm font-medium text-gray-700">Full Name *</Label>
                   <Input id="edit-name" value={editFormData.name} onChange={(e) => handleEditInputChange('name', e.target.value)} required disabled={editing} className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500" />
@@ -925,6 +1016,89 @@ export function UserManagement() {
                   </Select>
                 </div>
               </div>
+
+              {/* Warehouse ID field for vendors */}
+              {editFormData.role === 'vendor' && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-warehouseId" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        id="edit-warehouseId"
+                        value={editFormData.warehouseId}
+                        onChange={(e) => handleEditInputChange('warehouseId', e.target.value)}
+                        required
+                        disabled={editing}
+                        className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
+                          warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
+                          warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
+                        }`}
+                        placeholder="Enter warehouse ID"
+                      />
+                      {warehouseValidating && (
+                        <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-blue-600" />
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleVerifyWarehouse}
+                      disabled={warehouseVerifyLoading || !editFormData.warehouseId.trim() || editing || !editDialogOpen}
+                    >
+                      {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                    </Button>
+                  </div>
+                  {warehouseValid === true && (
+                    <div className="space-y-1">
+                      <p className="text-sm text-green-600 flex items-center gap-1">
+                        <UserCheck className="h-3 w-3" />
+                        Valid warehouse ID
+                      </p>
+                      {warehouseInfo && (
+                        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
+                          <p><strong>Address:</strong> {warehouseInfo.address}</p>
+                          <p><strong>City:</strong> {warehouseInfo.city}</p>
+                          <p><strong>Pincode:</strong> {warehouseInfo.pincode}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {warehouseValid === false && (
+                    <p className="text-sm text-red-600 flex items-center gap-1">
+                      <Shield className="h-3 w-3" />
+                      Invalid warehouse ID
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Contact Number field */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-contactNumber" className="text-sm font-medium text-gray-700">Contact Number</Label>
+                <Input
+                  id="edit-contactNumber"
+                  value={editFormData.contactNumber}
+                  onChange={(e) => handleEditInputChange('contactNumber', e.target.value)}
+                  disabled={editing}
+                  className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                  placeholder="Enter contact number (optional)"
+                />
+              </div>
+
+              {/* Error and Success Messages */}
+              {error && (
+                <Alert variant="destructive" className="border-red-200 bg-red-50">
+                  <AlertDescription className="text-red-800">{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {success && (
+                <Alert className="border-green-200 bg-green-50">
+                  <AlertDescription className="text-green-800">{success}</AlertDescription>
+                </Alert>
+              )}
+
               <DialogFooter>
                 <Button type="submit" disabled={editing}>
                   {editing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -947,6 +1121,20 @@ export function UserManagement() {
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              {/* Password Requirements Alert */}
+              <Alert className="border-purple-200 bg-purple-50">
+                <Shield className="h-4 w-4 text-purple-600" />
+                <AlertDescription className="text-purple-800 text-xs">
+                  <strong>Password Requirements:</strong>
+                  <ul className="list-disc list-inside mt-1 space-y-0.5">
+                    <li>Min 6 characters</li>
+                    <li>One uppercase (A-Z)</li>
+                    <li>One lowercase (a-z)</li>
+                    <li>One number (0-9)</li>
+                  </ul>
+                </AlertDescription>
+              </Alert>
+
               <div className="space-y-2">
                 <Label htmlFor="new-password">New Password</Label>
                 <Input id="new-password" type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} required />
@@ -992,10 +1180,10 @@ export function UserManagement() {
               </div>
               <div className="min-w-0">
                 <h1 className={`font-bold text-gray-900 ${isMobile ? 'text-lg' : 'text-xl'}`}>
-                  {isMobile ? 'Admin Panel' : 'Super Admin Panel'}
+                  {isMobile ? 'Clamio' : 'Clamio - Super Admin'}
                 </h1>
                 {!isMobile && (
-                  <p className="text-sm text-gray-600">User Management & System Control</p>
+                  <p className="text-sm text-gray-600">Welcome back, Super Admin</p>
                 )}
               </div>
             </div>
@@ -1003,7 +1191,7 @@ export function UserManagement() {
               {!isMobile && (
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-900 truncate max-w-[120px]">{currentUser?.name}</p>
-                  <p className="text-xs text-gray-500 truncate max-w-[120px]">{currentUser?.email}</p>
+                  <p className="text-xs text-gray-500 break-all max-w-[200px]">{currentUser?.email}</p>
                 </div>
               )}
               <Button 
@@ -1379,7 +1567,7 @@ export function UserManagement() {
                                         variant="outline"
                                         className="ml-2"
                                         onClick={handleVerifyWarehouse}
-                                        disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating}
+                                        disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating || editDialogOpen}
                                       >
                                         {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify Warehouse"}
                                       </Button>
@@ -1403,10 +1591,31 @@ export function UserManagement() {
                                   </Tooltip>
                                 </TooltipProvider>
                               </div>
+                              {warehouseValid === true && !warehouseVerified && (
+                                <div className="space-y-1 mt-1">
+                                  <p className="text-sm text-green-600 flex items-center gap-1">
+                                    <UserCheck className="h-3 w-3" />
+                                    Valid warehouse ID
+                                  </p>
+                                  {warehouseInfo && (
+                                    <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
+                                      <p><strong>Address:</strong> {warehouseInfo.address}</p>
+                                      <p><strong>City:</strong> {warehouseInfo.city}</p>
+                                      <p><strong>Pincode:</strong> {warehouseInfo.pincode}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                               {warehouseVerified && warehouseInfo && (
                                 <p className="text-xs text-green-600 flex items-center gap-1 mt-1">
                                   <UserCheck className="h-3 w-3" />
                                   Verified: {warehouseInfo.address}, {warehouseInfo.city}, {warehouseInfo.state}, {warehouseInfo.country} (Pincode: {warehouseInfo.pincode})
+                                </p>
+                              )}
+                              {warehouseValid === false && (
+                                <p className="text-sm text-red-600 flex items-center gap-1 mt-1">
+                                  <Shield className="h-3 w-3" />
+                                  Invalid warehouse ID
                                 </p>
                               )}
                               {warehouseVerifyError && !warehouseVerifyLoading && (
@@ -1432,6 +1641,20 @@ export function UserManagement() {
                         </div>
 
                         <Separator />
+
+                        {/* Password Requirements Alert */}
+                        <Alert className="border-blue-200 bg-blue-50">
+                          <Shield className="h-4 w-4 text-blue-600" />
+                          <AlertDescription className="text-blue-800 text-sm">
+                            <strong>Password Requirements:</strong>
+                            <ul className="list-disc list-inside mt-1 space-y-0.5">
+                              <li>Minimum 6 characters long</li>
+                              <li>At least one uppercase letter (A-Z)</li>
+                              <li>At least one lowercase letter (a-z)</li>
+                              <li>At least one number (0-9)</li>
+                            </ul>
+                          </AlertDescription>
+                        </Alert>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div className="space-y-2">
@@ -1478,7 +1701,7 @@ export function UserManagement() {
                         <Button 
                           type="submit" 
                           className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg" 
-                          disabled={creating || (formData.role === 'vendor' && !warehouseVerified)}
+                          disabled={creating || (formData.role === 'vendor' && !warehouseVerified && warehouseValid !== true)}
                         >
                           {creating ? (
                             <>
@@ -1596,27 +1819,48 @@ export function UserManagement() {
               {editFormData.role === 'vendor' && (
                 <div className="space-y-2">
                   <Label htmlFor="edit-warehouseId" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
-                  <div className="relative">
-                    <Input
-                      id="edit-warehouseId"
-                      value={editFormData.warehouseId}
-                      onChange={(e) => handleEditInputChange('warehouseId', e.target.value)}
-                      required
-                      disabled={editing}
-                      className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
-                        warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
-                        warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
-                      }`}
-                    />
-                    {warehouseValidating && (
-                      <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-blue-600" />
-                    )}
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        id="edit-warehouseId"
+                        value={editFormData.warehouseId}
+                        onChange={(e) => handleEditInputChange('warehouseId', e.target.value)}
+                        required
+                        disabled={editing}
+                        className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
+                          warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
+                          warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
+                        }`}
+                        placeholder="Enter warehouse ID"
+                      />
+                      {warehouseValidating && (
+                        <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-blue-600" />
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleVerifyWarehouse}
+                      disabled={warehouseVerifyLoading || !editFormData.warehouseId.trim() || editing || !editDialogOpen}
+                    >
+                      {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                    </Button>
                   </div>
                   {warehouseValid === true && (
-                    <p className="text-sm text-green-600 flex items-center gap-1">
-                      <UserCheck className="h-3 w-3" />
-                      Valid warehouse ID
-                    </p>
+                    <div className="space-y-1">
+                      <p className="text-sm text-green-600 flex items-center gap-1">
+                        <UserCheck className="h-3 w-3" />
+                        Valid warehouse ID
+                      </p>
+                      {warehouseInfo && (
+                        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
+                          <p><strong>Address:</strong> {warehouseInfo.address}</p>
+                          <p><strong>City:</strong> {warehouseInfo.city}</p>
+                          <p><strong>Pincode:</strong> {warehouseInfo.pincode}</p>
+                        </div>
+                      )}
+                    </div>
                   )}
                   {warehouseValid === false && (
                     <p className="text-sm text-red-600 flex items-center gap-1">
@@ -1695,6 +1939,20 @@ export function UserManagement() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            {/* Password Requirements Alert */}
+            <Alert className="border-purple-200 bg-purple-50">
+              <Shield className="h-4 w-4 text-purple-600" />
+              <AlertDescription className="text-purple-800 text-sm">
+                <strong>Password Requirements:</strong>
+                <ul className="list-disc list-inside mt-1 space-y-0.5">
+                  <li>Minimum 6 characters long</li>
+                  <li>At least one uppercase letter (A-Z)</li>
+                  <li>At least one lowercase letter (a-z)</li>
+                  <li>At least one number (0-9)</li>
+                </ul>
+              </AlertDescription>
+            </Alert>
+
             <div className="space-y-2">
               <Label htmlFor="newPassword" className="text-sm font-medium text-gray-700">New Password *</Label>
               <div className="relative">

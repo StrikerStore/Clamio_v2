@@ -27,8 +27,8 @@ export default function LoginPage() {
               />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Stiker Store - Claimio</h1>
-          <p className="text-gray-600 mt-2">Sign in to manage your orders</p>
+          <h1 className="text-2xl font-bold text-gray-900">Claimio</h1>
+          <p className="text-gray-600 mt-2">Tap. Claim. Complete.</p>
         </div>
         <ClientOnly>
           <LoginForm />

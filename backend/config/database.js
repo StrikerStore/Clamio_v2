@@ -8,49 +8,154 @@ const mysql = require('mysql2/promise');
  */
 class Database {
   constructor() {
-    this.mysqlConnection = null;
+    this.mysqlConnection = null; // Keep for backward compatibility
+    this.mysqlPool = null; // Connection pool
     this.mysqlInitialized = false;
+    this.initializing = false;
+    // Don't auto-initialize in serverless environment
+    if (process.env.NODE_ENV !== 'production' || process.env.FORCE_DB_INIT === 'true') {
     this.initializeMySQL();
+    }
   }
 
   /**
    * Initialize MySQL connection
    */
   async initializeMySQL() {
+    // Prevent multiple simultaneous initializations
+    if (this.initializing) {
+      console.log('⏳ Database initialization already in progress, waiting...');
+      while (this.initializing) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      return;
+    }
+
+    if (this.mysqlInitialized && this.mysqlConnection) {
+      console.log('✅ Database already initialized');
+      return;
+    }
+
+    this.initializing = true;
     try {
       // Get database configuration from environment variables
-      const dbConfig = {
-        host: process.env.DB_HOST,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME
+      // Support both standard DB_* and MYSQL_* variable formats, plus URL parsing
+      let dbConfig = {
+        host: process.env.DB_HOST || process.env.MYSQL_HOST || process.env.MYSQLHOST,
+        user: process.env.DB_USER || process.env.MYSQL_USER || process.env.MYSQLUSER,
+        password: process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || process.env.MYSQLPASSWORD,
+        database: process.env.DB_NAME || process.env.MYSQL_DATABASE || process.env.MYSQLDATABASE,
+        port: process.env.DB_PORT || process.env.MYSQL_PORT || process.env.MYSQLPORT || 3306
       };
+
+      // If MYSQL_URL is provided, parse it and override individual settings
+      if (process.env.MYSQL_URL) {
+        try {
+          const url = new URL(process.env.MYSQL_URL);
+          dbConfig.host = url.hostname;
+          dbConfig.port = url.port || 3306;
+          dbConfig.user = url.username;
+          dbConfig.password = url.password;
+          dbConfig.database = url.pathname.substring(1); // Remove leading slash
+          console.log('✅ Parsed database configuration from MYSQL_URL');
+          console.log('🔍 Connection details:', {
+            host: dbConfig.host,
+            port: dbConfig.port,
+            user: dbConfig.user,
+            database: dbConfig.database,
+            hasPassword: !!dbConfig.password
+          });
+        } catch (error) {
+          console.error('❌ Error parsing MYSQL_URL:', error.message);
+          throw new Error('Invalid MYSQL_URL format');
+        }
+      }
+
+      // Log connection details for debugging
+      const sslConfig = process.env.NODE_ENV === 'production' || process.env.DB_HOST?.includes('railway') || process.env.DB_HOST?.includes('rlwy') ? { rejectUnauthorized: false } : false;
+      console.log('🔍 Attempting to connect with:', {
+        host: dbConfig.host,
+        port: dbConfig.port,
+        user: dbConfig.user,
+        database: dbConfig.database,
+        hasPassword: !!dbConfig.password,
+        ssl: sslConfig,
+        isRailway: dbConfig.host?.includes('railway') || dbConfig.host?.includes('rlwy')
+      });
 
       // Validate required environment variables
       if (!dbConfig.host || !dbConfig.user || !dbConfig.password || !dbConfig.database) {
         throw new Error('Missing required database environment variables: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
       }
 
-      // First try to connect without database to create it if needed
-      let connection = await mysql.createConnection({
-        host: dbConfig.host,
-        user: dbConfig.user,
-        password: dbConfig.password
-      });
-
-      // Create database if it doesn't exist
-      await connection.execute(`CREATE DATABASE IF NOT EXISTS ${dbConfig.database}`);
-      await connection.end();
-
-      // Now connect to the specific database
-      this.mysqlConnection = await mysql.createConnection({
+      // Railway-specific connection configuration
+      const isRailway = dbConfig.host?.includes('railway') || dbConfig.host?.includes('rlwy');
+      
+      // Connection Pool Configuration (Better for serverless!)
+      const poolConfig = {
         host: dbConfig.host,
         user: dbConfig.user,
         password: dbConfig.password,
-        database: dbConfig.database
-      });
+        port: dbConfig.port,
+        database: dbConfig.database,
+        ssl: isRailway ? { rejectUnauthorized: false } : false,
+        
+        // Connection Pool Settings
+        connectionLimit: 5, // Max 5 connections in pool
+        queueLimit: 0, // Unlimited queue
+        waitForConnections: true,
+        
+        // Timeouts
+        connectTimeout: 30000,
+        acquireTimeout: 30000,
+        
+        // Keep connections alive (NO auto-close)
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000, // Send keepalive every 10s to prevent timeout
+        
+        // Railway-specific settings
+        ...(isRailway && {
+          charset: 'utf8mb4',
+          timezone: '+00:00',
+          multipleStatements: false
+        })
+      };
+
+      // Create connection pool with retry logic
+      let retries = 3;
+      let lastError;
       
-      console.log('✅ MySQL connection established');
+      while (retries > 0) {
+        try {
+          console.log(`🔄 Creating connection pool (${4 - retries}/3)...`);
+          
+          // Create connection pool
+          this.mysqlPool = mysql.createPool(poolConfig);
+          
+          // Add connection error handlers
+          this.mysqlPool.on('connection', (connection) => {
+            console.log('🔌 New connection established in pool');
+            
+            // Handle connection errors
+            connection.on('error', (err) => {
+              console.error('❌ Connection error in pool:', err.message);
+              if (err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ECONNRESET') {
+                console.log('🔄 Connection lost, pool will create new one automatically');
+              }
+            });
+          });
+          
+          // Test the pool by getting a connection
+          const connection = await this.mysqlPool.getConnection();
+          await connection.execute('SELECT 1');
+          connection.release();
+          
+          console.log('✅ MySQL connection pool established');
+          
+          // For backward compatibility, keep a reference
+          this.mysqlConnection = this.mysqlPool;
+          
+          // Create tables
       await this.createCarriersTable();
       await this.createProductsTable();
       await this.createUsersTable();
@@ -58,12 +163,39 @@ class Database {
       await this.createTransactionsTable();
       await this.createOrdersTable();
       await this.createClaimsTable();
+          
       this.mysqlInitialized = true;
+          this.initializing = false;
+          return; // Success, exit retry loop
+          
     } catch (error) {
-      console.error('❌ MySQL connection failed:', error.message);
+          lastError = error;
+          retries--;
+          console.error(`❌ Connection pool creation failed (${retries} retries left):`, error.message);
+          
+          if (retries > 0) {
+            console.log('⏳ Waiting 2 seconds before retry...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+      }
+      
+      // All retries failed
+      this.initializing = false;
+      throw lastError;
+      
+    } catch (error) {
+      console.error('❌ MySQL connection failed after all retries:', error.message);
+      console.error('🔍 Error details:', {
+        code: error.code,
+        errno: error.errno,
+        sqlState: error.sqlState
+      });
+      
       // MySQL connection failed - application will not function without database
       this.mysqlConnection = null;
       this.mysqlInitialized = true; // Mark as initialized even if failed
+      this.initializing = false;
       throw new Error(`Database initialization failed: ${error.message}`);
     }
   }
@@ -617,72 +749,6 @@ class Database {
     } catch (error) {
       console.error('Error updating carrier:', error);
       throw new Error('Failed to update carrier in database');
-    }
-  }
-
-  /**
-   * Swap carrier priorities atomically using a transaction
-   * @param {string} carrierId1 - First carrier ID
-   * @param {string} carrierId2 - Second carrier ID
-   * @param {number} priority1 - First carrier's priority
-   * @param {number} priority2 - Second carrier's priority
-   * @returns {Promise<void>}
-   */
-  async swapCarrierPriorities(carrierId1, carrierId2, priority1, priority2) {
-    if (!this.mysqlConnection) {
-      throw new Error('MySQL connection not available');
-    }
-
-    try {
-      await this.mysqlConnection.beginTransaction();
-
-      // Update both carriers in a single transaction
-      await this.mysqlConnection.execute(
-        'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
-        [priority2, carrierId1]
-      );
-
-      await this.mysqlConnection.execute(
-        'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
-        [priority1, carrierId2]
-      );
-
-      await this.mysqlConnection.commit();
-    } catch (error) {
-      await this.mysqlConnection.rollback();
-      console.error('Error swapping carrier priorities:', error);
-      throw new Error('Failed to swap carrier priorities');
-    }
-  }
-
-  /**
-   * Reorder carrier priorities sequentially (1, 2, 3, ...)
-   * @param {Array} carriers - Array of carriers in the desired order
-   * @returns {Promise<void>}
-   */
-  async reorderCarrierPriorities(carriers) {
-    if (!this.mysqlConnection) {
-      throw new Error('MySQL connection not available');
-    }
-
-    try {
-      await this.mysqlConnection.beginTransaction();
-
-      // Update priorities sequentially starting from 1
-      for (let i = 0; i < carriers.length; i++) {
-        const newPriority = i + 1;
-        await this.mysqlConnection.execute(
-          'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
-          [newPriority, carriers[i].carrier_id]
-        );
-      }
-
-      await this.mysqlConnection.commit();
-      console.log(`✅ Reordered ${carriers.length} carrier priorities sequentially`);
-    } catch (error) {
-      await this.mysqlConnection.rollback();
-      console.error('Error reordering carrier priorities:', error);
-      throw new Error('Failed to reorder carrier priorities');
     }
   }
 
@@ -2491,6 +2557,91 @@ class Database {
    */
   isMySQLAvailable() {
     return this.mysqlConnection !== null;
+  }
+
+  /**
+   * Test database connection health
+   * @returns {Promise<boolean>} True if connection is healthy
+   */
+  async testConnection() {
+    if (!this.mysqlPool && !this.mysqlConnection) {
+      return false;
+    }
+
+    try {
+      // Use pool if available
+      if (this.mysqlPool) {
+        const connection = await this.mysqlPool.getConnection();
+        
+        try {
+          await connection.execute('SELECT 1');
+          connection.release();
+          return true;
+        } catch (queryError) {
+          // Release connection even on error
+          connection.release();
+          
+          // If connection is lost, pool will automatically create new one
+          if (queryError.code === 'PROTOCOL_CONNECTION_LOST' || 
+              queryError.code === 'ECONNRESET' ||
+              queryError.code === 'ETIMEDOUT') {
+            console.log('🔄 Stale connection detected, pool will refresh automatically');
+            return false;
+          }
+          throw queryError;
+        }
+      }
+      
+      // Fallback to direct connection
+      await this.mysqlConnection.execute('SELECT 1');
+      return true;
+    } catch (error) {
+      console.error('Database connection test failed:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Reconnect to database if connection is lost
+   * @returns {Promise<boolean>} True if reconnection successful
+   */
+  async reconnect() {
+    try {
+      // Close existing pool/connection
+      if (this.mysqlPool) {
+        await this.mysqlPool.end();
+        this.mysqlPool = null;
+      } else if (this.mysqlConnection) {
+        await this.mysqlConnection.end();
+      }
+      
+      this.mysqlConnection = null;
+      this.mysqlInitialized = false;
+      
+      // Reinitialize with connection pool
+      await this.initializeMySQL();
+      return true;
+    } catch (error) {
+      console.error('Database reconnection failed:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Get connection pool statistics
+   * @returns {Object} Pool statistics
+   */
+  getPoolStats() {
+    if (!this.mysqlPool) {
+      return { available: false };
+    }
+
+    return {
+      available: true,
+      totalConnections: this.mysqlPool._allConnections?.length || 0,
+      freeConnections: this.mysqlPool._freeConnections?.length || 0,
+      queuedRequests: this.mysqlPool._connectionQueue?.length || 0
+    };
   }
 
   /**
