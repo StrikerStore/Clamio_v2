@@ -2,6 +2,15 @@
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'
 
+// Debug logging for API requests
+const DEBUG_API = process.env.NODE_ENV === 'development';
+
+if (DEBUG_API) {
+  console.log('🔧 API Configuration:');
+  console.log('  API_BASE_URL:', API_BASE_URL);
+  console.log('  Environment:', process.env.NODE_ENV);
+}
+
 interface ApiResponse<T = any> {
   success: boolean
   message: string
@@ -48,9 +57,37 @@ class ApiClient {
     }
 
     try {
+      if (DEBUG_API) {
+        console.log(`🚀 API Request: ${config.method || 'GET'} ${API_BASE_URL}${endpoint}`);
+        console.log('  Headers:', config.headers);
+        if (config.body) console.log('  Body:', config.body);
+      }
+      
       const response = await fetch(`${API_BASE_URL}${endpoint}`, config)
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        // If not JSON, read as text to get the actual error
+        const text = await response.text()
+        console.error('Non-JSON response received:', {
+          status: response.status,
+          statusText: response.statusText,
+          url: `${API_BASE_URL}${endpoint}`,
+          contentType,
+          responseText: text.substring(0, 200) // First 200 chars
+        })
+        
+        if (response.status === 404) {
+          throw new Error(`API endpoint not found: ${endpoint}`)
+        } else if (response.status >= 500) {
+          throw new Error(`Server error: ${response.status} ${response.statusText}`)
+        } else {
+          throw new Error(`Invalid response format: Expected JSON, got ${contentType}`)
+        }
+      }
+      
       const data = await response.json()
-
 
       if (!response.ok) {
         // Log detailed validation errors for debugging
@@ -62,9 +99,16 @@ class ApiClient {
         throw new Error(data.message || `HTTP error! status: ${response.status}`)
       }
 
+      if (DEBUG_API) {
+        console.log(`✅ API Response: ${response.status} ${response.statusText}`);
+        console.log('  Data:', data);
+      }
+      
       return data
     } catch (error) {
-      console.error('API request failed:', error)
+      if (DEBUG_API) {
+        console.error('❌ API request failed:', error);
+      }
       throw error
     }
   }
@@ -337,6 +381,77 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ unique_id })
     });
+  }
+
+  // Admin label download methods
+  async downloadLabelAsAdmin(orderId: string, format: string = 'thermal'): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/download-label', {
+      method: 'POST',
+      body: JSON.stringify({ order_id: orderId, format })
+    });
+  }
+
+  async bulkDownloadLabelsAsAdmin(orderIds: string[], format: string = 'thermal'): Promise<Blob> {
+    const authHeader = typeof window !== 'undefined' ? localStorage.getItem('authHeader') : null;
+    
+    if (!authHeader) {
+      throw new Error('Admin authentication required');
+    }
+
+    console.log('🔵 ADMIN BULK DOWNLOAD LABELS API REQUEST START');
+    console.log('  - orderIds:', orderIds);
+    console.log('  - format:', format);
+    console.log('  - authHeader:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
+
+    const config: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ order_ids: orderIds, format })
+    };
+
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format }));
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders/admin/bulk-download-labels`, config);
+      
+      console.log('📥 ADMIN BULK DOWNLOAD LABELS API RESPONSE RECEIVED');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Content-Type:', response.headers.get('content-type'));
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      }
+
+      // Check if response is PDF or JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/pdf')) {
+        // Single vendor PDF response
+        const blob = await response.blob();
+        console.log('  - Blob size:', blob.size);
+        console.log('  - Blob type:', blob.type);
+        return blob;
+      } else {
+        // Multiple vendors JSON response
+        const data = await response.json();
+        console.log('  - JSON response:', data);
+        
+        // For now, return the first vendor's PDF (you can enhance this later)
+        if (data.data && data.data.vendor_groups && data.data.vendor_groups.length > 0) {
+          // This would need additional implementation to handle multiple PDFs
+          throw new Error('Multiple vendor PDFs not yet implemented in frontend');
+        }
+        
+        throw new Error('No PDF data received');
+      }
+    } catch (error) {
+      console.error('Admin bulk download labels API request failed:', error);
+      throw error;
+    }
   }
 
   async claimOrder(unique_id: string): Promise<ApiResponse> {
@@ -1013,6 +1128,51 @@ class ApiClient {
    */
   async getNotificationStats(): Promise<ApiResponse> {
     return this.makeRequest('/notifications/stats')
+  }
+
+  // ==================== PUSH NOTIFICATION METHODS ====================
+
+  /**
+   * Get VAPID public key
+   */
+  async getVapidKey(): Promise<ApiResponse> {
+    return this.makeRequest('/public/vapid-key')
+  }
+
+  /**
+   * Subscribe to push notifications
+   */
+  async subscribeToPushNotifications(subscription: any): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ subscription })
+    })
+  }
+
+  /**
+   * Unsubscribe from push notifications
+   */
+  async unsubscribeFromPushNotifications(): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/unsubscribe', {
+      method: 'POST'
+    })
+  }
+
+  /**
+   * Get push subscription status
+   */
+  async getPushNotificationStatus(): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/push-status')
+  }
+
+  /**
+   * Update push notification preference
+   */
+  async updatePushNotificationPreference(enabled: boolean): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/push-preference', {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled })
+    })
   }
 }
 

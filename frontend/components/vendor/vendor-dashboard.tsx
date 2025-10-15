@@ -41,6 +41,7 @@ import { useDeviceType } from "@/hooks/use-mobile"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DatePicker } from "@/components/ui/date-picker"
 import { apiClient } from "@/lib/api"
+import { vendorErrorTracker } from "@/lib/vendorErrorTracker"
 
 // Mock data - Version 4
 // const mockOrders = [

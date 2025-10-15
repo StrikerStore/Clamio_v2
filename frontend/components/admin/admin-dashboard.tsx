@@ -65,6 +65,7 @@ import { apiClient } from "@/lib/api"
 import { useEffect, useMemo } from "react"
 import { useDeviceType } from "@/hooks/use-mobile"
 import { InventoryAggregation } from "@/components/admin/inventory/inventory-aggregation"
+import { NotificationDialog } from "./notification-dialog"
 
 // Mock data for admin dashboard
 const mockVendors = [
@@ -274,6 +275,7 @@ export function AdminDashboard() {
   const [notificationStats, setNotificationStats] = useState<any>(null)
   const [selectedNotification, setSelectedNotification] = useState<any>(null)
   const [showNotificationDialog, setShowNotificationDialog] = useState(false)
+  const [showNotificationPanel, setShowNotificationPanel] = useState(false)
   const [resolutionNotes, setResolutionNotes] = useState("")
   const [notificationFilters, setNotificationFilters] = useState({ 
     status: "all", 
@@ -315,6 +317,14 @@ export function AdminDashboard() {
   const [showBulkAssignModal, setShowBulkAssignModal] = useState(false)
   const [selectedBulkVendorId, setSelectedBulkVendorId] = useState<string>("")
   const [bulkAssignLoading, setBulkAssignLoading] = useState(false)
+  
+  // Individual assign/unassign loading states (similar to vendor claim/unclaim)
+  const [assignLoading, setAssignLoading] = useState<{[key: string]: boolean}>({})
+  const [unassignLoading, setUnassignLoading] = useState<{[key: string]: boolean}>({})
+  
+  // Label download states
+  const [labelFormat, setLabelFormat] = useState<string>('thermal')
+  const [bulkLabelDownloadLoading, setBulkLabelDownloadLoading] = useState(false)
 
   // Derived selection state for bulk actions
   const selectedOrderObjects = orders.filter((o) => selectedOrders.includes(o.unique_id))
@@ -1084,8 +1094,11 @@ export function AdminDashboard() {
   };
 
   // Handle order assignment to vendor
-  const handleAssignOrder = async () => {
-    if (!selectedOrderForAssignment || !selectedVendorId) {
+  const handleAssignOrder = async (order?: any, vendorId?: string) => {
+    const orderToAssign = order || selectedOrderForAssignment;
+    const vendorToAssign = vendorId || selectedVendorId;
+    
+    if (!orderToAssign || !vendorToAssign) {
       toast({
         title: "Missing Information",
         description: "Please select a vendor",
@@ -1094,10 +1107,13 @@ export function AdminDashboard() {
       return;
     }
 
+    // Set loading state for this order
+    setAssignLoading(prev => ({ ...prev, [orderToAssign.unique_id]: true }));
+
     try {
       const response = await apiClient.assignOrderToVendor(
-        selectedOrderForAssignment.unique_id,
-        selectedVendorId
+        orderToAssign.unique_id,
+        vendorToAssign
       );
 
       if (response.success) {
@@ -1105,9 +1121,14 @@ export function AdminDashboard() {
           title: "Order Assigned",
           description: response.message,
         });
-        setShowAssignModal(false);
-        setSelectedOrderForAssignment(null);
-        setSelectedVendorId("");
+        
+        // Close modal if it was opened from modal
+        if (!order) {
+          setShowAssignModal(false);
+          setSelectedOrderForAssignment(null);
+          setSelectedVendorId("");
+        }
+        
         fetchOrders(); // Refresh orders list
       } else {
         toast({
@@ -1122,11 +1143,17 @@ export function AdminDashboard() {
         description: "Failed to assign order",
         variant: "destructive",
       });
+    } finally {
+      // Clear loading state
+      setAssignLoading(prev => ({ ...prev, [orderToAssign.unique_id]: false }));
     }
   };
 
   // Handle order unassignment
   const handleUnassignOrder = async (order: any) => {
+    // Set loading state for this order
+    setUnassignLoading(prev => ({ ...prev, [order.unique_id]: true }));
+
     try {
       const response = await apiClient.unassignOrder(order.unique_id);
 
@@ -1149,6 +1176,9 @@ export function AdminDashboard() {
         description: "Failed to unassign order",
         variant: "destructive",
       });
+    } finally {
+      // Clear loading state
+      setUnassignLoading(prev => ({ ...prev, [order.unique_id]: false }));
     }
   };
 
@@ -1157,6 +1187,99 @@ export function AdminDashboard() {
     setSelectedOrderForAssignment(order);
     setSelectedVendorId("");
     setShowAssignModal(true);
+  };
+
+  // Handle bulk label download
+  const handleBulkLabelDownload = async () => {
+    if (selectedOrders.length === 0) {
+      toast({
+        title: "No Orders Selected",
+        description: "Please select orders to download labels",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Filter to only claimed orders
+    const claimedOrders = selectedOrderObjects.filter(order => 
+      order.status === 'claimed' && order.claimed_by && order.claimed_by.trim() !== ''
+    );
+
+    if (claimedOrders.length === 0) {
+      toast({
+        title: "No Claimed Orders",
+        description: "Please select orders that are claimed by vendors",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const orderIds = claimedOrders.map(order => order.order_id);
+    const unclaimedCount = selectedOrders.length - claimedOrders.length;
+
+    try {
+      setBulkLabelDownloadLoading(true);
+      
+      toast({
+        title: "Bulk Download Started",
+        description: `Generating ${labelFormat} labels for ${claimedOrders.length} orders...`,
+      });
+
+      console.log('🔵 ADMIN: Starting bulk download labels process');
+      console.log('  - selected orders:', claimedOrders.length);
+      console.log('  - format:', labelFormat);
+
+      // Call the bulk download labels API
+      const blob = await apiClient.bulkDownloadLabelsAsAdmin(orderIds, labelFormat);
+      
+      console.log('📥 ADMIN: Bulk download labels response received');
+      console.log('  - blob size:', blob.size);
+      console.log('  - blob type:', blob.type);
+      
+      // Create download link for the combined PDF
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Generate filename
+      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const filename = `admin_labels_${currentDate}.pdf`;
+      link.download = filename;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      console.log('✅ ADMIN: Bulk labels PDF downloaded successfully');
+      
+      // Show success message with warnings if any
+      if (unclaimedCount > 0) {
+        toast({
+          title: "Bulk Download Complete",
+          description: `Successfully downloaded labels for ${claimedOrders.length} orders. ${unclaimedCount} orders were unclaimed and skipped.`,
+          className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
+        });
+      } else {
+        toast({
+          title: "Bulk Download Complete",
+          description: `Successfully downloaded labels for ${claimedOrders.length} orders`,
+        });
+      }
+
+      // Refresh orders to update the UI
+      await fetchOrders();
+      
+    } catch (error) {
+      console.error('❌ ADMIN: Bulk download labels error:', error);
+      toast({
+        title: 'Bulk Download Failed',
+        description: error instanceof Error ? error.message : 'An error occurred while downloading labels',
+        variant: 'destructive',
+      });
+    } finally {
+      setBulkLabelDownloadLoading(false);
+    }
   };
 
   // Download carriers CSV
@@ -1270,7 +1393,7 @@ export function AdminDashboard() {
                 <Button 
                   variant="ghost" 
                   size="sm"
-                  onClick={() => setActiveTab('notifications')}
+                  onClick={() => setShowNotificationPanel(true)}
                   className="p-2 relative"
                 >
                   <Bell className="w-5 h-5" />
@@ -1304,7 +1427,7 @@ export function AdminDashboard() {
                   variant="ghost" 
                   size="sm"
                   onClick={() => {
-                    setActiveTab('notifications');
+                    setShowNotificationPanel(true);
                     setIsMobileMenuOpen(false);
                   }}
                   className="p-2 relative"
@@ -1622,14 +1745,48 @@ export function AdminDashboard() {
                     )}
 
                     {activeTab === "orders" && !isMobile && (
-                      <Button
-                        onClick={() => setShowBulkAssignModal(true)}
-                        disabled={selectedOrders.length === 0}
-                        variant="default"
-                        size="sm"
-                      >
-                        Bulk Assign ({selectedOrders.length})
-                      </Button>
+                      <>
+                        <Button
+                          onClick={() => setShowBulkAssignModal(true)}
+                          disabled={selectedOrders.length === 0}
+                          variant="default"
+                          size="sm"
+                        >
+                          Bulk Assign ({selectedOrders.length})
+                        </Button>
+                        
+                        {/* Label Format Selection */}
+                        <Select value={labelFormat} onValueChange={setLabelFormat}>
+                          <SelectTrigger className="w-24 h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="thermal">Thermal</SelectItem>
+                            <SelectItem value="a4">A4</SelectItem>
+                            <SelectItem value="four-in-one">Four in One</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        
+                        {/* Bulk Label Download Button */}
+                        <Button
+                          onClick={handleBulkLabelDownload}
+                          disabled={selectedOrders.length === 0 || bulkLabelDownloadLoading}
+                          variant="outline"
+                          size="sm"
+                        >
+                          {bulkLabelDownloadLoading ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
+                              Downloading...
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-4 h-4 mr-2" />
+                              Download Labels ({selectedOrders.length})
+                            </>
+                          )}
+                        </Button>
+                      </>
                     )}
                     {activeTab === "carrier" && !isMobile && (
                       <>
@@ -1911,8 +2068,16 @@ export function AdminDashboard() {
                                         e.stopPropagation();
                                         openAssignModal(order);
                                       }}
+                                      disabled={assignLoading[order.unique_id]}
                                     >
-                                      Assign
+                                      {assignLoading[order.unique_id] ? (
+                                        <>
+                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                          Assigning...
+                                        </>
+                                      ) : (
+                                        'Assign'
+                                      )}
                                 </Button>
                                   ) : (
                                     <Button 
@@ -1922,8 +2087,16 @@ export function AdminDashboard() {
                                         e.stopPropagation();
                                         handleUnassignOrder(order);
                                       }}
+                                      disabled={unassignLoading[order.unique_id]}
                                     >
-                                      Unassign
+                                      {unassignLoading[order.unique_id] ? (
+                                        <>
+                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                          Unassigning...
+                                        </>
+                                      ) : (
+                                        'Unassign'
+                                      )}
                                     </Button>
                                   )}
                               </div>
@@ -2041,6 +2214,51 @@ export function AdminDashboard() {
                                     : 'N/A'}
                                   </span>
                                 </div>
+                              </div>
+                              
+                              {/* Assign/Unassign Button Row - Full Width at Bottom */}
+                              <div className="mt-3 pt-2 border-t">
+                                {order.status === 'unclaimed' ? (
+                                  <Button 
+                                    size="sm" 
+                                    variant="default"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAssignModal(order);
+                                    }}
+                                    disabled={assignLoading[order.unique_id]}
+                                    className="w-full text-xs h-8"
+                                  >
+                                    {assignLoading[order.unique_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                        Assigning...
+                                      </>
+                                    ) : (
+                                      'Assign Order'
+                                    )}
+                                  </Button>
+                                ) : (
+                                  <Button 
+                                    size="sm" 
+                                    variant="destructive"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUnassignOrder(order);
+                                    }}
+                                    disabled={unassignLoading[order.unique_id]}
+                                    className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                  >
+                                    {unassignLoading[order.unique_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
+                                        Unassigning...
+                                      </>
+                                    ) : (
+                                      'Unassign Order'
+                                    )}
+                                  </Button>
+                                )}
                               </div>
                             </Card>
                           ))
@@ -3435,25 +3653,50 @@ export function AdminDashboard() {
               {/* Fixed Bottom Bulk Assign Button for Mobile Orders */}
               {isMobile && activeTab === "orders" && (
                 <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
-                  <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
                     {/* Move to Top Button */}
                     <Button
                       onClick={scrollToTop}
                       variant="outline"
                       size="sm"
-                      className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                      className="h-8 w-8 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
                     >
-                      <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <ChevronUp className="w-3 h-3 sm:w-4 sm:h-4" />
                     </Button>
                     
                     {/* Bulk Assign Button */}
                     <Button 
                       onClick={() => setShowBulkAssignModal(true)}
                       disabled={selectedOrders.length === 0} 
-                      className="flex-1 h-10 sm:h-12 text-sm sm:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
+                      className="flex-1 h-8 sm:h-10 text-xs sm:text-sm font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
                     >
-                      <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                      <span className="truncate">Bulk Assign ({selectedOrders.length})</span>
+                      <Package className="w-3 h-3 sm:w-4 sm:h-4 mr-1 flex-shrink-0" />
+                      <span className="truncate">Assign ({selectedOrders.length})</span>
+                    </Button>
+                    
+                    {/* Label Format Selection */}
+                    <Select value={labelFormat} onValueChange={setLabelFormat}>
+                      <SelectTrigger className="w-24 h-8 sm:h-10 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="thermal">Thermal</SelectItem>
+                        <SelectItem value="a4">A4</SelectItem>
+                        <SelectItem value="four-in-one">Four in One</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    
+                    {/* Bulk Label Download Button - Mobile: Icon only, reduced width */}
+                    <Button 
+                      onClick={handleBulkLabelDownload}
+                      disabled={selectedOrders.length === 0 || bulkLabelDownloadLoading} 
+                      className="w-12 h-8 sm:h-10 text-xs sm:text-sm font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg flex-shrink-0"
+                    >
+                      {bulkLabelDownloadLoading ? (
+                        <div className="animate-spin rounded-full h-3 w-3 sm:h-4 sm:w-4 border-b-2 border-white"></div>
+                      ) : (
+                        <Download className="w-3 h-3 sm:w-4 sm:h-4" />
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -4093,7 +4336,16 @@ export function AdminDashboard() {
                    } else {
                      await handleAssignOrder()
                    }
-                 }} disabled={!selectedVendorId}>Confirm</Button>
+                 }} disabled={!selectedVendorId || assignLoading[selectedOrderForAssignment?.unique_id] || unassignLoading[selectedOrderForAssignment?.unique_id]}>
+                   {assignLoading[selectedOrderForAssignment?.unique_id] || unassignLoading[selectedOrderForAssignment?.unique_id] ? (
+                     <>
+                       <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                       Processing...
+                     </>
+                   ) : (
+                     'Confirm'
+                   )}
+                 </Button>
                </div>
              </div>
            )}
@@ -4255,6 +4507,17 @@ export function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Notification Dialog */}
+      <NotificationDialog
+        isOpen={showNotificationPanel}
+        onClose={() => setShowNotificationPanel(false)}
+        notificationStats={notificationStats}
+        onNotificationUpdate={() => {
+          fetchNotificationStats();
+          // Refresh other data if needed
+        }}
+      />
     </div>
   )
 }

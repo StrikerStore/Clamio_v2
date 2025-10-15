@@ -4,9 +4,10 @@ import React from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Share2, Download } from "lucide-react";
+import { Share2, Download, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface ProductInventoryCardProps {
   productName: string;
@@ -25,6 +26,9 @@ export function ProductInventoryCard({
 }: ProductInventoryCardProps) {
   const { toast } = useToast();
   const [showImageModal, setShowImageModal] = useState(false);
+  const [imageCopied, setImageCopied] = useState(false);
+  const [sizeQuantityCopied, setSizeQuantityCopied] = useState(false);
+  const isMobile = useIsMobile();
 
   /**
    * Format size-quantity for WhatsApp message
@@ -67,6 +71,84 @@ export function ProductInventoryCard({
     message += `\n\n---\n_Sent from Claimio Inventory System_`;
     
     return message;
+  };
+
+  /**
+   * Copy image data to clipboard (like Chrome's "Copy image" feature)
+   */
+  const copyImageData = async () => {
+    if (!imageUrl) {
+      toast({
+        title: "No Image",
+        description: "This product doesn't have an image.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Fetch the image as a blob
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.status}`);
+      }
+      
+      const blob = await response.blob();
+      
+      // Check if the Clipboard API supports writing images
+      if (navigator.clipboard && navigator.clipboard.write) {
+        // Create a ClipboardItem with the image blob
+        const clipboardItem = new ClipboardItem({
+          [blob.type]: blob
+        });
+        
+        await navigator.clipboard.write([clipboardItem]);
+        
+        // Show visual feedback
+        setImageCopied(true);
+        setTimeout(() => setImageCopied(false), 2000);
+      } else {
+        // Fallback: copy the image URL if clipboard API doesn't support images
+        await navigator.clipboard.writeText(imageUrl);
+        setImageCopied(true);
+        setTimeout(() => setImageCopied(false), 2000);
+      }
+    } catch (error) {
+      console.error("Error copying image:", error);
+      
+      // Fallback: try to copy the URL
+      try {
+        await navigator.clipboard.writeText(imageUrl);
+        setImageCopied(true);
+        setTimeout(() => setImageCopied(false), 2000);
+      } catch (urlError) {
+        toast({
+          title: "Copy Failed",
+          description: "Failed to copy image or URL. Please try again.",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
+  /**
+   * Copy size-quantity to clipboard
+   */
+  const copySizeQuantity = async () => {
+    try {
+      await navigator.clipboard.writeText(sizeQuantity);
+      
+      // Show visual feedback
+      setSizeQuantityCopied(true);
+      setTimeout(() => setSizeQuantityCopied(false), 2000);
+    } catch (error) {
+      console.error("Error copying size-quantity:", error);
+      toast({
+        title: "Copy Failed",
+        description: "Failed to copy size-quantity. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   /**
@@ -158,16 +240,33 @@ export function ProductInventoryCard({
 
         {/* Product Image */}
         {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt={productName}
-            className="w-24 h-24 sm:w-32 sm:h-32 object-contain mx-auto mb-2 sm:mb-3 rounded-md bg-gray-50 cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => setShowImageModal(true)}
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              target.src = "/placeholder.svg";
-            }}
-          />
+          <div className="relative">
+            <img
+              src={imageUrl}
+              alt={productName}
+              className="w-24 h-24 sm:w-32 sm:h-32 object-contain mx-auto mb-2 sm:mb-3 rounded-md bg-gray-50 cursor-pointer hover:opacity-80 transition-opacity"
+              onClick={() => setShowImageModal(true)}
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = "/placeholder.svg";
+              }}
+            />
+            {/* Mobile Copy Image Button */}
+            {isMobile && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={copyImageData}
+                className={`absolute top-1 right-1 w-6 h-6 p-0 bg-white/90 hover:bg-white border-gray-300 transition-colors duration-200 ${
+                  imageCopied ? 'bg-green-100 border-green-300' : ''
+                }`}
+              >
+                <Copy className={`w-3 h-3 transition-colors duration-200 ${
+                  imageCopied ? 'text-green-600' : ''
+                }`} />
+              </Button>
+            )}
+          </div>
         ) : (
           <div className="w-24 h-24 sm:w-32 sm:h-32 mx-auto mb-2 sm:mb-3 rounded-md bg-gray-100 flex items-center justify-center text-gray-400 text-xs sm:text-sm">
             No Image
@@ -176,7 +275,22 @@ export function ProductInventoryCard({
 
         {/* Size-Quantity */}
         <div className="mb-2 sm:mb-3">
-          <p className="text-xs text-gray-500 mb-1">Size & Quantity</p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-gray-500">Size & Quantity</p>
+            {/* Mobile Copy Size-Quantity Button */}
+            {isMobile && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={copySizeQuantity}
+                className={`h-6 w-6 p-0 transition-colors duration-200 ${
+                  sizeQuantityCopied ? 'text-green-600 bg-green-50' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Copy className="w-3 h-3" />
+              </Button>
+            )}
+          </div>
           <div className="bg-gray-50 rounded-md px-2 sm:px-3 py-1.5 sm:py-2">
             <p className="text-xs sm:text-sm font-medium text-gray-800 break-words">
               {sizeQuantity}
