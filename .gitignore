@@ -24,12 +24,8 @@ frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
 backend/data/raw_shipway_orders.json
-<<<<<<< HEAD
-=======
 backend/env.example
 backend/uploads/payment-proofs/payment-proof-1753294317020-14169049.webp
-
->>>>>>> 4932a4323c32b30730279ef55f6a00febebdc7f0
 
 # Build outputs
 dist/
