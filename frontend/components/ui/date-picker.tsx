@@ -43,40 +43,40 @@ const CustomCalendar = ({
   
   // Add empty cells for days before the month starts
   const emptyCells = Array.from({ length: firstDayOfWeek }, (_, i) => (
-    <div key={`empty-${i}`} className="w-9 h-9" />
+    <div key={`empty-${i}`} className="aspect-square min-h-[36px]" />
   ))
 
   return (
     <div className="w-full">
       {/* Month Names Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 via-blue-50 to-gray-50">
+      <div className="flex items-center justify-between p-3 sm:p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 via-blue-50 to-gray-50">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => onMonthChange(prevMonth)}
-          className="h-8 w-8 p-0 hover:bg-gray-200 rounded-full"
+          className="h-8 w-8 p-0 hover:bg-gray-200 rounded-full flex-shrink-0"
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
         
-        <div className="flex items-center space-x-6">
-          {/* Previous Month Name */}
+        <div className="flex items-center space-x-2 sm:space-x-6 flex-1 justify-center min-w-0">
+          {/* Previous Month Name - Hidden on mobile */}
           <button
             onClick={() => onMonthChange(prevMonth)}
-            className="text-sm text-gray-400 hover:text-gray-600 transition-colors cursor-pointer font-medium"
+            className="hidden sm:block text-sm text-gray-400 hover:text-gray-600 transition-colors cursor-pointer font-medium"
           >
             {format(prevMonth, "MMMM")}
           </button>
           
           {/* Current Month Name */}
-          <h2 className="text-lg font-bold text-gray-900 px-4 py-1 bg-blue-100 rounded-full">
-            {format(currentMonth, "MMMM yyyy")}
+          <h2 className="text-sm sm:text-lg font-bold text-gray-900 px-2 sm:px-4 py-1 bg-blue-100 rounded-full text-center truncate">
+            {format(currentMonth, "MMM yyyy")}
           </h2>
           
-          {/* Next Month Name */}
+          {/* Next Month Name - Hidden on mobile */}
           <button
             onClick={() => onMonthChange(nextMonth)}
-            className="text-sm text-gray-400 hover:text-gray-600 transition-colors cursor-pointer font-medium"
+            className="hidden sm:block text-sm text-gray-400 hover:text-gray-600 transition-colors cursor-pointer font-medium"
           >
             {format(nextMonth, "MMMM")}
           </button>
@@ -86,20 +86,20 @@ const CustomCalendar = ({
           variant="ghost"
           size="sm"
           onClick={() => onMonthChange(nextMonth)}
-          className="h-8 w-8 p-0 hover:bg-gray-200 rounded-full"
+          className="h-8 w-8 p-0 hover:bg-gray-200 rounded-full flex-shrink-0"
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
 
       {/* Single Month Calendar */}
-      <div className="p-4 bg-white">
+      <div className="p-3 sm:p-4 bg-white">
         {/* Day Headers */}
         <div className="grid grid-cols-7 gap-1 mb-3">
           {daysInWeek.map((day) => (
             <div 
               key={day} 
-              className="text-center text-xs font-semibold text-gray-600 w-9 h-7 flex items-center justify-center"
+              className="text-center text-xs font-semibold text-gray-600 h-7 flex items-center justify-center"
             >
               {day}
             </div>
@@ -118,7 +118,7 @@ const CustomCalendar = ({
                 key={day.toISOString()}
                 onClick={() => onSelect?.(day)}
                 className={cn(
-                  "w-9 h-9 text-sm rounded-lg transition-all duration-200 flex items-center justify-center font-medium hover:scale-105 hover:shadow-md",
+                  "aspect-square text-sm rounded-lg transition-all duration-200 flex items-center justify-center font-medium hover:scale-105 hover:shadow-md min-h-[36px]",
                   "text-gray-700 hover:bg-blue-100",
                   isSelected
                     ? "bg-blue-600 text-white hover:bg-blue-700 shadow-lg scale-105"
@@ -174,15 +174,24 @@ export function DatePicker({
             className
           )}
         >
-          <CalendarIcon className="mr-3 h-4 w-4 text-gray-500" />
-          {date ? (
-            <span className="text-gray-900">{format(date, "MMM dd, yyyy")}</span>
-          ) : (
-            <span className="text-gray-500">{placeholder}</span>
-          )}
+          <CalendarIcon className="mr-2 sm:mr-3 h-4 w-4 text-gray-500 flex-shrink-0" />
+          <span className="truncate min-w-0 flex-1">
+            {date ? (
+              <>
+                <span className="text-gray-900 text-xs sm:text-sm sm:hidden">
+                  {format(date, "MMM dd")}
+                </span>
+                <span className="text-gray-900 text-xs sm:text-sm hidden sm:inline">
+                  {format(date, "MMM dd, yyyy")}
+                </span>
+              </>
+            ) : (
+              <span className="text-gray-500 text-xs sm:text-sm">{placeholder}</span>
+            )}
+          </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0 shadow-xl border border-gray-200 rounded-lg overflow-hidden" align="start">
+      <PopoverContent className="w-auto max-w-[95vw] p-0 shadow-xl border border-gray-200 rounded-lg overflow-hidden" align="start">
         {/* Quick Actions */}
         <div className="p-3 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-blue-50">
           <div className="flex gap-2">

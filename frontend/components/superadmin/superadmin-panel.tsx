@@ -273,7 +273,7 @@ export function SuperAdminPanel() {
       superadmin: "bg-red-100 text-red-800",
     }
 
-    return <Badge className={colors[role as keyof typeof colors]}>{role.toUpperCase()}</Badge>
+    return <Badge className={`${colors[role as keyof typeof colors]} text-[10px] sm:text-xs truncate`}>{role.toUpperCase()}</Badge>
   }
 
   const getStatusBadge = (status: string) => {
@@ -282,25 +282,25 @@ export function SuperAdminPanel() {
       inactive: "bg-gray-100 text-gray-800",
     }
 
-    return <Badge className={colors[status as keyof typeof colors]}>{status.toUpperCase()}</Badge>
+    return <Badge className={`${colors[status as keyof typeof colors]} text-[10px] sm:text-xs truncate`}>{status.toUpperCase()}</Badge>
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
-                <Settings className="w-5 h-5 text-white" />
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
+          <div className="flex justify-between items-center py-3 sm:py-4">
+            <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 bg-red-600 rounded-full flex items-center justify-center flex-shrink-0">
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
               <div className="min-w-0">
-                <h1 className={`font-semibold text-gray-900 ${isMobile ? 'text-lg' : 'text-xl'}`}>
+                <h1 className={`font-semibold text-gray-900 truncate ${isMobile ? 'text-sm' : 'text-lg sm:text-xl'}`}>
                   {isMobile ? 'Admin' : 'Super Admin Panel'}
                 </h1>
                 {!isMobile && (
-                  <p className="text-sm text-gray-500 truncate">Welcome back, {user?.name}</p>
+                  <p className="text-xs sm:text-sm text-gray-500 truncate">Welcome back, {user?.name}</p>
                 )}
               </div>
             </div>
@@ -328,18 +328,18 @@ export function SuperAdminPanel() {
           
           {/* Mobile Menu */}
           {isMobile && isMobileMenuOpen && (
-            <div className="border-t bg-white py-4">
-              <div className="space-y-3">
+            <div className="border-t bg-white py-3">
+              <div className="space-y-2">
                 <div className="px-2">
-                  <p className="text-sm text-gray-600 truncate">Welcome, {user?.name}</p>
-                  <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+                  <p className="text-xs sm:text-sm text-gray-600 truncate">Welcome, {user?.name}</p>
+                  <p className="text-[10px] sm:text-xs text-gray-400 truncate break-all">{user?.email}</p>
                 </div>
                 <Button 
                   variant="outline" 
                   onClick={logout} 
-                  className="w-full flex items-center justify-center gap-2"
+                  className="w-full flex items-center justify-center gap-2 text-sm"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-3 h-3 sm:w-4 sm:h-4" />
                   Logout
                 </Button>
               </div>
@@ -348,36 +348,36 @@ export function SuperAdminPanel() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-3 sm:py-4 md:py-8">
         {/* Stats Cards */}
-        <div className={`grid gap-4 md:gap-6 mb-6 md:mb-8 ${
+        <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${
           isMobile ? 'grid-cols-1' : 
           isTablet ? 'grid-cols-2' : 
           'grid-cols-3'
         }`}>
           <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Users className="w-6 h-6 text-blue-600" />
+            <CardContent className="p-3 sm:p-4 md:p-6">
+              <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg flex-shrink-0">
+                  <Users className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-blue-600" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Users</p>
-                  <p className="text-2xl font-bold text-gray-900">{users.length}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-gray-600 truncate">Total Users</p>
+                  <p className="text-base sm:text-xl md:text-2xl font-bold text-gray-900">{users.length}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <Users className="w-6 h-6 text-green-600" />
+            <CardContent className="p-3 sm:p-4 md:p-6">
+              <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg flex-shrink-0">
+                  <Users className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-green-600" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Active Users</p>
-                  <p className="text-2xl font-bold text-gray-900">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-gray-600 truncate">Active Users</p>
+                  <p className="text-base sm:text-xl md:text-2xl font-bold text-gray-900">
                     {users.filter((u) => u.status === "active").length}
                   </p>
                 </div>
@@ -386,14 +386,14 @@ export function SuperAdminPanel() {
           </Card>
 
           <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <div className="p-2 bg-purple-100 rounded-lg">
-                  <Users className="w-6 h-6 text-purple-600" />
+            <CardContent className="p-3 sm:p-4 md:p-6">
+              <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                <div className="p-1.5 sm:p-2 bg-purple-100 rounded-lg flex-shrink-0">
+                  <Users className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-purple-600" />
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Vendors</p>
-                  <p className="text-2xl font-bold text-gray-900">{users.filter((u) => u.role === "vendor").length}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] sm:text-xs md:text-sm font-medium text-gray-600 truncate">Vendors</p>
+                  <p className="text-base sm:text-xl md:text-2xl font-bold text-gray-900">{users.filter((u) => u.role === "vendor").length}</p>
                 </div>
               </div>
             </CardContent>
@@ -402,39 +402,39 @@ export function SuperAdminPanel() {
 
         {/* Main Content */}
         <Card>
-          <CardHeader>
-            <CardTitle>System Management</CardTitle>
-            <CardDescription>Manage users, API keys, and system settings</CardDescription>
+          <CardHeader className="p-3 sm:p-4 md:p-6">
+            <CardTitle className="text-base sm:text-lg md:text-xl">System Management</CardTitle>
+            <CardDescription className="text-xs sm:text-sm">Manage users, API keys, and system settings</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-2 sm:p-4 md:p-6">
             <Tabs defaultValue="users" className="w-full">
               <TabsList className={`grid w-full grid-cols-2 ${isMobile ? 'h-auto' : ''}`}>
-                <TabsTrigger value="users" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
+                <TabsTrigger value="users" className={`${isMobile ? 'text-[10px] sm:text-xs px-2 py-2.5 sm:py-3' : ''}`}>
                   {isMobile ? 'Users' : 'User Management'}
                 </TabsTrigger>
-                <TabsTrigger value="bulk-import" className={`${isMobile ? 'text-xs px-2 py-3' : ''}`}>
+                <TabsTrigger value="bulk-import" className={`${isMobile ? 'text-[10px] sm:text-xs px-2 py-2.5 sm:py-3' : ''}`}>
                   {isMobile ? 'Import' : 'Bulk Import'}
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="users" className="space-y-4 md:space-y-6">
-                <div className={`flex ${isMobile ? 'flex-col space-y-3' : 'justify-between items-center'}`}>
-                  <h3 className={`font-medium ${isMobile ? 'text-base' : 'text-lg'}`}>User Management</h3>
+              <TabsContent value="users" className="space-y-3 sm:space-y-4 md:space-y-6">
+                <div className={`flex ${isMobile ? 'flex-col space-y-2 sm:space-y-3' : 'justify-between items-center'}`}>
+                  <h3 className={`font-medium ${isMobile ? 'text-sm sm:text-base' : 'text-lg'}`}>User Management</h3>
                   <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
                     <DialogTrigger asChild>
-                      <Button className={`${isMobile ? 'w-full' : ''}`} size={isMobile ? 'default' : 'default'}>
-                        <Plus className="w-4 h-4 mr-2" />
+                      <Button className={`${isMobile ? 'w-full text-sm' : ''}`} size={isMobile ? 'default' : 'default'}>
+                        <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
                         {isMobile ? 'Add User' : 'Add User'}
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh] overflow-y-auto' : 'max-w-md'}`}>
+                    <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh] overflow-y-auto p-3 sm:p-6' : 'max-w-md'}`}>
                       <DialogHeader>
-                        <DialogTitle className={`${isMobile ? 'text-lg' : 'text-xl'}`}>Add New User</DialogTitle>
-                        <DialogDescription className={`${isMobile ? 'text-sm' : ''}`}>
+                        <DialogTitle className={`${isMobile ? 'text-sm sm:text-lg' : 'text-xl'}`}>Add New User</DialogTitle>
+                        <DialogDescription className={`${isMobile ? 'text-xs sm:text-sm' : ''}`}>
                           Create a new user account for the vendor portal
                         </DialogDescription>
                       </DialogHeader>
-                      <div className="space-y-4">
+                      <div className="space-y-3 sm:space-y-4">
                         {!newUser.userType ? (
                           <div>
                             <Label>Select User Type</Label>
@@ -558,11 +558,11 @@ export function SuperAdminPanel() {
                           </>
                         )}
                       </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsAddUserOpen(false)}>
+                      <DialogFooter className={`${isMobile ? 'flex-col space-y-2' : ''}`}>
+                        <Button variant="outline" onClick={() => setIsAddUserOpen(false)} className={`${isMobile ? 'w-full text-sm' : ''}`}>
                           Cancel
                         </Button>
-                        <Button onClick={handleAddUser}>Add User</Button>
+                        <Button onClick={handleAddUser} className={`${isMobile ? 'w-full text-sm' : ''}`}>Add User</Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
@@ -570,29 +570,29 @@ export function SuperAdminPanel() {
 
                 {/* Mobile Card Layout */}
                 {isMobile ? (
-                  <div className="space-y-4">
+                  <div className="space-y-3 sm:space-y-4">
                     {users.map((user) => (
-                      <Card key={user.id} className="p-4">
-                        <div className="space-y-3">
-                          <div className="flex justify-between items-start">
+                      <Card key={user.id} className="p-2.5 sm:p-4">
+                        <div className="space-y-2 sm:space-y-3">
+                          <div className="flex justify-between items-start gap-2">
                             <div className="min-w-0 flex-1">
-                              <h4 className="font-medium text-gray-900 truncate">{user.name}</h4>
-                              <p className="text-sm text-gray-600 truncate">{user.email}</p>
+                              <h4 className="text-sm sm:text-base font-medium text-gray-900 truncate">{user.name}</h4>
+                              <p className="text-xs sm:text-sm text-gray-600 truncate break-all">{user.email}</p>
                             </div>
-                            <div className="flex space-x-1 ml-2">
-                              <Button size="sm" variant="outline" onClick={() => handleEditUser(user)}>
-                                <Edit className="w-4 h-4" />
+                            <div className="flex space-x-1 flex-shrink-0">
+                              <Button size="sm" variant="outline" onClick={() => handleEditUser(user)} className="h-8 w-8 p-0">
+                                <Edit className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                               </Button>
-                              <Button size="sm" variant="outline" onClick={() => handleDeleteClick(user)}>
-                                <Trash2 className="w-4 h-4" />
+                              <Button size="sm" variant="outline" onClick={() => handleDeleteClick(user)} className="h-8 w-8 p-0">
+                                <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                               </Button>
                             </div>
                           </div>
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap gap-1.5 sm:gap-2">
                             {getRoleBadge(user.role)}
                             {getStatusBadge(user.status)}
                           </div>
-                          <div className="text-xs text-gray-500">
+                          <div className="text-[10px] sm:text-xs text-gray-500 truncate">
                             Last login: {user.lastLogin}
                           </div>
                         </div>
@@ -645,35 +645,35 @@ export function SuperAdminPanel() {
                 )}
               </TabsContent>
 
-              <TabsContent value="bulk-import" className="space-y-4 md:space-y-6">
+              <TabsContent value="bulk-import" className="space-y-3 sm:space-y-4 md:space-y-6">
                 <div>
-                  <h3 className={`font-medium mb-4 ${isMobile ? 'text-base' : 'text-lg'}`}>Bulk Import Users</h3>
+                  <h3 className={`font-medium mb-3 sm:mb-4 ${isMobile ? 'text-sm sm:text-base' : 'text-lg'}`}>Bulk Import Users</h3>
                   <Card>
-                    <CardHeader>
-                      <CardTitle>CSV Import</CardTitle>
-                      <CardDescription>
+                    <CardHeader className="p-3 sm:p-6">
+                      <CardTitle className="text-sm sm:text-base md:text-lg">CSV Import</CardTitle>
+                      <CardDescription className="text-xs sm:text-sm">
                         Import multiple users at once using CSV format. Expected format: Name, Email, Role
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-4">
+                    <CardContent className="space-y-3 sm:space-y-4 p-3 sm:p-6">
                       <div>
-                        <Label htmlFor="csv-data">CSV Data</Label>
+                        <Label htmlFor="csv-data" className="text-xs sm:text-sm">CSV Data</Label>
                         <Textarea
                           id="csv-data"
                           placeholder="Name,Email,Role&#10;John Doe,john@example.com,vendor&#10;Jane Smith,jane@example.com,admin"
                           value={csvData}
                           onChange={(e) => setCsvData(e.target.value)}
-                          rows={8}
-                          className="font-mono text-sm"
+                          rows={isMobile ? 6 : 8}
+                          className="font-mono text-xs sm:text-sm mt-1"
                         />
                       </div>
-                      <div className="flex space-x-2">
-                        <Button onClick={handleCsvUpload}>
-                          <Upload className="w-4 h-4 mr-2" />
+                      <div className={`flex ${isMobile ? 'flex-col space-y-2' : 'flex-row space-x-2'}`}>
+                        <Button onClick={handleCsvUpload} className={`${isMobile ? 'w-full text-sm' : ''}`}>
+                          <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
                           Import Users
                         </Button>
-                        <Button variant="outline">
-                          <Upload className="w-4 h-4 mr-2" />
+                        <Button variant="outline" className={`${isMobile ? 'w-full text-sm' : ''}`}>
+                          <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
                           Upload CSV File
                         </Button>
                       </div>
@@ -683,11 +683,11 @@ export function SuperAdminPanel() {
 
                 <div>
                   <Card>
-                    <CardHeader>
-                      <CardTitle>Import Instructions</CardTitle>
+                    <CardHeader className="p-3 sm:p-6">
+                      <CardTitle className="text-sm sm:text-base md:text-lg">Import Instructions</CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2 text-sm text-gray-600">
+                    <CardContent className="p-3 sm:p-6">
+                      <div className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm text-gray-600">
                         <p>
                           <strong>CSV Format:</strong> Name, Email, Role
                         </p>
@@ -697,7 +697,7 @@ export function SuperAdminPanel() {
                         <p>
                           <strong>Example:</strong>
                         </p>
-                        <pre className="bg-gray-100 p-2 rounded text-xs">
+                        <pre className="bg-gray-100 p-2 rounded text-[10px] sm:text-xs overflow-x-auto">
                           Name,Email,Role{"\n"}
                           John Vendor,john@vendor.com,vendor{"\n"}
                           Jane Admin,jane@admin.com,admin{"\n"}
@@ -714,13 +714,13 @@ export function SuperAdminPanel() {
       </div>
       {/* Edit User Dialog */}
       <Dialog open={isEditUserOpen} onOpenChange={setIsEditUserOpen}>
-        <DialogContent>
+        <DialogContent className={`${isMobile ? 'max-w-[95vw] p-3 sm:p-6' : ''}`}>
           <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
-            <DialogDescription>Update user account information</DialogDescription>
+            <DialogTitle className={`${isMobile ? 'text-sm sm:text-base' : ''}`}>Edit User</DialogTitle>
+            <DialogDescription className={`${isMobile ? 'text-xs sm:text-sm' : ''}`}>Update user account information</DialogDescription>
           </DialogHeader>
           {editingUser && (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               <div>
                 <Label htmlFor="edit-name">Full Name *</Label>
                 <Input
@@ -773,29 +773,29 @@ export function SuperAdminPanel() {
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditUserOpen(false)}>
+          <DialogFooter className={`${isMobile ? 'flex-col space-y-2' : ''}`}>
+            <Button variant="outline" onClick={() => setIsEditUserOpen(false)} className={`${isMobile ? 'w-full text-sm' : ''}`}>
               Cancel
             </Button>
-            <Button onClick={handleUpdateUser}>Update User</Button>
+            <Button onClick={handleUpdateUser} className={`${isMobile ? 'w-full text-sm' : ''}`}>Update User</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
-        <DialogContent>
+        <DialogContent className={`${isMobile ? 'max-w-[95vw] p-3 sm:p-6' : ''}`}>
           <DialogHeader>
-            <DialogTitle>Confirm Delete</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className={`${isMobile ? 'text-sm sm:text-base' : ''}`}>Confirm Delete</DialogTitle>
+            <DialogDescription className={`${isMobile ? 'text-xs sm:text-sm' : ''}`}>
               Are you sure you want to delete {userToDelete?.name}? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteConfirmOpen(false)}>
+          <DialogFooter className={`${isMobile ? 'flex-col space-y-2' : ''}`}>
+            <Button variant="outline" onClick={() => setIsDeleteConfirmOpen(false)} className={`${isMobile ? 'w-full text-sm' : ''}`}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete}>
+            <Button variant="destructive" onClick={handleConfirmDelete} className={`${isMobile ? 'w-full text-sm' : ''}`}>
               Delete User
             </Button>
           </DialogFooter>

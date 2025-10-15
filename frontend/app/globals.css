@@ -87,3 +87,16 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Inventory Card Styles */
+@layer components {
+  .minimal-card {
+    @apply bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200;
+  }
+  
+  @media (max-width: 640px) {
+    .minimal-card {
+      @apply rounded-lg;
+    }
+  }
+}

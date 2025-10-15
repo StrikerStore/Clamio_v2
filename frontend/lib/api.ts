@@ -17,6 +17,20 @@ class ApiClient {
     return null
   }
 
+  private getCurrentUserInfo(): { role?: string; email?: string } | null {
+    try {
+      if (typeof window !== 'undefined') {
+        const userData = localStorage.getItem('user_data')
+        if (userData) {
+          return JSON.parse(userData)
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing user info:', error)
+    }
+    return null
+  }
+
   private async makeRequest<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -39,6 +53,12 @@ class ApiClient {
 
 
       if (!response.ok) {
+        // Log detailed validation errors for debugging
+        if (data.errors && Array.isArray(data.errors)) {
+          console.error('Validation errors:', data.errors)
+          const errorMessages = data.errors.map((err: any) => `${err.field}: ${err.message}`).join(', ')
+          throw new Error(`${data.message}: ${errorMessages}`)
+        }
         throw new Error(data.message || `HTTP error! status: ${response.status}`)
       }
 
@@ -119,12 +139,33 @@ class ApiClient {
     warehouseId?: string
     contactNumber?: string
   }): Promise<ApiResponse> {
-    const isAdminCreatingVendor = userData.role === 'vendor'
-    const endpoint = isAdminCreatingVendor ? '/users/vendor' : '/users'
-    return this.makeRequest(endpoint, {
-      method: 'POST',
-      body: JSON.stringify(userData)
-    })
+    // Check user role from localStorage to determine which endpoint to use
+    const authHeader = this.getAuthHeader()
+    if (!authHeader) {
+      throw new Error('Authentication required')
+    }
+
+    // Decode the auth header to check user role
+    const userInfo = this.getCurrentUserInfo()
+    
+    if (userInfo?.role === 'superadmin') {
+      // Superadmin can create both vendors and admins via the general /users endpoint
+      return this.makeRequest('/users', {
+        method: 'POST',
+        body: JSON.stringify(userData)
+      })
+    } else if (userInfo?.role === 'admin') {
+      // Admin can only create vendors via the vendor-specific endpoint
+      if (userData.role !== 'vendor') {
+        throw new Error('Admins can only create vendor accounts')
+      }
+      return this.makeRequest('/users/vendor', {
+        method: 'POST',
+        body: JSON.stringify(userData)
+      })
+    } else {
+      throw new Error('Insufficient permissions to create users')
+    }
   }
 
   async updateUser(userId: string, userData: Partial<{
@@ -135,21 +176,41 @@ class ApiClient {
     warehouseId: string
     contactNumber: string
   }>): Promise<ApiResponse> {
-    // Always use the general users endpoint for superadmin operations
-    // The superadmin route /users/:id can update any user type
-    const endpoint = `/users/${userId}`
-    return this.makeRequest(endpoint, {
-      method: 'PUT',
-      body: JSON.stringify(userData)
-    })
+    const userInfo = this.getCurrentUserInfo()
+    
+    if (userInfo?.role === 'superadmin') {
+      // Superadmin uses the general route which allows updating any user (vendor or admin)
+      return this.makeRequest(`/users/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(userData)
+      })
+    } else if (userInfo?.role === 'admin') {
+      // Admin can only update vendors via the vendor-specific endpoint
+      return this.makeRequest(`/users/vendor/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify(userData)
+      })
+    } else {
+      throw new Error('Insufficient permissions to update users')
+    }
   }
 
   async deleteUser(userId: string): Promise<ApiResponse> {
-    // Use the general users endpoint for superadmin operations
-    // The superadmin route /users/:id can delete any user type
-    return this.makeRequest(`/users/${userId}`, {
-      method: 'DELETE'
-    })
+    const userInfo = this.getCurrentUserInfo()
+    
+    if (userInfo?.role === 'superadmin') {
+      // Superadmin uses the general route which allows deleting any user (vendor or admin)
+      return this.makeRequest(`/users/${userId}`, {
+        method: 'DELETE'
+      })
+    } else if (userInfo?.role === 'admin') {
+      // Admin can only delete vendors via the vendor-specific endpoint
+      return this.makeRequest(`/users/vendor/${userId}`, {
+        method: 'DELETE'
+      })
+    } else {
+      throw new Error('Insufficient permissions to delete users')
+    }
   }
 
   async getUserById(userId: string): Promise<ApiResponse> {
@@ -333,8 +394,10 @@ class ApiClient {
     })
   }
 
-  async getGroupedOrders(): Promise<ApiResponse> {
+  async getGroupedOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: getGroupedOrders called');
+    console.log('  - page:', page);
+    console.log('  - limit:', limit);
     
     // Use vendor token for grouped orders endpoint
     const vendorToken = localStorage.getItem('vendorToken')
@@ -350,14 +413,75 @@ class ApiClient {
     console.log('📤 API CLIENT: Making request to /orders/grouped');
     console.log('  - Method: GET');
     console.log('  - Headers: Authorization');
+    console.log('  - Query params: page=' + page + ', limit=' + limit);
 
-    return this.makeRequest('/orders/grouped', {
+    return this.makeRequest(`/orders/grouped?page=${page}&limit=${limit}`, {
       method: 'GET',
       headers: {
         'Authorization': vendorToken
       },
     })
   }
+
+  async reverseOrder(unique_id: string): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: reverseOrder called');
+    console.log('  - unique_id:', unique_id);
+    
+    // Use vendor token for reverse endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/reverse');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ unique_id }));
+
+    return this.makeRequest('/orders/reverse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ unique_id }),
+    })
+  }
+
+  async reverseGroupedOrder(order_id: string, unique_ids: string[]): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: reverseGroupedOrder called');
+    console.log('  - order_id:', order_id);
+    console.log('  - unique_ids:', unique_ids);
+    
+    // Use vendor token for reverse grouped endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/reverse-grouped');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ order_id, unique_ids }));
+
+    return this.makeRequest('/orders/reverse-grouped', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ order_id, unique_ids }),
+    })
+  }
+
   // Settlement API methods
   
   // Vendor settlement methods
@@ -618,13 +742,14 @@ class ApiClient {
   }
 
   // Download label methods
-  async downloadLabel(orderId: string): Promise<ApiResponse> {
+  async downloadLabel(orderId: string, format: string = 'thermal'): Promise<ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
     console.log('🔍 DOWNLOAD LABEL API CLIENT DEBUG:');
     console.log('  - Order ID being sent:', orderId);
     console.log('  - Order ID type:', typeof orderId);
+    console.log('  - Format being sent:', format);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
@@ -633,10 +758,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_id: orderId })
+      body: JSON.stringify({ order_id: orderId, format: format })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_id: orderId }));
+    console.log('  - Request body:', JSON.stringify({ order_id: orderId, format: format }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/download-label`, config)
@@ -658,13 +783,14 @@ class ApiClient {
     }
   }
 
-  async bulkDownloadLabels(orderIds: string[]): Promise<Blob> {
+  async bulkDownloadLabels(orderIds: string[], format: string = 'thermal'): Promise<Blob> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
     console.log('🔍 BULK DOWNLOAD LABELS API CLIENT DEBUG:');
     console.log('  - Order IDs being sent:', orderIds);
     console.log('  - Order IDs count:', orderIds.length);
+    console.log('  - Format being sent:', format);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
@@ -673,10 +799,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_ids: orderIds })
+      body: JSON.stringify({ order_ids: orderIds, format: format })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds }));
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)
@@ -695,6 +821,22 @@ class ApiClient {
       const blob = await response.blob()
       console.log('✅ Bulk labels PDF downloaded successfully');
       console.log('  - Blob size:', blob.size, 'bytes');
+      
+      // Check for warning headers and store them in blob object
+      const warningsHeader = response.headers.get('X-Download-Warnings');
+      const failedOrdersHeader = response.headers.get('X-Failed-Orders');
+      
+      if (warningsHeader) {
+        console.log('⚠️ Some orders failed during bulk download');
+        const warnings = atob(warningsHeader);
+        const failedOrders = failedOrdersHeader ? JSON.parse(failedOrdersHeader) : [];
+        console.log('  - Warnings:', warnings);
+        console.log('  - Failed orders:', failedOrders);
+        
+        // Store warnings in blob object for later access
+        (blob as any)._warnings = warnings;
+        (blob as any)._failedOrders = failedOrders;
+      }
       console.log('  - Blob type:', blob.type);
       
       return blob
@@ -758,6 +900,119 @@ class ApiClient {
       console.error('❌ Download label file failed:', error)
       throw error
     }
+  }
+
+  // ==================== NOTIFICATION METHODS ====================
+
+  /**
+   * Get all notifications with filters
+   */
+  async getNotifications(params?: {
+    page?: number
+    limit?: number
+    status?: string
+    type?: string
+    severity?: string
+    vendor_id?: number
+    order_id?: string
+    start_date?: string
+    end_date?: string
+    search?: string
+  }): Promise<ApiResponse> {
+    const queryParams = new URLSearchParams()
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          queryParams.append(key, String(value))
+        }
+      })
+    }
+    const queryString = queryParams.toString()
+    return this.makeRequest(`/notifications${queryString ? `?${queryString}` : ''}`)
+  }
+
+  /**
+   * Get notification by ID
+   */
+  async getNotificationById(id: number): Promise<ApiResponse> {
+    return this.makeRequest(`/notifications/${id}`)
+  }
+
+  /**
+   * Create new notification
+   */
+  async createNotification(data: {
+    type: string
+    severity?: string
+    title: string
+    message: string
+    order_id?: string
+    vendor_id?: number
+    vendor_name?: string
+    vendor_warehouse_id?: string
+    metadata?: any
+    error_details?: string
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/notifications', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  /**
+   * Update notification status
+   */
+  async updateNotificationStatus(id: number, status: string): Promise<ApiResponse> {
+    return this.makeRequest(`/notifications/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    })
+  }
+
+  /**
+   * Resolve notification
+   */
+  async resolveNotification(id: number, resolution_notes?: string): Promise<ApiResponse> {
+    return this.makeRequest(`/notifications/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution_notes })
+    })
+  }
+
+  /**
+   * Dismiss notification
+   */
+  async dismissNotification(id: number, dismiss_reason?: string): Promise<ApiResponse> {
+    return this.makeRequest(`/notifications/${id}/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify({ dismiss_reason })
+    })
+  }
+
+  /**
+   * Bulk resolve notifications
+   */
+  async bulkResolveNotifications(notification_ids: number[], resolution_notes?: string): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/bulk-resolve', {
+      method: 'POST',
+      body: JSON.stringify({ notification_ids, resolution_notes })
+    })
+  }
+
+  /**
+   * Delete notification
+   */
+  async deleteNotification(id: number): Promise<ApiResponse> {
+    return this.makeRequest(`/notifications/${id}`, {
+      method: 'DELETE'
+    })
+  }
+
+  /**
+   * Get notification statistics
+   */
+  async getNotificationStats(): Promise<ApiResponse> {
+    return this.makeRequest('/notifications/stats')
   }
 }
 
