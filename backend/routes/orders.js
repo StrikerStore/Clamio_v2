@@ -4099,6 +4099,404 @@ router.post('/reverse-grouped', async (req, res) => {
 });
 
 /**
+ * @route   POST /api/orders/admin/download-label
+ * @desc    Admin downloads a single label on behalf of vendor
+ * @access  Admin only
+ */
+router.post('/admin/download-label', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  const { order_id, format = 'thermal' } = req.body;
+  
+  console.log('🔵 ADMIN DOWNLOAD LABEL REQUEST START');
+  console.log('  - order_id:', order_id);
+  console.log('  - format:', format);
+  
+  if (!order_id) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'order_id is required' 
+    });
+  }
+
+  try {
+    const database = require('../config/database');
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+    
+    // Get order details
+    const orders = await database.getAllOrders();
+    const orderProducts = orders.filter(order => order.order_id === order_id);
+    
+    if (orderProducts.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Order not found' 
+      });
+    }
+    
+    // Check if order is claimed by any vendor
+    const claimedProducts = orderProducts.filter(order => 
+      order.claimed_by && order.claimed_by.trim() !== '' && order.status === 'claimed'
+    );
+    
+    if (claimedProducts.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Order is not claimed by any vendor' 
+      });
+    }
+    
+    // Get vendor info for the claimed products
+    const vendorWarehouseId = claimedProducts[0].claimed_by;
+    const vendor = await database.getUserByWarehouseId(vendorWarehouseId);
+    
+    if (!vendor) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Vendor not found for claimed order' 
+      });
+    }
+    
+    console.log('✅ VENDOR FOUND:', vendor.name);
+    
+    // Check if label already downloaded
+    const firstClaimedProduct = claimedProducts[0];
+    if (firstClaimedProduct.label_downloaded === 1) {
+      console.log('✅ LABEL ALREADY DOWNLOADED: Found cached label');
+      
+      const cachedLabel = await database.getLabelByOrderId(order_id);
+      if (cachedLabel && cachedLabel.label_url) {
+        return res.json({
+          success: true,
+          data: {
+            shipping_url: cachedLabel.label_url,
+            awb: cachedLabel.awb || 'N/A',
+            carrier_id: cachedLabel.carrier_id || 'N/A',
+            carrier_name: cachedLabel.carrier_name || 'N/A',
+            cached: true
+          }
+        });
+      }
+    }
+    
+    // Generate new label using existing vendor logic
+    console.log('🔄 GENERATING NEW LABEL...');
+    const labelResponse = await generateLabelForOrder(order_id, claimedProducts, vendor, format);
+    
+    if (labelResponse.success && labelResponse.data.shipping_url) {
+      // Store label data
+      await database.upsertLabel({
+        order_id: order_id,
+        label_url: labelResponse.data.shipping_url,
+        awb: labelResponse.data.awb,
+        carrier_id: labelResponse.data.carrier_id,
+        carrier_name: labelResponse.data.carrier_name
+      });
+      
+      // Mark label as downloaded
+      for (const product of claimedProducts) {
+        await database.updateOrder(product.unique_id, {
+          label_downloaded: 1
+        });
+      }
+      
+      console.log('✅ ADMIN LABEL DOWNLOAD SUCCESS');
+    }
+    
+    return res.json(labelResponse);
+    
+  } catch (error) {
+    console.error('💥 ADMIN DOWNLOAD LABEL ERROR:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error: ' + error.message 
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/admin/bulk-download-labels
+ * @desc    Admin downloads labels for multiple orders, grouped by vendor
+ * @access  Admin only
+ */
+router.post('/admin/bulk-download-labels', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
+  const { order_ids, format = 'thermal' } = req.body;
+  
+  console.log('🔵 ADMIN BULK DOWNLOAD LABELS REQUEST START');
+  console.log('  - order_ids count:', Array.isArray(order_ids) ? order_ids.length : 0);
+  console.log('  - format:', format);
+  
+  if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'order_ids array is required' 
+    });
+  }
+
+  try {
+    const database = require('../config/database');
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+    
+    // Get all orders
+    const orders = await database.getAllOrders();
+    
+    // Group orders by vendor
+    const vendorGroups = {};
+    const errors = [];
+    const warnings = [];
+    
+    for (const orderId of order_ids) {
+      const orderProducts = orders.filter(order => order.order_id === orderId);
+      
+      if (orderProducts.length === 0) {
+        errors.push({
+          order_id: orderId,
+          error: 'Order not found'
+        });
+        continue;
+      }
+      
+      const claimedProducts = orderProducts.filter(order => 
+        order.claimed_by && order.claimed_by.trim() !== '' && order.status === 'claimed'
+      );
+      
+      if (claimedProducts.length === 0) {
+        warnings.push({
+          order_id: orderId,
+          warning: 'Order is not claimed by any vendor'
+        });
+        continue;
+      }
+      
+      const vendorWarehouseId = claimedProducts[0].claimed_by;
+      
+      if (!vendorGroups[vendorWarehouseId]) {
+        vendorGroups[vendorWarehouseId] = {
+          vendor_warehouse_id: vendorWarehouseId,
+          orders: []
+        };
+      }
+      
+      vendorGroups[vendorWarehouseId].orders.push({
+        order_id: orderId,
+        products: claimedProducts
+      });
+    }
+    
+    console.log(`📊 PROCESSING ${Object.keys(vendorGroups).length} VENDOR GROUPS`);
+    
+    // Process each vendor group
+    const vendorResults = [];
+    const CONCURRENCY_LIMIT = 6;
+    
+    for (const [vendorWarehouseId, vendorGroup] of Object.entries(vendorGroups)) {
+      try {
+        const vendor = await database.getUserByWarehouseId(vendorWarehouseId);
+        if (!vendor) {
+          errors.push({
+            vendor_warehouse_id: vendorWarehouseId,
+            error: 'Vendor not found'
+          });
+          continue;
+        }
+        
+        console.log(`🔄 PROCESSING VENDOR: ${vendor.name} (${vendorGroup.orders.length} orders)`);
+        
+        const vendorOrders = vendorGroup.orders;
+        const results = [];
+        
+        // Process orders in parallel batches
+        for (let i = 0; i < vendorOrders.length; i += CONCURRENCY_LIMIT) {
+          const batch = vendorOrders.slice(i, i + CONCURRENCY_LIMIT);
+          
+          const batchPromises = batch.map(async (orderData) => {
+            try {
+              const { order_id, products } = orderData;
+              
+              // Check if label already downloaded
+              const firstProduct = products[0];
+              if (firstProduct.label_downloaded === 1) {
+                const cachedLabel = await database.getLabelByOrderId(order_id);
+                if (cachedLabel && cachedLabel.label_url) {
+                  return {
+                    success: true,
+                    order_id: order_id,
+                    shipping_url: cachedLabel.label_url,
+                    awb: cachedLabel.awb || 'N/A',
+                    cached: true
+                  };
+                }
+              }
+              
+              // Generate new label
+              const labelResponse = await generateLabelForOrder(order_id, products, vendor, format);
+              
+              if (labelResponse.success && labelResponse.data.shipping_url) {
+                // Store label data
+                await database.upsertLabel({
+                  order_id: order_id,
+                  label_url: labelResponse.data.shipping_url,
+                  awb: labelResponse.data.awb,
+                  carrier_id: labelResponse.data.carrier_id,
+                  carrier_name: labelResponse.data.carrier_name
+                });
+                
+                // Mark label as downloaded
+                for (const product of products) {
+                  await database.updateOrder(product.unique_id, {
+                    label_downloaded: 1
+                  });
+                }
+              }
+              
+              return {
+                success: labelResponse.success,
+                order_id: order_id,
+                shipping_url: labelResponse.data?.shipping_url,
+                awb: labelResponse.data?.awb,
+                error: labelResponse.success ? null : (labelResponse.message || 'Label generation failed')
+              };
+              
+            } catch (error) {
+              console.error(`❌ Error processing order ${orderData.order_id}:`, error);
+              return {
+                success: false,
+                order_id: orderData.order_id,
+                error: error.message
+              };
+            }
+          });
+          
+          const batchResults = await Promise.all(batchPromises);
+          results.push(...batchResults);
+        }
+        
+        // Create PDF for this vendor
+        const successfulResults = results.filter(r => r.success && r.shipping_url);
+        
+        if (successfulResults.length > 0) {
+          console.log(`📄 CREATING PDF FOR VENDOR: ${vendor.name} (${successfulResults.length} labels)`);
+          
+          try {
+            // Use existing PDF generation logic
+            const pdfBuffer = await generateCombinedLabelsPDF(successfulResults, format);
+            
+            vendorResults.push({
+              vendor_id: vendorWarehouseId,
+              vendor_name: vendor.name,
+              order_count: successfulResults.length,
+              orders: successfulResults.map(r => r.order_id),
+              pdf_buffer: pdfBuffer,
+              failed_count: results.filter(r => !r.success).length
+            });
+            
+            console.log(`✅ PDF CREATED FOR VENDOR: ${vendor.name}`);
+          } catch (pdfError) {
+            console.error(`❌ Error creating PDF for vendor ${vendor.name}:`, pdfError);
+            errors.push({
+              vendor_warehouse_id: vendorWarehouseId,
+              error: `PDF generation failed: ${pdfError.message}`
+            });
+          }
+        }
+        
+      } catch (vendorError) {
+        console.error(`❌ Error processing vendor ${vendorWarehouseId}:`, vendorError);
+        errors.push({
+          vendor_warehouse_id: vendorWarehouseId,
+          error: vendorError.message
+        });
+      }
+    }
+    
+    // Create notifications for errors
+    if (errors.length > 0 || warnings.length > 0) {
+      try {
+        const notificationService = require('../services/notificationService');
+        await notificationService.createNotification({
+          type: 'admin_bulk_label_download_warning',
+          severity: 'medium',
+          title: 'Admin Bulk Label Download - Some Issues',
+          message: `${errors.length} orders had errors, ${warnings.length} orders were unclaimed`,
+          admin_id: req.user.id,
+          metadata: {
+            errors: errors,
+            warnings: warnings,
+            total_orders: order_ids.length
+          }
+        });
+      } catch (notificationError) {
+        console.error('⚠️ Failed to create notification:', notificationError.message);
+      }
+    }
+    
+    // If only one vendor group, return PDF directly
+    if (vendorResults.length === 1) {
+      const vendorResult = vendorResults[0];
+      
+      // Set response headers for PDF download
+      res.setHeader('Content-Type', 'application/pdf');
+      
+      // Generate filename
+      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const vendorId = vendorResult.vendor_id || 'unknown';
+      const vendorName = (vendorResult.vendor_name || 'unknown').toLowerCase().replace(/\s+/g, '_');
+      const filename = `admin_${vendorId}_${vendorName}_${currentDate}.pdf`;
+      
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', vendorResult.pdf_buffer.length);
+      
+      // Add warnings header if there were any failures
+      if (errors.length > 0 || warnings.length > 0) {
+        const warningMessages = [...errors.map(e => e.error), ...warnings.map(w => w.warning)].join('; ');
+        res.setHeader('X-Download-Warnings', Buffer.from(warningMessages).toString('base64'));
+        res.setHeader('X-Failed-Orders', JSON.stringify([...errors.map(e => e.order_id || e.vendor_warehouse_id), ...warnings.map(w => w.order_id)]));
+      }
+      
+      // Send the PDF buffer
+      return res.send(vendorResult.pdf_buffer);
+    }
+    
+    // Multiple vendor groups - return JSON with base64 encoded PDFs
+    return res.json({
+      success: true,
+      data: {
+        vendor_groups: vendorResults.map(vr => ({
+          vendor_id: vr.vendor_id,
+          vendor_name: vr.vendor_name,
+          order_count: vr.order_count,
+          orders: vr.orders,
+          failed_count: vr.failed_count,
+          pdf_data: vr.pdf_buffer.toString('base64'),
+          pdf_filename: `admin_${vr.vendor_name.toLowerCase().replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.pdf`
+        })),
+        summary: {
+          total_orders: order_ids.length,
+          successful_vendors: vendorResults.length,
+          total_errors: errors.length,
+          total_warnings: warnings.length
+        },
+        errors: errors,
+        warnings: warnings
+      }
+    });
+    
+  } catch (error) {
+    console.error('💥 ADMIN BULK DOWNLOAD LABELS ERROR:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error: ' + error.message 
+    });
+  }
+});
+
+/**
  * @route   POST /api/orders/auto-reverse-expired
  * @desc    Automatically reverse orders that have been claimed for 24+ hours without label download
  * @access  Admin/Superadmin only (or can be called by cron job)
