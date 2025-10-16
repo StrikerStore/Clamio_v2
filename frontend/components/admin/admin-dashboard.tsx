@@ -1788,13 +1788,13 @@ export function AdminDashboard() {
                         
                         {/* Label Format Selection */}
                         <Select value={labelFormat} onValueChange={setLabelFormat}>
-                          <SelectTrigger className="w-24 h-9 text-sm">
-                            <SelectValue />
+                          <SelectTrigger className="w-24 h-9 text-sm focus:ring-2 focus:ring-blue-300 focus:border-blue-300">
+                            <SelectValue className="text-left" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="thermal">Thermal</SelectItem>
-                            <SelectItem value="a4">A4</SelectItem>
-                            <SelectItem value="four-in-one">Four in One</SelectItem>
+                            <SelectItem value="thermal" className="text-left">Thermal</SelectItem>
+                            <SelectItem value="a4" className="text-left">A4</SelectItem>
+                            <SelectItem value="four-in-one" className="text-left">Four in One</SelectItem>
                           </SelectContent>
                         </Select>
                         
@@ -3707,13 +3707,13 @@ export function AdminDashboard() {
                     
                     {/* Label Format Selection */}
                     <Select value={labelFormat} onValueChange={setLabelFormat}>
-                      <SelectTrigger className="w-24 h-8 sm:h-10 text-xs">
-                        <SelectValue />
+                      <SelectTrigger className="w-24 h-8 sm:h-10 text-xs focus:ring-2 focus:ring-blue-300 focus:border-blue-300">
+                        <SelectValue className="text-left" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="thermal">Thermal</SelectItem>
-                        <SelectItem value="a4">A4</SelectItem>
-                        <SelectItem value="four-in-one">Four in One</SelectItem>
+                        <SelectItem value="thermal" className="text-left">Thermal</SelectItem>
+                        <SelectItem value="a4" className="text-left">A4</SelectItem>
+                        <SelectItem value="four-in-one" className="text-left">Four in One</SelectItem>
                       </SelectContent>
                     </Select>
                     
