@@ -380,13 +380,11 @@ class Database {
    */
   async createLabelsTable() {
     try {
-      // Drop existing labels table to recreate with clean structure
-      console.log('🔄 Dropping existing labels table and creating fresh one...');
-      await this.mysqlConnection.execute('DROP TABLE IF EXISTS labels');
-      console.log('✅ Old labels table dropped');
+      // Create labels table if it doesn't exist (preserve existing data)
+      console.log('🔄 Creating labels table if not exists...');
 
       const createLabelsTableQuery = `
-        CREATE TABLE labels (
+        CREATE TABLE IF NOT EXISTS labels (
           id INT AUTO_INCREMENT PRIMARY KEY,
           order_id VARCHAR(100) UNIQUE NOT NULL,
           label_url VARCHAR(1000),
@@ -411,7 +409,7 @@ class Database {
       `;
       
       await this.mysqlConnection.execute(createLabelsTableQuery);
-      console.log('✅ Fresh labels table created with clean structure');
+      console.log('✅ Labels table created/verified (existing data preserved)');
       
       // Add is_manifest column if it doesn't exist (for existing tables)
       try {
@@ -462,8 +460,6 @@ class Database {
         }
       }
       
-      // Migrate existing labels data from orders table
-      await this.migrateLabelsData();
       } catch (error) {
       console.error('❌ Error creating labels table:', error.message);
     }
