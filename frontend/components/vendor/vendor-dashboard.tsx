@@ -204,6 +204,7 @@ export function VendorDashboard() {
   const [groupedOrdersPage, setGroupedOrdersPage] = useState(1);
   const [groupedOrdersHasMore, setGroupedOrdersHasMore] = useState(true);
   const [groupedOrdersTotalCount, setGroupedOrdersTotalCount] = useState(0);
+  const [groupedOrdersTotalQuantity, setGroupedOrdersTotalQuantity] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Settlement-related state
@@ -430,6 +431,14 @@ export function VendorDashboard() {
           if (!resetPagination) {
             setGroupedOrdersPage(prev => prev + 1);
           }
+        }
+        
+        // Update total quantity (only on reset to avoid overwriting with partial data)
+        if (resetPagination && response.data.totalQuantity !== undefined) {
+          console.log('🔢 Setting groupedOrdersTotalQuantity:', response.data.totalQuantity);
+          setGroupedOrdersTotalQuantity(response.data.totalQuantity);
+        } else if (resetPagination) {
+          console.log('⚠️ totalQuantity not found in response data:', response.data);
         }
       } else {
         if (resetPagination) {
@@ -1526,15 +1535,26 @@ export function VendorDashboard() {
 
   // Helper functions to calculate quantity sums for each tab
   const getQuantitySumForTab = (tabName: string) => {
-    const orders = getFilteredOrdersForTab(tabName);
-    
     if (tabName === "my-orders") {
-      // For My Orders, sum up the total_quantity from grouped orders
-      return orders.reduce((sum, order) => {
+      // For My Orders, use the total quantity from the API response
+      // This gives us the accurate count across all orders, not just paginated ones
+      console.log('🔢 getQuantitySumForTab("my-orders"):', groupedOrdersTotalQuantity);
+      console.log('🔢 groupedOrders.length:', groupedOrders.length);
+      console.log('🔢 groupedOrdersTotalCount:', groupedOrdersTotalCount);
+      
+      // If totalQuantity is 0 but we have orders, fallback to calculating from visible orders
+      if (groupedOrdersTotalQuantity === 0 && groupedOrders.length > 0) {
+        const fallbackSum = groupedOrders.reduce((sum, order) => {
         return sum + (order.total_quantity || 0);
       }, 0);
+        console.log('🔢 Fallback calculation from visible orders:', fallbackSum);
+        return fallbackSum;
+      }
+      
+      return groupedOrdersTotalQuantity;
     } else {
       // For All Orders and Handover, sum up individual order quantities
+      const orders = getFilteredOrdersForTab(tabName);
       return orders.reduce((sum, order) => {
         return sum + (order.quantity || 0);
       }, 0);
