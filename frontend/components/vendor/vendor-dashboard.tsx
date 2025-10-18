@@ -721,6 +721,19 @@ export function VendorDashboard() {
       out_for_delivery: "bg-orange-100 text-orange-800",
       delivered: "bg-green-100 text-green-800",
       rto: "bg-red-100 text-red-800",
+      // Additional shipping status values
+      "shipment booked": "bg-cyan-100 text-cyan-800",
+      "picked up": "bg-purple-100 text-purple-800",
+      "in warehouse": "bg-blue-100 text-blue-800",
+      "dispatched": "bg-indigo-100 text-indigo-800",
+      "out for pickup": "bg-yellow-100 text-yellow-800",
+      "attempted delivery": "bg-orange-100 text-orange-800",
+      "returned": "bg-red-100 text-red-800",
+      "cancelled": "bg-gray-100 text-gray-800",
+      "failed delivery": "bg-red-100 text-red-800",
+      // Legacy status values for backward compatibility
+      claimed: "bg-blue-100 text-blue-800",
+      ready_for_handover: "bg-purple-100 text-purple-800",
     }
 
     const displayNames = {
@@ -732,10 +745,23 @@ export function VendorDashboard() {
       out_for_delivery: "OUT FOR DELIVERY",
       delivered: "DELIVERED",
       rto: "RTO",
+      // Additional shipping status values
+      "shipment booked": "SHIPMENT BOOKED",
+      "picked up": "PICKED UP",
+      "in warehouse": "IN WAREHOUSE",
+      "dispatched": "DISPATCHED",
+      "out for pickup": "OUT FOR PICKUP",
+      "attempted delivery": "ATTEMPTED DELIVERY",
+      "returned": "RETURNED",
+      "cancelled": "CANCELLED",
+      "failed delivery": "FAILED DELIVERY",
+      // Legacy status values for backward compatibility
+      claimed: "CLAIMED",
+      ready_for_handover: "READY FOR HANDOVER",
     }
 
     return (
-      <Badge className={`${colors[status as keyof typeof colors]} text-xs sm:text-sm truncate max-w-full`}>
+      <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full`}>
         {displayNames[status as keyof typeof displayNames] || status.toUpperCase()}
       </Badge>
     )
@@ -980,6 +1006,17 @@ export function VendorDashboard() {
     
     // Ensure unique orders before returning
     return ensureUniqueOrders(baseOrders, 'unique_id');
+  }
+
+  // Get unique status values from orders data
+  const getUniqueStatuses = () => {
+    const uniqueStatuses = new Set<string>();
+    orders.forEach(order => {
+      if (order.status && order.status.trim() !== '') {
+        uniqueStatuses.add(order.status);
+      }
+    });
+    return Array.from(uniqueStatuses).sort();
   }
 
   // Filter grouped orders for My Orders tab
@@ -2111,13 +2148,11 @@ export function VendorDashboard() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All Statuses</SelectItem>
-                          <SelectItem value="Shipment Booked">Shipment Booked</SelectItem>
-                          <SelectItem value="In Transit">In Transit</SelectItem>
-                          <SelectItem value="Out for Delivery">Out for Delivery</SelectItem>
-                          <SelectItem value="Delivered">Delivered</SelectItem>
-                          <SelectItem value="Delivered to Customer">Delivered to Customer</SelectItem>
-                          <SelectItem value="Returned">Returned</SelectItem>
-                          <SelectItem value="Cancelled">Cancelled</SelectItem>
+                          {getUniqueStatuses().map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -2157,13 +2192,11 @@ export function VendorDashboard() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="all">All Statuses</SelectItem>
-                              <SelectItem value="Shipment Booked">Shipment Booked</SelectItem>
-                              <SelectItem value="In Transit">In Transit</SelectItem>
-                              <SelectItem value="Out for Delivery">Out for Delivery</SelectItem>
-                              <SelectItem value="Delivered">Delivered</SelectItem>
-                              <SelectItem value="Delivered to Customer">Delivered to Customer</SelectItem>
-                              <SelectItem value="Returned">Returned</SelectItem>
-                              <SelectItem value="Cancelled">Cancelled</SelectItem>
+                              {getUniqueStatuses().map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                           {/* Blue dot indicator when filter is active */}

@@ -109,14 +109,14 @@ export function LoginForm() {
 
   return (
     <>
-      <Card className="w-full shadow-lg">
+      <Card className="w-full shadow-lg relative">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl text-center">Sign In</CardTitle>
           <CardDescription className="text-center">Enter your credentials to access</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
+          <form onSubmit={handleSubmit} className="space-y-4 relative">
+            <div className="space-y-2 autofill-container">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
@@ -126,9 +126,10 @@ export function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
                 required={true}
                 disabled={loading}
+                autoComplete="email"
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 autofill-container">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Input
@@ -139,6 +140,7 @@ export function LoginForm() {
                   onChange={(e) => setPassword(e.target.value)}
                   required={true}
                   disabled={loading}
+                  autoComplete="current-password"
                 />
                 <Button
                   type="button"

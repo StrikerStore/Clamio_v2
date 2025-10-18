@@ -100,3 +100,34 @@
     }
   }
 }
+
+/* Fix autofill suggestions positioning */
+@layer utilities {
+  /* Fix autofill suggestions positioning */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px white inset !important;
+    -webkit-text-fill-color: #000 !important;
+  }
+  
+  /* Ensure autofill dropdown appears in correct position */
+  .autofill-container {
+    position: relative;
+    z-index: 1;
+  }
+  
+  /* Fix for Chrome autofill dropdown positioning */
+  input[type="email"],
+  input[type="password"] {
+    position: relative;
+    z-index: 1;
+  }
+  
+  /* Additional fix for form positioning */
+  form.relative {
+    position: relative;
+    z-index: 1;
+  }
+}

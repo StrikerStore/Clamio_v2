@@ -343,14 +343,27 @@ export function AdminDashboard() {
   const getStatusBadge = (status: string) => {
     const colors = {
       unclaimed: "bg-gray-100 text-gray-800",
-      claimed: "bg-blue-100 text-blue-800",
-      ready_for_handover: "bg-purple-100 text-purple-800",
+      in_pack: "bg-blue-100 text-blue-800",
       handover: "bg-yellow-100 text-yellow-800",
       picked: "bg-purple-100 text-purple-800",
       in_transit: "bg-indigo-100 text-indigo-800",
       out_for_delivery: "bg-orange-100 text-orange-800",
       delivered: "bg-green-100 text-green-800",
       rto: "bg-red-100 text-red-800",
+      // Additional shipping status values
+      "shipment booked": "bg-cyan-100 text-cyan-800",
+      "picked up": "bg-purple-100 text-purple-800",
+      "in warehouse": "bg-blue-100 text-blue-800",
+      "dispatched": "bg-indigo-100 text-indigo-800",
+      "out for pickup": "bg-yellow-100 text-yellow-800",
+      "attempted delivery": "bg-orange-100 text-orange-800",
+      "returned": "bg-red-100 text-red-800",
+      "cancelled": "bg-gray-100 text-gray-800",
+      "failed delivery": "bg-red-100 text-red-800",
+      // Legacy status values for backward compatibility
+      claimed: "bg-blue-100 text-blue-800",
+      ready_for_handover: "bg-purple-100 text-purple-800",
+      // Vendor management status values
       active: "bg-green-100 text-green-800",
       pending: "bg-yellow-100 text-yellow-800",
       inactive: "bg-red-100 text-red-800",
@@ -358,12 +371,46 @@ export function AdminDashboard() {
       rejected: "bg-red-100 text-red-800",
     }
 
+    const displayNames = {
+      unclaimed: "UNCLAIMED",
+      in_pack: "IN PACK",
+      handover: "HANDOVER",
+      picked: "PICKED",
+      in_transit: "IN TRANSIT",
+      out_for_delivery: "OUT FOR DELIVERY",
+      delivered: "DELIVERED",
+      rto: "RTO",
+      // Additional shipping status values
+      "shipment booked": "SHIPMENT BOOKED",
+      "picked up": "PICKED UP",
+      "in warehouse": "IN WAREHOUSE",
+      "dispatched": "DISPATCHED",
+      "out for pickup": "OUT FOR PICKUP",
+      "attempted delivery": "ATTEMPTED DELIVERY",
+      "returned": "RETURNED",
+      "cancelled": "CANCELLED",
+      "failed delivery": "FAILED DELIVERY",
+      // Legacy status values for backward compatibility
+      claimed: "CLAIMED",
+      ready_for_handover: "READY FOR HANDOVER",
+      // Vendor management status values
+      active: "ACTIVE",
+      pending: "PENDING",
+      inactive: "INACTIVE",
+      completed: "COMPLETED",
+      rejected: "REJECTED",
+    }
+
     // Handle undefined or null status
     if (!status) {
       return <Badge className="bg-gray-100 text-gray-800 text-xs sm:text-sm truncate">UNKNOWN</Badge>
     }
 
-    return <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full`}>{status.replace("_", " ").toUpperCase()}</Badge>
+    return (
+      <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full`}>
+        {displayNames[status as keyof typeof displayNames] || status.replace("_", " ").toUpperCase()}
+      </Badge>
+    )
   }
 
   const getPriorityBadge = (priority: string) => {
@@ -392,6 +439,17 @@ export function AdminDashboard() {
     }
 
     return <Badge className={colors[priority as keyof typeof colors] || "bg-gray-100 text-gray-800"}>Priority {priority}</Badge>
+  }
+
+  // Get unique status values from orders data
+  const getUniqueStatuses = () => {
+    const uniqueStatuses = new Set<string>();
+    orders.forEach(order => {
+      if (order.status && order.status.trim() !== '') {
+        uniqueStatuses.add(order.status);
+      }
+    });
+    return Array.from(uniqueStatuses).sort();
   }
 
   const getFilteredOrdersForTab = (tab: string) => {
@@ -1568,11 +1626,11 @@ export function AdminDashboard() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">All Status</SelectItem>
-                            <SelectItem value="unclaimed">Unclaimed</SelectItem>
-                            <SelectItem value="claimed">Claimed</SelectItem>
-                            <SelectItem value="ready_for_handover">Ready for Handover</SelectItem>
-                            <SelectItem value="handover">Handover</SelectItem>
-                            <SelectItem value="delivered">Delivered</SelectItem>
+                            {getUniqueStatuses().map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
 
@@ -1622,11 +1680,11 @@ export function AdminDashboard() {
                           <SelectItem value="all">All Status</SelectItem>
                           {activeTab === "orders" && (
                             <>
-                              <SelectItem value="unclaimed">Unclaimed</SelectItem>
-                              <SelectItem value="claimed">Claimed</SelectItem>
-                              <SelectItem value="ready_for_handover">Ready for Handover</SelectItem>
-                              <SelectItem value="handover">Handover</SelectItem>
-                              <SelectItem value="delivered">Delivered</SelectItem>
+                              {getUniqueStatuses().map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                </SelectItem>
+                              ))}
                             </>
                           )}
                           {activeTab === "vendors" && (
@@ -1951,16 +2009,17 @@ export function AdminDashboard() {
                                   ) : (
                                     <Button 
                                       size="sm" 
-                                      variant="destructive"
+                                      variant="outline"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleUnassignOrder(order);
                                       }}
                                       disabled={unassignLoading[order.unique_id]}
+                                      className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
                                     >
                                       {unassignLoading[order.unique_id] ? (
                                         <>
-                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
                                           Unassigning...
                                         </>
                                       ) : (
@@ -1993,10 +2052,27 @@ export function AdminDashboard() {
                               style={{ 
                                 borderLeftColor: 
                                   order.status === 'unclaimed' ? '#f59e0b' : 
+                                  order.status === 'in_pack' ? '#3b82f6' : 
+                                  order.status === 'handover' ? '#eab308' :
+                                  order.status === 'picked' ? '#8b5cf6' :
+                                  order.status === 'in_transit' ? '#6366f1' :
+                                  order.status === 'out_for_delivery' ? '#f97316' :
+                                  order.status === 'delivered' ? '#10b981' :
+                                  order.status === 'rto' ? '#ef4444' :
+                                  // Additional shipping status values
+                                  order.status === 'shipment booked' ? '#06b6d4' :
+                                  order.status === 'picked up' ? '#8b5cf6' :
+                                  order.status === 'in warehouse' ? '#3b82f6' :
+                                  order.status === 'dispatched' ? '#6366f1' :
+                                  order.status === 'out for pickup' ? '#eab308' :
+                                  order.status === 'attempted delivery' ? '#f97316' :
+                                  order.status === 'returned' ? '#ef4444' :
+                                  order.status === 'cancelled' ? '#6b7280' :
+                                  order.status === 'failed delivery' ? '#ef4444' :
+                                  // Legacy status values for backward compatibility
                                   order.status === 'claimed' ? '#3b82f6' : 
                                   order.status === 'ready_for_handover' ? '#8b5cf6' :
-                                  order.status === 'handover' ? '#eab308' :
-                                  order.status === 'delivered' ? '#10b981' : '#6b7280'
+                                  '#6b7280'
                               }}
                               onClick={() => {
                                 if (selectedOrders.includes(order.unique_id)) {
@@ -2110,7 +2186,7 @@ export function AdminDashboard() {
                                 ) : (
                                   <Button 
                                     size="sm" 
-                                    variant="destructive"
+                                    variant="outline"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleUnassignOrder(order);
