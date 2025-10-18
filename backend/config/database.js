@@ -427,7 +427,7 @@ class Database {
           console.error('❌ Error adding is_manifest column to labels table:', error.message);
         }
       }
-
+      
       // Add is_handover column if it doesn't exist (for existing tables)
       try {
         await this.mysqlConnection.execute(`
@@ -2534,7 +2534,7 @@ class Database {
         SELECT 
           o.*,
           p.image as product_image,
-          c.status,
+          c.status as claims_status,
           c.claimed_by,
           c.claimed_at,
           c.last_claimed_by,
@@ -2549,7 +2549,14 @@ class Database {
           l.carrier_name,
           l.handover_at,
           c.priority_carrier,
-          l.is_manifest
+          l.is_manifest,
+          l.current_shipment_status,
+          l.is_handover,
+          CASE 
+            WHEN l.current_shipment_status IS NOT NULL AND l.current_shipment_status != '' 
+            THEN l.current_shipment_status 
+            ELSE c.status 
+          END as status
         FROM orders o
         LEFT JOIN products p ON (
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR

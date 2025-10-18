@@ -229,6 +229,12 @@ export function VendorDashboard() {
 
   // Tab highlight animation state
   const [highlightedTab, setHighlightedTab] = useState<string | null>(null)
+  
+  // Status filter state for handover tab
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
+  
+  // Label download filter state for my orders tab
+  const [selectedLabelFilter, setSelectedLabelFilter] = useState<string>('all')
 
   useEffect(() => {
     async function fetchAddress() {
@@ -835,11 +841,75 @@ export function VendorDashboard() {
         break;
       case "handover":
         // Show orders ready for handover by current vendor with is_manifest = 1
-        baseOrders = orders.filter(order => 
-          order.status === 'ready_for_handover' && 
+        // Use claims_status for filtering since the main status now shows enhanced status
+        let handoverOrders = orders.filter(order => 
+          order.claims_status === 'ready_for_handover' && 
           order.claimed_by === currentVendorId &&
           order.is_manifest === 1
         );
+        
+        // Apply status filter if any statuses are selected
+        if (selectedStatuses.length > 0) {
+          handoverOrders = handoverOrders.filter(order => 
+            selectedStatuses.includes(order.status)
+          );
+        }
+        
+        // Group orders by order_id for handover tab
+        const handoverGrouped = handoverOrders.reduce((acc: any, order) => {
+          const orderId = order.order_id;
+          if (!acc[orderId]) {
+            acc[orderId] = {
+              order_id: orderId,
+              order_date: order.order_date,
+              claimed_by: order.claimed_by,
+              status: order.status,
+              claims_status: order.claims_status,
+              current_shipment_status: order.current_shipment_status,
+              is_handover: order.is_handover,
+              is_manifest: order.is_manifest,
+              total_quantity: 0,
+              products: []
+            };
+          }
+          acc[orderId].products.push(order);
+          acc[orderId].total_quantity += order.quantity || 0;
+          return acc;
+        }, {});
+        
+        baseOrders = Object.values(handoverGrouped);
+        break;
+      case "my-orders":
+        // For My Orders, use groupedOrders directly and apply label download filter
+        let filteredGroupedOrders = [...groupedOrders];
+        
+        // Debug: Log the first order to see data structure
+        if (groupedOrders.length > 0) {
+          console.log('🔍 First Order Data Structure:', groupedOrders[0]);
+        }
+        
+        // Apply label download filter to grouped orders
+        if (selectedLabelFilter === 'downloaded') {
+          filteredGroupedOrders = groupedOrders.filter(order => 
+            order.label_downloaded === 1
+          );
+          console.log('🔍 Label Downloaded Filter:', {
+            totalOrders: groupedOrders.length,
+            filteredOrders: filteredGroupedOrders.length,
+            selectedFilter: selectedLabelFilter
+          });
+        } else if (selectedLabelFilter === 'not_downloaded') {
+          filteredGroupedOrders = groupedOrders.filter(order => 
+            order.label_downloaded === 0
+          );
+          console.log('🔍 Label Not Downloaded Filter:', {
+            totalOrders: groupedOrders.length,
+            filteredOrders: filteredGroupedOrders.length,
+            selectedFilter: selectedLabelFilter
+          });
+        }
+        
+        baseOrders = filteredGroupedOrders;
         break;
       default:
         baseOrders = orders;
@@ -916,6 +986,19 @@ export function VendorDashboard() {
   const getFilteredGroupedOrdersForTab = (tab: string) => {
     let baseOrders = groupedOrders;
     const tabFilter = tabFilters[tab as keyof typeof tabFilters];
+    
+    // Apply label download filter for my orders tab
+    if (tab === "my-orders" && selectedLabelFilter !== 'all') {
+      if (selectedLabelFilter === 'downloaded') {
+        baseOrders = baseOrders.filter(order => 
+          order.label_downloaded === 1
+        );
+      } else if (selectedLabelFilter === 'not_downloaded') {
+        baseOrders = baseOrders.filter(order => 
+          order.label_downloaded === 0
+        );
+      }
+    }
     
     // Apply search filter (search across order id, customer, and all products in each order)
     if (tabFilter.searchTerm.trim()) {
@@ -1533,7 +1616,44 @@ export function VendorDashboard() {
     }, 2000);
   };
 
-  // Helper functions to calculate quantity sums for each tab
+  // Helper functions to calculate quantity sums for each tab (WITHOUT filters - for cards)
+  const getTotalQuantitySumForTab = (tabName: string) => {
+    if (tabName === "my-orders") {
+      // For My Orders, use the total quantity from the API response (no filtering)
+      return groupedOrdersTotalQuantity;
+    } else if (tabName === "handover") {
+      // For Handover, calculate total without status filters
+      const currentVendorId = user?.warehouseId;
+      const handoverOrders = orders.filter(order => 
+        order.claims_status === 'ready_for_handover' && 
+        order.claimed_by === currentVendorId &&
+        order.is_manifest === 1
+      );
+      
+      // Group orders by order_id for handover tab (no status filtering)
+      const handoverGrouped = handoverOrders.reduce((acc: any, order) => {
+        const orderId = order.order_id;
+        if (!acc[orderId]) {
+          acc[orderId] = {
+            total_quantity: 0
+          };
+        }
+        acc[orderId].total_quantity += order.quantity || 0;
+        return acc;
+      }, {});
+      
+      return Object.values(handoverGrouped).reduce((sum: number, order: any) => {
+        return sum + (order.total_quantity || 0);
+      }, 0);
+    } else {
+      // For All Orders, sum up all individual order quantities (no filtering)
+      return orders.reduce((sum, order) => {
+        return sum + (order.quantity || 0);
+      }, 0);
+    }
+  };
+
+  // Helper functions to calculate quantity sums for each tab (WITH filters - for tab content)
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       // For My Orders, use the total quantity from the API response
@@ -1551,9 +1671,59 @@ export function VendorDashboard() {
         return fallbackSum;
       }
       
+      // Apply label download filter for my orders count
+      if (selectedLabelFilter === 'downloaded') {
+        // Filter grouped orders by label_downloaded = 1
+        const filteredGroupedOrders = groupedOrders.filter(order => 
+          order.label_downloaded === 1
+        );
+        return filteredGroupedOrders.reduce((sum: number, order: any) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+      } else if (selectedLabelFilter === 'not_downloaded') {
+        // Filter grouped orders by label_downloaded = 0
+        const filteredGroupedOrders = groupedOrders.filter(order => 
+          order.label_downloaded === 0
+        );
+        return filteredGroupedOrders.reduce((sum: number, order: any) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+      }
+      
       return groupedOrdersTotalQuantity;
+    } else if (tabName === "handover") {
+      // For Handover, use the same grouping logic as the tab content
+      const currentVendorId = user?.warehouseId;
+      let handoverOrders = orders.filter(order => 
+        order.claims_status === 'ready_for_handover' && 
+        order.claimed_by === currentVendorId &&
+        order.is_manifest === 1
+      );
+      
+      // Apply status filter if any statuses are selected (same logic as getFilteredOrdersForTab)
+      if (selectedStatuses.length > 0) {
+        handoverOrders = handoverOrders.filter(order => 
+          selectedStatuses.includes(order.status)
+        );
+      }
+      
+      // Group orders by order_id for handover tab (same logic as getFilteredOrdersForTab)
+      const handoverGrouped = handoverOrders.reduce((acc: any, order) => {
+        const orderId = order.order_id;
+        if (!acc[orderId]) {
+          acc[orderId] = {
+            total_quantity: 0
+          };
+        }
+        acc[orderId].total_quantity += order.quantity || 0;
+        return acc;
+      }, {});
+      
+      return Object.values(handoverGrouped).reduce((sum: number, order: any) => {
+        return sum + (order.total_quantity || 0);
+      }, 0);
     } else {
-      // For All Orders and Handover, sum up individual order quantities
+      // For All Orders, sum up individual order quantities
       const orders = getFilteredOrdersForTab(tabName);
       return orders.reduce((sum, order) => {
         return sum + (order.quantity || 0);
@@ -1757,7 +1927,7 @@ export function VendorDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-blue-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>All Orders</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {getQuantitySumForTab("all-orders")}
+                    {getTotalQuantitySumForTab("all-orders")}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -1776,7 +1946,7 @@ export function VendorDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-green-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>My Orders</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {getQuantitySumForTab("my-orders")}
+                    {getTotalQuantitySumForTab("my-orders")}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -1795,7 +1965,7 @@ export function VendorDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-orange-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Handover</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {getQuantitySumForTab("handover")}
+                    {getTotalQuantitySumForTab("handover")}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -1890,7 +2060,7 @@ export function VendorDashboard() {
                 </TabsList>
 
                 {/* Filters */}
-                <div className={`flex flex-col gap-3 mb-4 md:mb-6 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
+                <div className={`flex flex-col gap-3 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
                   <div className="flex-1 min-w-0">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -1925,6 +2095,35 @@ export function VendorDashboard() {
                       )}
                     </div>
                   </div>
+                  
+                  {/* Status Filter - Desktop Only for Handover Tab */}
+                  {!isMobile && activeTab === "handover" && (
+                    <div className="flex-1 min-w-0">
+                      <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
+                        if (value === 'all') {
+                          setSelectedStatuses([]);
+                        } else {
+                          setSelectedStatuses(value.split(','));
+                        }
+                      }}>
+                        <SelectTrigger className="w-full px-3 py-2">
+                          <SelectValue placeholder="Filter by Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Statuses</SelectItem>
+                          <SelectItem value="Shipment Booked">Shipment Booked</SelectItem>
+                          <SelectItem value="In Transit">In Transit</SelectItem>
+                          <SelectItem value="Out for Delivery">Out for Delivery</SelectItem>
+                          <SelectItem value="Delivered">Delivered</SelectItem>
+                          <SelectItem value="Delivered to Customer">Delivered to Customer</SelectItem>
+                          <SelectItem value="Returned">Returned</SelectItem>
+                          <SelectItem value="Cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  
+                  
                   <div className={`flex gap-2 items-center ${isMobile ? 'flex-wrap' : ''}`}>
                     <DatePicker
                       date={getCurrentTabFilters().dateFrom}
@@ -1939,6 +2138,65 @@ export function VendorDashboard() {
                       placeholder={isMobile ? "To" : "To date"}
                       className={`${isMobile ? 'flex-1 min-w-[120px]' : 'w-40'}`}
                     />
+                    
+                    {/* Status Filter - Mobile View */}
+                    {isMobile && activeTab === "handover" && (
+                      <div className="flex items-center">
+                        <div className="relative">
+                          <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
+                            if (value === 'all') {
+                              setSelectedStatuses([]);
+                            } else {
+                              setSelectedStatuses(value.split(','));
+                            }
+                          }}>
+                            <SelectTrigger className="w-12 h-10 p-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
+                              <SelectValue>
+                                <Filter className="w-4 h-4 text-gray-600" />
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Statuses</SelectItem>
+                              <SelectItem value="Shipment Booked">Shipment Booked</SelectItem>
+                              <SelectItem value="In Transit">In Transit</SelectItem>
+                              <SelectItem value="Out for Delivery">Out for Delivery</SelectItem>
+                              <SelectItem value="Delivered">Delivered</SelectItem>
+                              <SelectItem value="Delivered to Customer">Delivered to Customer</SelectItem>
+                              <SelectItem value="Returned">Returned</SelectItem>
+                              <SelectItem value="Cancelled">Cancelled</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {/* Blue dot indicator when filter is active */}
+                          {selectedStatuses.length > 0 && (
+                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Label Download Filter - Mobile View */}
+                    {isMobile && activeTab === "my-orders" && (
+                      <div className="flex items-center">
+                        <div className="relative">
+                          <Select value={selectedLabelFilter} onValueChange={setSelectedLabelFilter}>
+                            <SelectTrigger className="w-12 h-10 p-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
+                              <SelectValue>
+                                <Filter className="w-4 h-4 text-gray-600" />
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Orders</SelectItem>
+                              <SelectItem value="downloaded">Label Downloaded</SelectItem>
+                              <SelectItem value="not_downloaded">Label Not Downloaded</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {/* Blue dot indicator when filter is active */}
+                          {selectedLabelFilter !== 'all' && (
+                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   
                   {/* Tab-specific Actions */}
@@ -1946,7 +2204,7 @@ export function VendorDashboard() {
                     <Button 
                       onClick={() => handleBulkClaimOrders()} 
                       disabled={selectedUnclaimedOrders.length === 0} 
-                      className="h-10 text-sm whitespace-nowrap px-6 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
+                      className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                     >
                       <Package className="w-4 h-4 mr-2" />
                       Claim Selected ({selectedUnclaimedOrders.length})
@@ -1965,10 +2223,30 @@ export function VendorDashboard() {
                           <SelectItem value="four-in-one">Four in One</SelectItem>
                         </SelectContent>
                       </Select>
+                      
+                      {/* Label Download Filter - Desktop Only for My Orders Tab */}
+                      <div className="relative">
+                        <Select value={selectedLabelFilter} onValueChange={setSelectedLabelFilter}>
+                          <SelectTrigger className="w-12 h-10 p-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
+                            <SelectValue>
+                              <Filter className="w-4 h-4 text-gray-600" />
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Orders</SelectItem>
+                            <SelectItem value="downloaded">Label Downloaded</SelectItem>
+                            <SelectItem value="not_downloaded">Label Not Downloaded</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {/* Blue dot indicator when filter is active */}
+                        {selectedLabelFilter !== 'all' && (
+                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
+                        )}
+                      </div>
                       <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
                         disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
-                        className="h-10 text-sm whitespace-nowrap px-6 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
+                        className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                       >
                         {bulkDownloadLoading ? (
                           <>
@@ -1991,7 +2269,7 @@ export function VendorDashboard() {
                             .filter(order => selectedMyOrders.includes(order.order_id))
                             .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
                         }
-                        className="h-10 text-sm whitespace-nowrap px-6 min-w-fit bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg text-white"
+                        className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg text-white"
                         title={
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -2246,7 +2524,14 @@ export function VendorDashboard() {
                                 
                                 {/* Order Info */}
                                 <div className="flex-1 min-w-0">
-                                  <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                    {order.status && (
+                                      <div className="text-xs font-medium text-blue-800 px-2 py-1 bg-blue-100 rounded-full border border-blue-200">
+                                        {order.status}
+                                      </div>
+                                    )}
+                                  </div>
                                   <p className="text-xs sm:text-sm text-gray-500 truncate">
                                     {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
                                   </p>
@@ -2461,7 +2746,9 @@ export function VendorDashboard() {
                                   {order.total_quantity || 0}
                                 </div>
                               </TableCell>
-                              <TableCell>{getStatusBadge(order.status)}</TableCell>
+                              <TableCell>
+                               <span className="text-sm font-medium text-gray-800">{order.status || "N/A"}</span>
+                             </TableCell>
                               <TableCell>
                                 <Button 
                                   size="sm" 
@@ -2515,36 +2802,57 @@ export function VendorDashboard() {
                     <div className="space-y-2.5 sm:space-y-3">
                       {getFilteredOrdersForTab("handover").map((order, index) => (
                         <Card key={`${order.order_id}-${index}`} className="p-2.5 sm:p-3">
-                          <div className="space-y-2 sm:space-y-3">
-                            <div className="flex items-start gap-2 sm:gap-3">
-                              <img
-                                src={order.product_image || "/placeholder.svg"}
-                                alt={order.product_name || order.product}
-                                className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0"
-                                onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
-                                onError={(e) => {
-                                  e.currentTarget.src = "/placeholder.svg";
-                                }}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
-                                <p className="text-xs sm:text-sm text-gray-600 break-words leading-relaxed">{order.product_name || order.product}</p>
-                                <div className="mt-1">
-                                  {getStatusBadge(order.status)}
+                          <div className="space-y-1.5 sm:space-y-2">
+                            {/* Top Row: Order Info | Total */}
+                            <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                              <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
+                                {/* Order Info (with inline status badge) */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                    {order.status && (
+                                      <div className={`text-xs font-medium text-blue-800 py-0.5 bg-blue-100 rounded-full border border-blue-200 text-center ${
+                                        order.status.length <= 10 ? 'px-1.5' : 
+                                        order.status.length <= 20 ? 'px-2' : 'px-2.5'
+                                      }`}>
+                                        {order.status}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <p className="text-xs sm:text-sm text-gray-500 truncate">
+                                    {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                  </p>
                                 </div>
                               </div>
+                              {/* Total Count - Right aligned */}
+                              <div className="text-right flex-shrink-0">
+                                <div className="text-sm text-gray-500">Total</div>
+                                <div className="text-xl font-bold text-green-600">{order.total_quantity || 0}</div>
+                              </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-1.5 sm:gap-2 text-xs sm:text-sm">
-                              <div>
-                                <span className="text-gray-500">Date:</span>
-                                <p className="font-medium">
-                                  {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
-                                </p>
-                              </div>
-                              <div>
-                                <span className="text-gray-500">Status:</span>
-                                <Badge variant="outline" className="text-xs mt-1">Ready for Pickup</Badge>
-                              </div>
+                            
+                            {/* Products List */}
+                            <div className="space-y-2">
+                              {order.products && order.products.map((product: any) => (
+                                <div key={product.unique_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                                  <img
+                                    src={product.image || product.product_image || "/placeholder.svg"}
+                                    alt={product.product_name}
+                                    className="w-10 h-10 rounded-md object-cover cursor-pointer"
+                                    onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
+                                    onError={(e) => {
+                                      e.currentTarget.src = "/placeholder.svg";
+                                    }}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <h5 className="font-medium text-sm break-words leading-relaxed">{product.product_name}</h5>
+                                    <p className="text-xs text-gray-500 break-words">Code: {product.product_code}</p>
+                                  </div>
+                                  <div className="text-sm font-medium text-gray-700">
+                                    {product.quantity || 0}
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         </Card>
@@ -2556,10 +2864,10 @@ export function VendorDashboard() {
                     <Table>
                       <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
-                          <TableHead>Image</TableHead>
                           <TableHead>Order ID</TableHead>
                           <TableHead>Order Date</TableHead>
-                          <TableHead>Product Name</TableHead>
+                          <TableHead>Products</TableHead>
+                          <TableHead>Count</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Actions</TableHead>
                         </TableRow>
@@ -2567,26 +2875,6 @@ export function VendorDashboard() {
                       <TableBody>
                         {getFilteredOrdersForTab("handover").map((order, index) => (
                           <TableRow key={`${order.order_id}-${index}`}>
-                            <TableCell>
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <img
-                                      src={order.product_image || "/placeholder.svg"}
-                                      alt={order.product_name || order.product}
-                                      className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                      onClick={() => order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || order.product || "Product Image"})}
-                                      onError={(e) => {
-                                        e.currentTarget.src = "/placeholder.svg";
-                                      }}
-                                    />
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>Click to view full image</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </TableCell>
                             <TableCell className="font-medium">{order.order_id}</TableCell>
                             <TableCell>
                               {order.order_date ? (
@@ -2600,8 +2888,54 @@ export function VendorDashboard() {
                                 </div>
                               ) : "N/A"}
                             </TableCell>
-                            <TableCell>{order.product_name || order.product}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
+                            <TableCell>
+                              <div className="space-y-2">
+                                {order.products && order.products.map((product: any, productIndex: number) => (
+                                  <div key={product.unique_id} className="flex items-center gap-3">
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <img
+                                            src={product.image || product.product_image || "/placeholder.svg"}
+                                            alt={product.product_name}
+                                            className="w-10 h-10 rounded-md object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                            onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
+                                            onError={(e) => {
+                                              e.currentTarget.src = "/placeholder.svg";
+                                            }}
+                                          />
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>Click to view full image</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-medium text-sm break-words leading-relaxed">{product.product_name}</div>
+                                      <div className="text-xs text-gray-500 break-words">Code: {product.product_code}</div>
+                                    </div>
+                                    <div className="text-sm font-medium text-gray-700">
+                                      {product.quantity || 0}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="text-base font-bold text-blue-600">
+                                {order.total_quantity || 0}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {order.status && (
+                                <div className="text-xs font-medium text-blue-800 px-2 py-1 bg-blue-100 rounded-full border border-blue-200 inline-block">
+                                  {order.status}
+                                </div>
+                              )}
+                              {!order.status && (
+                                <span className="text-sm font-medium text-gray-800">N/A</span>
+                              )}
+                            </TableCell>
                             <TableCell>
                               <Badge variant="outline">Ready for Pickup</Badge>
                             </TableCell>
