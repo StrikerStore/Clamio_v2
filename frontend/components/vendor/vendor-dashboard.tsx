@@ -2179,25 +2179,25 @@ export function VendorDashboard() {
                   )}
                   
                   
-                  <div className={`flex gap-2 items-center ${isMobile ? 'flex-nowrap overflow-x-auto' : ''}`}>
-                    {/* Date Range Container - Always takes priority */}
-                    <div className={`flex gap-2 items-center ${isMobile ? 'flex-shrink-0' : ''}`}>
+                  <div className={`flex gap-2 items-center ${isMobile ? 'w-full' : ''}`}>
+                    {/* Date Range Container - Responsive width */}
+                    <div className={`flex gap-2 items-center ${isMobile ? 'flex-1' : ''}`}>
                       <DatePicker
                         date={getCurrentTabFilters().dateFrom}
                         onDateChange={(date) => updateCurrentTabFilter('dateFrom', date)}
                         placeholder={isMobile ? "From" : "From date"}
-                        className={`${isMobile ? 'w-24 min-w-[90px]' : 'w-40'}`}
+                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-40'}`}
                       />
                       <span className="text-gray-500 text-sm px-1 flex-shrink-0">to</span>
                       <DatePicker
                         date={getCurrentTabFilters().dateTo}
                         onDateChange={(date) => updateCurrentTabFilter('dateTo', date)}
                         placeholder={isMobile ? "To" : "To date"}
-                        className={`${isMobile ? 'w-24 min-w-[90px]' : 'w-40'}`}
+                        className={`${isMobile ? 'flex-1 min-w-0' : 'w-40'}`}
                       />
                     </div>
                     
-                    {/* Filter Icons - Mobile View - Always on same line */}
+                    {/* Filter Icons - Mobile View - Fixed width on right */}
                     {isMobile && (
                       <div className="flex items-center flex-shrink-0">
                         {/* Status Filter for Handover */}
