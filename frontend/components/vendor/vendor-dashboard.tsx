@@ -1656,7 +1656,20 @@ export function VendorDashboard() {
   // Helper functions to calculate quantity sums for each tab (WITHOUT filters - for cards)
   const getTotalQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
-      // For My Orders, use the total quantity from the API response (no filtering)
+      // For My Orders card, use the absolute total (no filtering applied)
+      console.log('🔍 CARD DEBUG: Using absolute total for card (no filters)');
+      console.log('🔍 CARD DEBUG: groupedOrdersTotalQuantity:', groupedOrdersTotalQuantity);
+      console.log('🔍 CARD DEBUG: groupedOrders.length:', groupedOrders.length);
+      
+      // If API total is 0 or seems incorrect, calculate from all visible orders
+      if ((groupedOrdersTotalQuantity === 0 || groupedOrdersTotalQuantity < groupedOrders.length) && groupedOrders.length > 0) {
+        const calculatedTotal = groupedOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        console.log('🔍 CARD DEBUG: Calculated absolute total from all orders:', calculatedTotal);
+        return calculatedTotal;
+      }
+      
       return groupedOrdersTotalQuantity;
     } else if (tabName === "handover") {
       // For Handover, calculate total without status filters
@@ -1683,8 +1696,18 @@ export function VendorDashboard() {
         return sum + (order.total_quantity || 0);
       }, 0);
     } else {
-      // For All Orders, sum up all individual order quantities (no filtering)
-      return orders.reduce((sum, order) => {
+      // For All Orders card, show absolute total of unclaimed orders (no additional filters)
+      const unclaimedOrders = orders.filter(order => order.status === 'unclaimed');
+      const uniqueUnclaimedOrders = ensureUniqueOrders(unclaimedOrders, 'unique_id');
+      console.log('🔍 ALL ORDERS CARD DEBUG:');
+      console.log('  - Total orders:', orders.length);
+      console.log('  - Unclaimed orders (before deduplication):', unclaimedOrders.length);
+      console.log('  - Unclaimed orders (after deduplication):', uniqueUnclaimedOrders.length);
+      console.log('  - Duplicates removed:', unclaimedOrders.length - uniqueUnclaimedOrders.length);
+      console.log('  - Card total quantity:', uniqueUnclaimedOrders.reduce((sum, order) => {
+        return sum + (order.quantity || 0);
+      }, 0));
+      return uniqueUnclaimedOrders.reduce((sum, order) => {
         return sum + (order.quantity || 0);
       }, 0);
     }
@@ -1693,41 +1716,19 @@ export function VendorDashboard() {
   // Helper functions to calculate quantity sums for each tab (WITH filters - for tab content)
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
-      // For My Orders, use the total quantity from the API response
-      // This gives us the accurate count across all orders, not just paginated ones
-      console.log('🔢 getQuantitySumForTab("my-orders"):', groupedOrdersTotalQuantity);
-      console.log('🔢 groupedOrders.length:', groupedOrders.length);
-      console.log('🔢 groupedOrdersTotalCount:', groupedOrdersTotalCount);
+      // For My Orders tab, use the filtered results (applies search, date, label filters)
+      const filteredOrders = getFilteredGroupedOrdersForTab(tabName);
+      console.log('🔢 TAB COUNT: Using filtered orders for tab count');
+      console.log('🔢 TAB COUNT: filteredOrders.length:', filteredOrders.length);
+      console.log('🔢 TAB COUNT: groupedOrders.length (unfiltered):', groupedOrders.length);
       
-      // If totalQuantity is 0 but we have orders, fallback to calculating from visible orders
-      if (groupedOrdersTotalQuantity === 0 && groupedOrders.length > 0) {
-        const fallbackSum = groupedOrders.reduce((sum, order) => {
+      // Calculate total quantity from filtered orders
+      const filteredTotal = filteredOrders.reduce((sum, order) => {
         return sum + (order.total_quantity || 0);
       }, 0);
-        console.log('🔢 Fallback calculation from visible orders:', fallbackSum);
-        return fallbackSum;
-      }
       
-      // Apply label download filter for my orders count
-      if (selectedLabelFilter === 'downloaded') {
-        // Filter grouped orders by label_downloaded = 1
-        const filteredGroupedOrders = groupedOrders.filter(order => 
-          order.label_downloaded === 1
-        );
-        return filteredGroupedOrders.reduce((sum: number, order: any) => {
-          return sum + (order.total_quantity || 0);
-        }, 0);
-      } else if (selectedLabelFilter === 'not_downloaded') {
-        // Filter grouped orders by label_downloaded = 0
-        const filteredGroupedOrders = groupedOrders.filter(order => 
-          order.label_downloaded === 0
-        );
-        return filteredGroupedOrders.reduce((sum: number, order: any) => {
-          return sum + (order.total_quantity || 0);
-        }, 0);
-      }
-      
-      return groupedOrdersTotalQuantity;
+      console.log('🔢 TAB COUNT: Filtered total quantity:', filteredTotal);
+      return filteredTotal;
     } else if (tabName === "handover") {
       // For Handover, use the same grouping logic as the tab content
       const currentVendorId = user?.warehouseId;
@@ -1760,9 +1761,28 @@ export function VendorDashboard() {
         return sum + (order.total_quantity || 0);
       }, 0);
     } else {
-      // For All Orders, sum up individual order quantities
-      const orders = getFilteredOrdersForTab(tabName);
-      return orders.reduce((sum, order) => {
+      // For All Orders tab, show filtered results (applies search, date filters)
+      const filteredOrders = getFilteredOrdersForTab(tabName);
+      console.log('🔍 ALL ORDERS TAB DEBUG:');
+      console.log('  - Tab name:', tabName);
+      console.log('  - Filtered orders count:', filteredOrders.length);
+      console.log('  - Tab total quantity:', filteredOrders.reduce((sum, order) => {
+        return sum + (order.quantity || 0);
+      }, 0));
+      
+      // Debug: Check if there are any active filters
+      const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
+      console.log('  - Active filters:');
+      console.log('    - Search term:', tabFilter.searchTerm);
+      console.log('    - Date from:', tabFilter.dateFrom);
+      console.log('    - Date to:', tabFilter.dateTo);
+      
+      // Debug: Compare with unfiltered count
+      const unfilteredUnclaimed = orders.filter(order => order.status === 'unclaimed');
+      console.log('  - Unfiltered unclaimed orders:', unfilteredUnclaimed.length);
+      console.log('  - Difference:', unfilteredUnclaimed.length - filteredOrders.length);
+      
+      return filteredOrders.reduce((sum, order) => {
         return sum + (order.quantity || 0);
       }, 0);
     }
@@ -2159,75 +2179,79 @@ export function VendorDashboard() {
                   )}
                   
                   
-                  <div className={`flex gap-2 items-center ${isMobile ? 'flex-wrap' : ''}`}>
-                    <DatePicker
-                      date={getCurrentTabFilters().dateFrom}
-                      onDateChange={(date) => updateCurrentTabFilter('dateFrom', date)}
-                      placeholder={isMobile ? "From" : "From date"}
-                      className={`${isMobile ? 'flex-1 min-w-[120px]' : 'w-40'}`}
-                    />
-                    <span className="text-gray-500 text-sm px-1">to</span>
-                    <DatePicker
-                      date={getCurrentTabFilters().dateTo}
-                      onDateChange={(date) => updateCurrentTabFilter('dateTo', date)}
-                      placeholder={isMobile ? "To" : "To date"}
-                      className={`${isMobile ? 'flex-1 min-w-[120px]' : 'w-40'}`}
-                    />
+                  <div className={`flex gap-2 items-center ${isMobile ? 'flex-nowrap overflow-x-auto' : ''}`}>
+                    {/* Date Range Container - Always takes priority */}
+                    <div className={`flex gap-2 items-center ${isMobile ? 'flex-shrink-0' : ''}`}>
+                      <DatePicker
+                        date={getCurrentTabFilters().dateFrom}
+                        onDateChange={(date) => updateCurrentTabFilter('dateFrom', date)}
+                        placeholder={isMobile ? "From" : "From date"}
+                        className={`${isMobile ? 'w-24 min-w-[90px]' : 'w-40'}`}
+                      />
+                      <span className="text-gray-500 text-sm px-1 flex-shrink-0">to</span>
+                      <DatePicker
+                        date={getCurrentTabFilters().dateTo}
+                        onDateChange={(date) => updateCurrentTabFilter('dateTo', date)}
+                        placeholder={isMobile ? "To" : "To date"}
+                        className={`${isMobile ? 'w-24 min-w-[90px]' : 'w-40'}`}
+                      />
+                    </div>
                     
-                    {/* Status Filter - Mobile View */}
-                    {isMobile && activeTab === "handover" && (
-                      <div className="flex items-center">
-                        <div className="relative">
-                          <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
-                            if (value === 'all') {
-                              setSelectedStatuses([]);
-                            } else {
-                              setSelectedStatuses(value.split(','));
-                            }
-                          }}>
-                            <SelectTrigger className="w-12 h-10 p-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
-                              <SelectValue>
-                                <Filter className="w-4 h-4 text-gray-600" />
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Statuses</SelectItem>
-                              {getUniqueStatuses().map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {/* Blue dot indicator when filter is active */}
-                          {selectedStatuses.length > 0 && (
-                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Label Download Filter - Mobile View */}
-                    {isMobile && activeTab === "my-orders" && (
-                      <div className="flex items-center">
-                        <div className="relative">
-                          <Select value={selectedLabelFilter} onValueChange={setSelectedLabelFilter}>
-                            <SelectTrigger className="w-12 h-10 p-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
-                              <SelectValue>
-                                <Filter className="w-4 h-4 text-gray-600" />
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Orders</SelectItem>
-                              <SelectItem value="downloaded">Label Downloaded</SelectItem>
-                              <SelectItem value="not_downloaded">Label Not Downloaded</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          {/* Blue dot indicator when filter is active */}
-                          {selectedLabelFilter !== 'all' && (
-                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
-                          )}
-                        </div>
+                    {/* Filter Icons - Mobile View - Always on same line */}
+                    {isMobile && (
+                      <div className="flex items-center flex-shrink-0">
+                        {/* Status Filter for Handover */}
+                        {activeTab === "handover" && (
+                          <div className="relative">
+                            <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
+                              if (value === 'all') {
+                                setSelectedStatuses([]);
+                              } else {
+                                setSelectedStatuses(value.split(','));
+                              }
+                            }}>
+                              <SelectTrigger className="w-12 h-10 px-2 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
+                                <SelectValue>
+                                  <Filter className="w-5 h-5 text-gray-600" />
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Statuses</SelectItem>
+                                {getUniqueStatuses().map((status) => (
+                                  <SelectItem key={status} value={status}>
+                                    {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {/* Blue dot indicator when filter is active */}
+                            {selectedStatuses.length > 0 && (
+                              <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* Label Download Filter for My Orders */}
+                        {activeTab === "my-orders" && (
+                          <div className="relative">
+                            <Select value={selectedLabelFilter} onValueChange={setSelectedLabelFilter}>
+                              <SelectTrigger className="w-12 h-10 px-2 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
+                                <SelectValue>
+                                  <Filter className="w-5 h-5 text-gray-600" />
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Orders</SelectItem>
+                                <SelectItem value="downloaded">Label Downloaded</SelectItem>
+                                <SelectItem value="not_downloaded">Label Not Downloaded</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {/* Blue dot indicator when filter is active */}
+                            {selectedLabelFilter !== 'all' && (
+                              <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2260,9 +2284,9 @@ export function VendorDashboard() {
                       {/* Label Download Filter - Desktop Only for My Orders Tab */}
                       <div className="relative">
                         <Select value={selectedLabelFilter} onValueChange={setSelectedLabelFilter}>
-                          <SelectTrigger className="w-12 h-10 p-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
+                          <SelectTrigger className="w-12 h-10 px-2 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
                             <SelectValue>
-                              <Filter className="w-4 h-4 text-gray-600" />
+                              <Filter className="w-5 h-5 text-gray-600" />
                             </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
