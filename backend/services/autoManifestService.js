@@ -87,30 +87,37 @@ class AutoManifestService {
             const database = require('../config/database');
             for (const orderId of orderIds) {
               try {
+                // Set is_manifest = 1 in labels table
                 await database.updateManifestStatus(orderId, true);
+                
+                // Update claim status to ready_for_handover for all products in this order
+                const orders = await database.getAllOrders();
+                const orderProducts = orders.filter(order => order.order_id === orderId);
+                
+                for (const product of orderProducts) {
+                  await database.updateOrder(product.unique_id, {
+                    status: 'ready_for_handover'
+                  });
+                }
+                
                 successCount++;
-                console.log(`✅ [Auto-Manifest] Successfully created manifest for order ${orderId}`);
+                console.log(`✅ [Auto-Manifest] Successfully created manifest and updated status for order ${orderId}`);
               } catch (dbError) {
                 errorCount++;
                 console.error(`❌ [Auto-Manifest] Failed to update database for order ${orderId}:`, dbError.message);
               }
             }
           } else {
-            // If bulk API fails, try individual orders as fallback
-            console.log(`⚠️ [Auto-Manifest] Bulk API failed, trying individual orders...`);
-            for (const order of batch) {
-              try {
-                const individualResult = await this.processSingleOrderManifest(order);
-                if (individualResult.success) {
-                  successCount++;
-                } else {
-                  errorCount++;
-                }
-              } catch (error) {
-                errorCount++;
-                console.error(`❌ [Auto-Manifest] Failed to process order ${order.order_id}:`, error.message);
-              }
-            }
+            // If bulk API fails, try smart individual retry
+            console.log(`⚠️ [Auto-Manifest] Bulk API failed, attempting smart individual retry...`);
+            const retryResults = await this.smartIndividualRetry(batch);
+            
+            // Update counters based on retry results
+            const successRetries = retryResults.filter(r => r.status === 'success' || r.status === 'already_manifested').length;
+            const failedRetries = retryResults.filter(r => r.status === 'failed' || r.status === 'error').length;
+            
+            successCount += successRetries;
+            errorCount += failedRetries;
           }
         } catch (error) {
           console.error(`❌ [Auto-Manifest] Batch processing failed:`, error.message);
@@ -166,7 +173,17 @@ class AutoManifestService {
       // Update is_manifest = 1 in database
       await database.updateManifestStatus(order.order_id, true);
       
-      console.log(`✅ [Auto-Manifest] Successfully created manifest for order ${order.order_id}`);
+      // Update claim status to ready_for_handover for all products in this order
+      const orders = await database.getAllOrders();
+      const orderProducts = orders.filter(o => o.order_id === order.order_id);
+      
+      for (const product of orderProducts) {
+        await database.updateOrder(product.unique_id, {
+          status: 'ready_for_handover'
+        });
+      }
+      
+      console.log(`✅ [Auto-Manifest] Successfully created manifest and updated status for order ${order.order_id}`);
       
       return {
         success: true,
@@ -251,6 +268,63 @@ class AutoManifestService {
         message: error.message
       };
     }
+  }
+
+  /**
+   * Smart individual retry - tries to identify which orders actually failed
+   * @param {Array} batch - Array of orders that were in the failed batch
+   * @returns {Array} Array of retry results with status for each order
+   */
+  async smartIndividualRetry(batch) {
+    console.log(`🧠 [Auto-Manifest] Starting smart individual retry for ${batch.length} orders...`);
+    
+    const database = require('../config/database');
+    const retryResults = [];
+    
+    // Try each order individually
+    for (const order of batch) {
+      try {
+        console.log(`🔄 [Auto-Manifest] Retrying order ${order.order_id} individually...`);
+        
+        // Check if order is already manifested (might have succeeded in bulk but API didn't confirm)
+        const existingLabel = await database.mysqlConnection.execute(
+          'SELECT is_manifest FROM labels WHERE order_id = ?',
+          [order.order_id]
+        );
+        
+        if (existingLabel.length > 0 && existingLabel[0].is_manifest === 1) {
+          console.log(`✅ [Auto-Manifest] Order ${order.order_id} already manifested, skipping retry`);
+          retryResults.push({ orderId: order.order_id, status: 'already_manifested' });
+          continue;
+        }
+        
+        // Try individual manifest
+        const individualResult = await this.processSingleOrderManifest(order);
+        
+        if (individualResult.success) {
+          retryResults.push({ orderId: order.order_id, status: 'success' });
+          console.log(`✅ [Auto-Manifest] Order ${order.order_id} retry successful`);
+        } else {
+          retryResults.push({ orderId: order.order_id, status: 'failed', reason: individualResult.message });
+          console.log(`❌ [Auto-Manifest] Order ${order.order_id} retry failed: ${individualResult.message}`);
+        }
+        
+      } catch (error) {
+        retryResults.push({ orderId: order.order_id, status: 'error', reason: error.message });
+        console.error(`❌ [Auto-Manifest] Order ${order.order_id} retry error:`, error.message);
+      }
+    }
+    
+    // Log summary of retry results
+    const successRetries = retryResults.filter(r => r.status === 'success' || r.status === 'already_manifested').length;
+    const failedRetries = retryResults.filter(r => r.status === 'failed' || r.status === 'error').length;
+    
+    console.log(`📊 [Auto-Manifest] Smart retry completed:`);
+    console.log(`  - Successful: ${successRetries}`);
+    console.log(`  - Failed: ${failedRetries}`);
+    console.log(`  - Total processed: ${retryResults.length}`);
+    
+    return retryResults;
   }
 
   /**
