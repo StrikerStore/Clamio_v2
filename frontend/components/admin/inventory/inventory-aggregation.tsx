@@ -385,24 +385,7 @@ export function InventoryAggregation() {
               <span className="text-xs">Inventory</span>
             </Button>
             <div className="h-1/2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full h-full flex items-center justify-center"
-                onClick={() => {
-                  // Trigger the RTO upload dialog
-                  const uploadButton = document.querySelector('[data-rto-upload-trigger]') as HTMLButtonElement;
-                  if (uploadButton) {
-                    uploadButton.click();
-                  }
-                }}
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                <span className="text-xs">RTO</span>
-              </Button>
-              <div className="hidden" data-rto-upload-trigger>
-                <RTOUploadDialog onRTODataUploaded={handleRTODataUploaded} />
-              </div>
+              <RTOUploadDialog onRTODataUploaded={handleRTODataUploaded} />
             </div>
           </div>
         </div>
