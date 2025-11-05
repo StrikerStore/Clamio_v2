@@ -304,6 +304,9 @@ class Database {
 
       // Create order tracking table for shipment tracking
       await this.createOrderTrackingTable();
+
+      // Create customer info table for storing customer details
+      await this.createCustomerInfoTable();
     } catch (error) {
       console.error('❌ Error creating orders table:', error.message);
     }
@@ -541,6 +544,57 @@ class Database {
       console.log('✅ Order tracking table created/verified');
     } catch (error) {
       console.error('❌ Error creating order tracking table:', error.message);
+    }
+  }
+
+  /**
+   * Create customer info table for storing customer contact details
+   */
+  async createCustomerInfoTable() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      console.log('🔄 Creating customer_info table...');
+
+      const createCustomerInfoTableQuery = `
+        CREATE TABLE IF NOT EXISTS customer_info (
+          order_id VARCHAR(100) PRIMARY KEY,
+          email VARCHAR(255),
+          billing_firstname VARCHAR(100),
+          billing_lastname VARCHAR(100),
+          billing_phone VARCHAR(20),
+          billing_address TEXT,
+          billing_address2 TEXT,
+          billing_city VARCHAR(100),
+          billing_state VARCHAR(100),
+          billing_country VARCHAR(10),
+          billing_zipcode VARCHAR(20),
+          billing_latitude VARCHAR(20),
+          billing_longitude VARCHAR(20),
+          shipping_firstname VARCHAR(100),
+          shipping_lastname VARCHAR(100),
+          shipping_phone VARCHAR(20),
+          shipping_address TEXT,
+          shipping_address2 TEXT,
+          shipping_city VARCHAR(100),
+          shipping_state VARCHAR(100),
+          shipping_country VARCHAR(10),
+          shipping_zipcode VARCHAR(20),
+          shipping_latitude VARCHAR(20),
+          shipping_longitude VARCHAR(20),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          
+          INDEX idx_email (email),
+          INDEX idx_billing_zipcode (billing_zipcode),
+          INDEX idx_shipping_zipcode (shipping_zipcode)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+      
+      await this.mysqlConnection.execute(createCustomerInfoTableQuery);
+      console.log('✅ Customer info table created/verified');
+    } catch (error) {
+      console.error('❌ Error creating customer info table:', error.message);
     }
   }
 
@@ -3265,6 +3319,136 @@ class Database {
     } catch (error) {
       console.error('Error getting all labels:', error);
       throw new Error('Failed to get labels from database');
+    }
+  }
+
+  // ========================================
+  // Customer Info Methods
+  // ========================================
+
+  /**
+   * Get customer info by order ID
+   * @param {string} orderId - Order ID
+   * @returns {Object|null} Customer info or null if not found
+   */
+  async getCustomerInfoByOrderId(orderId) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT * FROM customer_info WHERE order_id = ?',
+        [orderId]
+      );
+      return rows.length > 0 ? rows[0] : null;
+    } catch (error) {
+      console.error('Error getting customer info by order ID:', error);
+      throw new Error('Failed to get customer info from database');
+    }
+  }
+
+  /**
+   * Create or update customer info
+   * @param {Object} customerData - Customer data
+   * @returns {Object} Created/updated customer info
+   */
+  async upsertCustomerInfo(customerData) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const fields = [
+        'email', 'billing_firstname', 'billing_lastname', 'billing_phone',
+        'billing_address', 'billing_address2', 'billing_city', 'billing_state',
+        'billing_country', 'billing_zipcode', 'billing_latitude', 'billing_longitude',
+        'shipping_firstname', 'shipping_lastname', 'shipping_phone',
+        'shipping_address', 'shipping_address2', 'shipping_city', 'shipping_state',
+        'shipping_country', 'shipping_zipcode', 'shipping_latitude', 'shipping_longitude'
+      ];
+
+      const updateClauses = fields.map(field => `${field} = VALUES(${field})`).join(', ');
+      const fieldNames = ['order_id', ...fields].join(', ');
+      const placeholders = ['order_id', ...fields].map(() => '?').join(', ');
+
+      const values = [
+        customerData.order_id,
+        customerData.email || null,
+        customerData.billing_firstname || null,
+        customerData.billing_lastname || null,
+        customerData.billing_phone || null,
+        customerData.billing_address || null,
+        customerData.billing_address2 || null,
+        customerData.billing_city || null,
+        customerData.billing_state || null,
+        customerData.billing_country || null,
+        customerData.billing_zipcode || null,
+        customerData.billing_latitude || null,
+        customerData.billing_longitude || null,
+        customerData.shipping_firstname || null,
+        customerData.shipping_lastname || null,
+        customerData.shipping_phone || null,
+        customerData.shipping_address || null,
+        customerData.shipping_address2 || null,
+        customerData.shipping_city || null,
+        customerData.shipping_state || null,
+        customerData.shipping_country || null,
+        customerData.shipping_zipcode || null,
+        customerData.shipping_latitude || null,
+        customerData.shipping_longitude || null
+      ];
+
+      await this.mysqlConnection.execute(
+        `INSERT INTO customer_info (${fieldNames}) VALUES (${placeholders})
+         ON DUPLICATE KEY UPDATE ${updateClauses}`,
+        values
+      );
+
+      return await this.getCustomerInfoByOrderId(customerData.order_id);
+    } catch (error) {
+      console.error('Error creating/updating customer info:', error);
+      throw new Error('Failed to save customer info to database');
+    }
+  }
+
+  /**
+   * Copy customer info from one order to another (for clones)
+   * @param {string} sourceOrderId - Source order ID
+   * @param {string} targetOrderId - Target order ID (clone)
+   * @returns {Object} Copied customer info
+   */
+  async copyCustomerInfo(sourceOrderId, targetOrderId) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      // Get source customer info
+      const sourceCustomer = await this.getCustomerInfoByOrderId(sourceOrderId);
+      
+      if (!sourceCustomer) {
+        throw new Error(`Customer info not found for order ${sourceOrderId}`);
+      }
+
+      // Create new customer info with target order_id
+      const targetCustomer = {
+        ...sourceCustomer,
+        order_id: targetOrderId
+      };
+
+      // Remove timestamps to let database generate new ones
+      delete targetCustomer.created_at;
+      delete targetCustomer.updated_at;
+
+      // Insert the copied customer info
+      await this.upsertCustomerInfo(targetCustomer);
+
+      console.log(`✅ Copied customer info from ${sourceOrderId} to ${targetOrderId}`);
+      return await this.getCustomerInfoByOrderId(targetOrderId);
+    } catch (error) {
+      console.error('Error copying customer info:', error);
+      throw new Error(`Failed to copy customer info: ${error.message}`);
     }
   }
 

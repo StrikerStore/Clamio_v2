@@ -2041,18 +2041,41 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
   try {
     console.log('🔄 Generating label for order:', orderId);
     
-    // Extract original order ID if this is a clone
-    const originalOrderId = orderId.includes('_') ? orderId.split('_')[0] : orderId;
-    console.log('  - Original order ID for contact info:', originalOrderId);
+    // Get customer info from database
+    const database = require('../config/database');
+    const customerInfo = await database.getCustomerInfoByOrderId(orderId);
     
-    // Load raw shipway orders for contact info
-    const rawOrdersPath = path.join(__dirname, '../data/raw_shipway_orders.json');
-    const rawOrdersData = JSON.parse(fs.readFileSync(rawOrdersPath, 'utf8'));
-    const originalOrder = rawOrdersData.message.find(order => order.order_id === originalOrderId);
-    
-    if (!originalOrder) {
-      throw new Error(`Original order not found in raw_shipway_orders.json for order ID: ${originalOrderId}`);
+    if (!customerInfo) {
+      throw new Error(`Customer info not found for order ID: ${orderId}. Please sync orders from Shipway first.`);
     }
+    
+    // Convert customer_info to originalOrder format expected by prepareShipwayRequestBody
+    const originalOrder = {
+      order_id: orderId,
+      email: customerInfo.email,
+      b_address: customerInfo.billing_address,
+      b_address_2: customerInfo.billing_address2,
+      b_city: customerInfo.billing_city,
+      b_state: customerInfo.billing_state,
+      b_country: customerInfo.billing_country,
+      b_firstname: customerInfo.billing_firstname,
+      b_lastname: customerInfo.billing_lastname,
+      b_phone: customerInfo.billing_phone,
+      b_zipcode: customerInfo.billing_zipcode,
+      b_latitude: customerInfo.billing_latitude,
+      b_longitude: customerInfo.billing_longitude,
+      s_address: customerInfo.shipping_address,
+      s_address_2: customerInfo.shipping_address2,
+      s_city: customerInfo.shipping_city,
+      s_state: customerInfo.shipping_state,
+      s_country: customerInfo.shipping_country,
+      s_firstname: customerInfo.shipping_firstname,
+      s_lastname: customerInfo.shipping_lastname,
+      s_phone: customerInfo.shipping_phone,
+      s_zipcode: customerInfo.shipping_zipcode,
+      s_latitude: customerInfo.shipping_latitude,
+      s_longitude: customerInfo.shipping_longitude
+    };
 
     // STEP 1: Get top 3 priority carriers from the first product
     console.log(`🚚 RETRIEVING TOP 3 PRIORITY CARRIERS for order ${orderId}...`);
@@ -2080,7 +2103,6 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
     }
     
     // Get carrier details from database for name lookup
-    const database = require('../config/database');
     const carrierServiceabilityService = require('../services/carrierServiceabilityService');
     const allCarriers = await carrierServiceabilityService.readCarriersFromDatabase();
     const carrierMap = new Map(allCarriers.map(c => [c.carrier_id, c]));
@@ -2559,14 +2581,41 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
   // Generate unique clone ID
   const cloneOrderId = await generateUniqueCloneId(originalOrderId);
   
-  // Load original order data once
-  const rawOrdersPath = path.join(__dirname, '../data/raw_shipway_orders.json');
-  const rawOrdersData = JSON.parse(fs.readFileSync(rawOrdersPath, 'utf8'));
-  const originalOrder = rawOrdersData.message.find(order => order.order_id === originalOrderId);
+  // Get customer info from database
+  const database = require('../config/database');
+  const customerInfo = await database.getCustomerInfoByOrderId(originalOrderId);
   
-  if (!originalOrder) {
-    throw new Error('Original order not found in raw_shipway_orders.json');
+  if (!customerInfo) {
+    throw new Error(`Customer info not found for order ID: ${originalOrderId}. Please sync orders from Shipway first.`);
   }
+  
+  // Convert customer_info to originalOrder format expected by prepareShipwayRequestBody
+  const originalOrder = {
+    order_id: originalOrderId,
+    email: customerInfo.email,
+    b_address: customerInfo.billing_address,
+    b_address_2: customerInfo.billing_address2,
+    b_city: customerInfo.billing_city,
+    b_state: customerInfo.billing_state,
+    b_country: customerInfo.billing_country,
+    b_firstname: customerInfo.billing_firstname,
+    b_lastname: customerInfo.billing_lastname,
+    b_phone: customerInfo.billing_phone,
+    b_zipcode: customerInfo.billing_zipcode,
+    b_latitude: customerInfo.billing_latitude,
+    b_longitude: customerInfo.billing_longitude,
+    s_address: customerInfo.shipping_address,
+    s_address_2: customerInfo.shipping_address2,
+    s_city: customerInfo.shipping_city,
+    s_state: customerInfo.shipping_state,
+    s_country: customerInfo.shipping_country,
+    s_firstname: customerInfo.shipping_firstname,
+    s_lastname: customerInfo.shipping_lastname,
+    s_phone: customerInfo.shipping_phone,
+    s_zipcode: customerInfo.shipping_zipcode,
+    s_latitude: customerInfo.shipping_latitude,
+    s_longitude: customerInfo.shipping_longitude
+  };
   
   const inputData = {
     originalOrderId,
@@ -2745,6 +2794,16 @@ async function updateLocalDatabaseAfterClone(inputData) {
   console.log(`  - Clone Order ID: ${cloneOrderId}`);
   console.log(`  - Original Order ID: ${originalOrderId}`);
   console.log(`  - Setting label_downloaded = 0 (not downloaded yet)`);
+  
+  // Copy customer info from original order to clone order
+  console.log(`📋 Copying customer info from ${originalOrderId} to ${cloneOrderId}...`);
+  try {
+    await database.copyCustomerInfo(originalOrderId, cloneOrderId);
+    console.log(`✅ Customer info copied successfully`);
+  } catch (error) {
+    console.error(`⚠️ Failed to copy customer info: ${error.message}`);
+    throw error;
+  }
   
     for (const product of claimedProducts) {
       // Update both orders and claims tables in a single call
@@ -3185,9 +3244,6 @@ router.post('/bulk-download-labels', async (req, res) => {
       try {
         console.log(`🔄 Processing order: ${orderId}`);
         
-        // Check if this is already a clone order
-        const isCloneOrder = orderId.includes('_');
-        
         // Get all products for this order_id
         const orderProducts = orders.filter(order => order.order_id === orderId);
         const claimedProducts = orderProducts.filter(order => 
@@ -3223,31 +3279,7 @@ router.post('/bulk-download-labels', async (req, res) => {
         }
 
         let labelResponse;
-        if (isCloneOrder) {
-          // Already a clone order - direct download
-          console.log(`📋 BULK: Processing clone order ${orderId}`);
-          labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor, format);
-          
-          // Store label and carrier info for clone order
-          if (labelResponse.success && labelResponse.data.shipping_url) {
-            await database.upsertLabel({
-              order_id: orderId,
-              label_url: labelResponse.data.shipping_url,
-              awb: labelResponse.data.awb,
-              carrier_id: labelResponse.data.carrier_id,
-              carrier_name: labelResponse.data.carrier_name
-            });
-            console.log(`✅ BULK: Stored label data for clone order ${orderId}`);
-            
-            // ✅ Mark label as downloaded in claims table for all claimed products
-            for (const product of claimedProducts) {
-              await database.updateOrder(product.unique_id, {
-                label_downloaded: 1  // Mark as downloaded after successful label generation
-              });
-              console.log(`  ✅ BULK: Marked product ${product.unique_id} label as downloaded`);
-            }
-          }
-        } else if (orderProducts.length === claimedProducts.length) {
+        if (orderProducts.length === claimedProducts.length) {
           // Direct download - all products claimed by vendor
           console.log(`📋 BULK: Processing direct download for ${orderId}`);
           labelResponse = await generateLabelForOrder(orderId, claimedProducts, vendor, format);
