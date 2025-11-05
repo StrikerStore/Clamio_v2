@@ -443,13 +443,15 @@ class Database {
           is_manifest TINYINT(1) DEFAULT 0,
           is_handover TINYINT(1) DEFAULT 0,
           current_shipment_status VARCHAR(100) NULL,
+          manifest_id VARCHAR(100) NULL,
           INDEX idx_order_id (order_id),
           INDEX idx_awb (awb),
           INDEX idx_carrier_id (carrier_id),
           INDEX idx_priority_carrier (priority_carrier),
           INDEX idx_is_manifest (is_manifest),
           INDEX idx_is_handover (is_handover),
-          INDEX idx_current_shipment_status (current_shipment_status)
+          INDEX idx_current_shipment_status (current_shipment_status),
+          INDEX idx_manifest_id (manifest_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
@@ -502,6 +504,22 @@ class Database {
           console.log('ℹ️ current_shipment_status column already exists in labels table');
         } else {
           console.error('❌ Error adding current_shipment_status column to labels table:', error.message);
+        }
+      }
+
+      // Add manifest_id column if it doesn't exist (for existing tables)
+      try {
+        await this.mysqlConnection.execute(`
+          ALTER TABLE labels 
+          ADD COLUMN manifest_id VARCHAR(100) NULL,
+          ADD INDEX idx_manifest_id (manifest_id)
+        `);
+        console.log('✅ Added manifest_id column to labels table');
+      } catch (error) {
+        if (error.code === 'ER_DUP_FIELDNAME') {
+          console.log('ℹ️ manifest_id column already exists in labels table');
+        } else {
+          console.error('❌ Error adding manifest_id column to labels table:', error.message);
         }
       }
       
@@ -2647,6 +2665,7 @@ class Database {
           l.handover_at,
           c.priority_carrier,
           l.is_manifest,
+          l.manifest_id,
           l.current_shipment_status,
           l.is_handover,
           CASE 
@@ -2875,6 +2894,7 @@ class Database {
           l.handover_at,
           c.priority_carrier,
           l.is_manifest,
+          l.manifest_id,
           l.current_shipment_status,
           l.is_handover,
           CASE 
@@ -3263,6 +3283,10 @@ class Database {
         updateFields.push('is_manifest = ?');
         updateValues.push(labelData.is_manifest || 0);
       }
+      if (labelData.hasOwnProperty('manifest_id')) {
+        updateFields.push('manifest_id = ?');
+        updateValues.push(labelData.manifest_id || null);
+      }
       
       // Always add updated_at
       updateFields.push('updated_at = CURRENT_TIMESTAMP');
@@ -3270,8 +3294,8 @@ class Database {
       const updateClause = updateFields.join(', ');
       
       const [result] = await this.mysqlConnection.execute(
-        `INSERT INTO labels (order_id, label_url, awb, carrier_id, carrier_name, priority_carrier, is_manifest) 
-         VALUES (?, ?, ?, ?, ?, ?, ?) 
+        `INSERT INTO labels (order_id, label_url, awb, carrier_id, carrier_name, priority_carrier, is_manifest, manifest_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
          ON DUPLICATE KEY UPDATE ${updateClause}`,
         [
           labelData.order_id,
@@ -3281,6 +3305,7 @@ class Database {
           labelData.carrier_name || null,
           labelData.priority_carrier || null,
           labelData.is_manifest || 0,
+          labelData.manifest_id || null,
           ...updateValues
         ]
       );

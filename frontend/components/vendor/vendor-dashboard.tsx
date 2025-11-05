@@ -678,6 +678,54 @@ export function VendorDashboard() {
     }
   }
 
+  const downloadManifestSummary = async (manifestIds: string[]) => {
+    try {
+      const vendorToken = localStorage.getItem('vendorToken');
+      if (!vendorToken) {
+        console.error('No vendor token found');
+        return;
+      }
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${API_BASE_URL}/orders/download-manifest-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': vendorToken,
+        },
+        body: JSON.stringify({ manifest_ids: manifestIds }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to download manifest summary');
+      }
+
+      // Download PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const timestamp = new Date().toISOString().split('T')[0];
+      link.download = `manifest-summary-${timestamp}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast({
+        title: "Manifest Downloaded",
+        description: "Manifest summary PDF has been downloaded successfully",
+      });
+    } catch (error) {
+      console.error('Error downloading manifest summary:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download manifest summary PDF",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleBulkMarkReady = async () => {
     if (selectedMyOrders.length === 0) {
       toast({
@@ -726,6 +774,12 @@ export function VendorDashboard() {
             variant: "destructive",
           });
           console.log('Failed orders:', data.data.failed_orders);
+        }
+        
+        // Auto-download manifest summary PDF
+        if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
+          console.log('📥 Auto-downloading manifest summary PDF...', data.data.manifest_ids);
+          await downloadManifestSummary(data.data.manifest_ids);
         }
         
         // Clear selection and refresh orders
@@ -979,6 +1033,7 @@ export function VendorDashboard() {
               current_shipment_status: order.current_shipment_status,
               is_handover: order.is_handover,
               is_manifest: order.is_manifest,
+              manifest_id: order.manifest_id,
               total_quantity: 0,
               products: []
             };
@@ -3025,26 +3080,50 @@ export function VendorDashboard() {
                               ))}
                             </div>
                             
-                            {/* Unclaim Button Row - Full Width at Bottom */}
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
-                              }}
-                              disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
-                              className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {reverseLoading[order.order_id] ? (
-                                <>
-                                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
-                                  Unclaiming...
-                                </>
-                              ) : (
-                                'Unclaim Order'
-                              )}
-                            </Button>
+                            {/* Action Buttons Row - Full Width at Bottom */}
+                            <div className="flex gap-2">
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const manifestId = order.manifest_id;
+                                  if (manifestId) {
+                                    downloadManifestSummary([manifestId]);
+                                  } else {
+                                    toast({
+                                      title: "Error",
+                                      description: "Manifest ID not found",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                                disabled={order.is_handover === 1}
+                                className="flex-1 text-xs h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                              >
+                                <Download className="w-3 h-3 mr-1" />
+                                Manifest
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                }}
+                                disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                className="flex-1 text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {reverseLoading[order.order_id] ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
+                                    Unclaiming...
+                                  </>
+                                ) : (
+                                  'Unclaim Order'
+                                )}
+                              </Button>
+                            </div>
                           </div>
                         </Card>
                       ))}
@@ -3128,25 +3207,50 @@ export function VendorDashboard() {
                               )}
                             </TableCell>
                             <TableCell>
-                              <Button 
-                                size="sm" 
-                                variant="destructive" 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
-                                }}
-                                disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
-                                className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {reverseLoading[order.order_id] ? (
-                                  <>
-                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                                    Loading...
-                                  </>
-                                ) : (
-                                  'Unclaim'
-                                )}
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Get manifest_id from order (should be available in handover tab)
+                                    const manifestId = order.manifest_id;
+                                    if (manifestId) {
+                                      downloadManifestSummary([manifestId]);
+                                    } else {
+                                      toast({
+                                        title: "Error",
+                                        description: "Manifest ID not found for this order",
+                                        variant: "destructive",
+                                      });
+                                    }
+                                  }}
+                                  disabled={order.is_handover === 1}
+                                  className="text-xs px-3 py-1 h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                >
+                                  <Download className="w-3 h-3 mr-1" />
+                                  Manifest
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive" 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                  }}
+                                  disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                  className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {reverseLoading[order.order_id] ? (
+                                    <>
+                                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                      Loading...
+                                    </>
+                                  ) : (
+                                    'Unclaim'
+                                  )}
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
