@@ -263,7 +263,7 @@ class Database {
 
       const createTableQuery = `
         CREATE TABLE IF NOT EXISTS orders (
-          id VARCHAR(50) PRIMARY KEY,
+          id VARCHAR(255) PRIMARY KEY,
           unique_id VARCHAR(100) UNIQUE,
           order_id VARCHAR(100),
           customer_name VARCHAR(255),
@@ -295,6 +295,9 @@ class Database {
 
       // Add size column to existing tables if it doesn't exist (migration)
       await this.addSizeColumnIfNotExists();
+
+      // Increase id column size if needed (migration)
+      await this.increaseIdColumnSizeIfNeeded();
 
       // Create labels table for caching label URLs
       await this.createLabelsTable();
@@ -340,6 +343,45 @@ class Database {
       }
     } catch (error) {
       console.error('❌ Error adding size column:', error.message);
+    }
+  }
+
+  /**
+   * Increase id column size if it's too small (migration)
+   */
+  async increaseIdColumnSizeIfNeeded() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check current id column size
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM orders WHERE Field = 'id'`
+      );
+
+      if (columns.length > 0) {
+        const idColumn = columns[0];
+        const currentType = idColumn.Type.toUpperCase();
+        
+        // Check if it's VARCHAR(50) or smaller
+        const match = currentType.match(/VARCHAR\((\d+)\)/);
+        if (match) {
+          const currentSize = parseInt(match[1]);
+          if (currentSize < 255) {
+            console.log(`🔄 Increasing id column size from VARCHAR(${currentSize}) to VARCHAR(255)...`);
+            
+            // Note: Don't specify PRIMARY KEY here - MySQL preserves it when modifying the column
+            await this.mysqlConnection.execute(
+              `ALTER TABLE orders MODIFY COLUMN id VARCHAR(255)`
+            );
+            
+            console.log('✅ id column size increased to VARCHAR(255)');
+          } else {
+            console.log(`✅ id column size is already VARCHAR(${currentSize})`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error increasing id column size:', error.message);
     }
   }
 
@@ -2315,15 +2357,16 @@ class Database {
         [
           orderData.order_id || null,
           orderData.handover_at || null,
-          orderData.priority_carrier || null,
-          orderData.is_in_new_order !== undefined ? orderData.is_in_new_order : true
+          orderData.priority_carrier || null
         ]
       );
 
       return await this.getOrderByUniqueId(orderData.unique_id);
     } catch (error) {
       console.error('Error creating order:', error);
-      throw new Error('Failed to create order');
+      // Include the actual error message for better debugging
+      const errorMessage = error.message || 'Unknown error';
+      throw new Error(`Failed to create order: ${errorMessage}`);
     }
   }
 
@@ -2565,7 +2608,7 @@ class Database {
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
-        WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1) 
+        WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1 OR (c.status = 'unclaimed' AND c.status IS NOT NULL)) 
         ORDER BY o.order_date DESC, o.order_id, o.product_name
       `);
       
@@ -3531,21 +3574,6 @@ class Database {
       
       console.log(`✅ Updated labels table for order ${orderId}: status=${currentStatus}, handover=${isHandover ? '1' : 'unchanged'}`);
       
-      // If we just set is_handover = 1, trigger auto-manifest check
-      if (handoverJustSet) {
-        console.log(`🔄 [Auto-Manifest] Order ${orderId} just became handed over, checking if auto-manifest is needed...`);
-        
-        // Import auto-manifest service and trigger it asynchronously
-        setImmediate(async () => {
-          try {
-            const autoManifestService = require('../services/autoManifestService');
-            await autoManifestService.processAutoManifest();
-          } catch (error) {
-            console.error('❌ [Auto-Manifest] Error in auto-manifest process:', error.message);
-          }
-        });
-      }
-      
     } catch (error) {
       console.error(`❌ Error updating labels table for order ${orderId}:`, error);
       throw error;
@@ -3618,61 +3646,6 @@ class Database {
     }
   }
 
-  /**
-   * Get orders that need auto-manifest (is_handover = 1 but is_manifest = 0)
-   */
-  async getOrdersNeedingAutoManifest() {
-    if (!this.mysqlConnection) {
-      throw new Error('MySQL connection not available');
-    }
-
-    try {
-      const [rows] = await this.mysqlConnection.execute(`
-        SELECT 
-          l.order_id,
-          l.label_url,
-          l.awb,
-          l.carrier_name,
-          l.current_shipment_status,
-          l.updated_at,
-          o.customer_name,
-          o.product_name
-        FROM labels l
-        LEFT JOIN orders o ON l.order_id = o.order_id
-        WHERE l.is_handover = 1 AND l.is_manifest = 0
-        ORDER BY l.updated_at DESC
-      `);
-      
-      return rows;
-    } catch (error) {
-      console.error('Error getting orders needing auto-manifest:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Update is_manifest status for an order
-   * @param {string} orderId - The order ID
-   * @param {boolean} isManifest - Whether manifest is created
-   */
-  async updateManifestStatus(orderId, isManifest = true) {
-    if (!this.mysqlConnection) {
-      throw new Error('MySQL connection not available');
-    }
-
-    try {
-      await this.mysqlConnection.execute(
-        'UPDATE labels SET is_manifest = ? WHERE order_id = ?',
-        [isManifest ? 1 : 0, orderId]
-      );
-      
-      console.log(`✅ Updated manifest status for order ${orderId}: is_manifest = ${isManifest ? 1 : 0}`);
-      
-    } catch (error) {
-      console.error(`❌ Error updating manifest status for order ${orderId}:`, error);
-      throw error;
-    }
-  }
 }
 
 module.exports = new Database(); 

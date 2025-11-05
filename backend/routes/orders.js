@@ -647,6 +647,8 @@ router.get('/my-orders', async (req, res) => {
           total_products: 0,
           total_quantity: 0,
           status: order.status,
+          is_handover: order.is_handover, // Add is_handover field
+          current_shipment_status: order.current_shipment_status, // Add current_shipment_status field
           products: []
         };
       }
@@ -847,6 +849,8 @@ router.get('/handover', async (req, res) => {
           total_products: 0,
           total_quantity: 0,
           status: order.status,
+          is_handover: order.is_handover, // Add is_handover field
+          current_shipment_status: order.current_shipment_status, // Add current_shipment_status field
           products: []
         };
       }
@@ -1047,6 +1051,8 @@ router.get('/grouped', async (req, res) => {
           customer_name: order.customer_name || order.customer,
           claimed_at: order.claimed_at,
           label_downloaded: order.label_downloaded, // Add label_downloaded field
+          is_handover: order.is_handover, // Add is_handover field
+          current_shipment_status: order.current_shipment_status, // Add current_shipment_status field
           total_value: 0,
           total_products: 0,
           total_quantity: 0,
@@ -4234,12 +4240,18 @@ router.post('/reverse', async (req, res) => {
 
       // Clear label data after successful cancellation
       await database.mysqlConnection.execute(
-        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL WHERE order_id = ?',
+        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL, is_manifest = 0, current_shipment_status = NULL WHERE order_id = ?',
         [order.order_id]
       );
       console.log('✅ LABEL DATA CLEARED');
     } else {
       console.log('🔄 CASE 1: No label downloaded - simple reverse');
+      // Even without label download, reset manifest fields if they exist (for Handover tab orders)
+      await database.mysqlConnection.execute(
+        'UPDATE labels SET is_manifest = 0, current_shipment_status = NULL WHERE order_id = ?',
+        [order.order_id]
+      );
+      console.log('✅ MANIFEST FIELDS RESET');
     }
 
     // Clear claim information (both cases)
@@ -4257,6 +4269,13 @@ router.post('/reverse', async (req, res) => {
     );
 
     console.log('✅ CLAIM DATA CLEARED');
+
+    // Set is_in_new_order = 1 so unclaimed order appears in All Orders tab
+    await database.mysqlConnection.execute(
+      'UPDATE orders SET is_in_new_order = 1 WHERE unique_id = ?',
+      [unique_id]
+    );
+    console.log('✅ ORDER SET TO NEW ORDER STATUS');
 
     // Get updated order for response
     const updatedOrder = await database.getOrderByUniqueId(unique_id);
@@ -4445,12 +4464,18 @@ router.post('/reverse-grouped', async (req, res) => {
 
       // Clear label data after successful cancellation (only once for the entire order)
       await database.mysqlConnection.execute(
-        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL WHERE order_id = ?',
+        'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL, is_manifest = 0, current_shipment_status = NULL WHERE order_id = ?',
         [order_id]
       );
       console.log('✅ LABEL DATA CLEARED');
     } else {
       console.log('🔄 CASE 1: No label downloaded - simple reverse');
+      // Even without label download, reset manifest fields if they exist (for Handover tab orders)
+      await database.mysqlConnection.execute(
+        'UPDATE labels SET is_manifest = 0, current_shipment_status = NULL WHERE order_id = ?',
+        [order_id]
+      );
+      console.log('✅ MANIFEST FIELDS RESET');
     }
 
     // Clear claim information for ONLY the vendor's products
@@ -4484,6 +4509,13 @@ router.post('/reverse-grouped', async (req, res) => {
     }
 
     console.log('✅ CLAIM DATA CLEARED FOR VENDOR\'S PRODUCTS');
+
+    // Set is_in_new_order = 1 for all products in this order so unclaimed orders appear in All Orders tab
+    await database.mysqlConnection.execute(
+      'UPDATE orders SET is_in_new_order = 1 WHERE order_id = ?',
+      [order_id]
+    );
+    console.log('✅ ORDERS SET TO NEW ORDER STATUS');
 
     const successMessage = isLabelDownloaded 
       ? `Shipment cancelled and ${validUniqueIds.length} products reversed successfully`
