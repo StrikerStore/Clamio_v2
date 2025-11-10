@@ -299,9 +299,6 @@ class Database {
       // Increase id column size if needed (migration)
       await this.increaseIdColumnSizeIfNeeded();
 
-      // Remove store_code column from orders table if it exists (cleanup migration)
-      await this.removeStoreCodeFromOrdersIfExists();
-
       // Create labels table for caching label URLs
       await this.createLabelsTable();
 
@@ -420,36 +417,6 @@ class Database {
       console.log(`✅ Updated ${updatedCount} orders with size information`);
     } catch (error) {
       console.error('❌ Error updating existing orders with size:', error.message);
-    }
-  }
-
-  /**
-   * Remove store_code column from orders table if it exists (cleanup migration)
-   * store_code should only be in customer_info table (order-level), not orders table (product-level)
-   */
-  async removeStoreCodeFromOrdersIfExists() {
-    if (!this.mysqlConnection) return;
-
-    try {
-      // Check if store_code column exists in orders table
-      const [columns] = await this.mysqlConnection.execute(
-        `SHOW COLUMNS FROM orders LIKE 'store_code'`
-      );
-
-      if (columns.length > 0) {
-        console.log('🔄 Removing redundant store_code column from orders table...');
-        
-        // Drop the column (it belongs in customer_info table, not orders table)
-        await this.mysqlConnection.execute(
-          `ALTER TABLE orders DROP COLUMN store_code`
-        );
-        
-        console.log('✅ store_code column removed from orders table (kept in customer_info table)');
-      } else {
-        console.log('✅ store_code column does not exist in orders table (correct)');
-      }
-    } catch (error) {
-      console.error('❌ Error removing store_code column from orders table:', error.message);
     }
   }
 
