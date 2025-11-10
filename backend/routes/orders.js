@@ -4055,7 +4055,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
             try {
               const orderProducts = orders.filter(order => order.order_id === order_id);
               const claimedProducts = orderProducts.filter(order => 
-                order.claimed_by === vendor.warehouseId && order.status === 'claimed'
+                order.claimed_by === vendor.warehouseId && order.claims_status === 'claimed'
               );
 
               // Set is_manifest = 1 and manifest_id in labels table
@@ -4119,7 +4119,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
             try {
               const orderProducts = orders.filter(order => order.order_id === order_id);
               const claimedProducts = orderProducts.filter(order => 
-                order.claimed_by === vendor.warehouseId && order.status === 'claimed'
+                order.claimed_by === vendor.warehouseId && order.claims_status === 'claimed'
               );
 
               // Set is_manifest = 1 and manifest_id in labels table
