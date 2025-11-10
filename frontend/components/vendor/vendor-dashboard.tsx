@@ -1950,15 +1950,16 @@ export function VendorDashboard() {
     }
   };
 
-  // Helper function to get quantity sum for orders with labels downloaded
+  // Helper function to get quantity sum for selected orders with labels downloaded
   const getReadyOrdersQuantitySum = () => {
     const myOrders = getFilteredOrdersForTab("my-orders");
-    const readyOrders = myOrders.filter(order => 
-      order.label_downloaded === 1 || 
-      order.label_downloaded === '1' || 
-      order.label_downloaded === true
+    const selectedReadyOrders = myOrders.filter(order => 
+      selectedMyOrders.includes(order.order_id) &&
+      (order.label_downloaded === 1 || 
+       order.label_downloaded === '1' || 
+       order.label_downloaded === true)
     );
-    return readyOrders.reduce((sum, order) => {
+    return selectedReadyOrders.reduce((sum, order) => {
       return sum + (order.total_quantity || 0);
     }, 0);
   };
