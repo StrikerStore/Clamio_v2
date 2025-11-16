@@ -34,6 +34,7 @@ import {
   Menu,
   X,
   ChevronUp,
+  Loader2,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -180,6 +181,7 @@ export function VendorDashboard() {
   const [selectedMyOrders, setSelectedMyOrders] = useState<string[]>([])
   const [selectedUnclaimedOrders, setSelectedUnclaimedOrders] = useState<string[]>([])
   const [bulkMarkReadyLoading, setBulkMarkReadyLoading] = useState(false)
+  const [manifestDownloadLoading, setManifestDownloadLoading] = useState<string | null>(null)
   const [vendorAddress, setVendorAddress] = useState<null | {
     warehouseId: string
     address: string
@@ -679,7 +681,10 @@ export function VendorDashboard() {
   }
 
   const downloadManifestSummary = async (manifestIds: string[]) => {
+    const manifestKey = manifestIds.join(',');
     try {
+      setManifestDownloadLoading(manifestKey);
+      
       const vendorToken = localStorage.getItem('vendorToken');
       if (!vendorToken) {
         console.error('No vendor token found');
@@ -723,6 +728,8 @@ export function VendorDashboard() {
         description: "Failed to download manifest summary PDF",
         variant: "destructive",
       });
+    } finally {
+      setManifestDownloadLoading(null);
     }
   };
 
@@ -3099,11 +3106,20 @@ export function VendorDashboard() {
                                     });
                                   }
                                 }}
-                                disabled={order.is_handover === 1}
+                                disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
                                 className="flex-1 text-xs h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                               >
-                                <Download className="w-3 h-3 mr-1" />
-                                Manifest
+                                {manifestDownloadLoading === order.manifest_id ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                    Downloading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3 mr-1" />
+                                    Manifest
+                                  </>
+                                )}
                               </Button>
                               <Button 
                                 size="sm" 
@@ -3226,11 +3242,20 @@ export function VendorDashboard() {
                                       });
                                     }
                                   }}
-                                  disabled={order.is_handover === 1}
+                                  disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
                                   className="text-xs px-3 py-1 h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                 >
-                                  <Download className="w-3 h-3 mr-1" />
-                                  Manifest
+                                  {manifestDownloadLoading === order.manifest_id ? (
+                                    <>
+                                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                      Downloading...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="w-3 h-3 mr-1" />
+                                      Manifest
+                                    </>
+                                  )}
                                 </Button>
                                 <Button 
                                   size="sm" 

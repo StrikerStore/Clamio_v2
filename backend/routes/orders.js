@@ -4853,23 +4853,31 @@ router.post('/download-manifest-summary', async (req, res) => {
     // Get vendor address
     let vendorAddress = '';
     try {
+      console.log('🔍 Fetching address for warehouseId:', vendor.warehouseId);
       const [addressRows] = await database.mysqlConnection.execute(`
-        SELECT address, city, state, pincode 
+        SELECT address, pincode 
         FROM users 
         WHERE warehouseId = ?
       `, [vendor.warehouseId]);
+      
+      console.log('📋 Address query results:', addressRows);
       
       if (addressRows.length > 0 && addressRows[0].address) {
         const addr = addressRows[0];
         const parts = [];
         if (addr.address) parts.push(addr.address);
-        if (addr.city) parts.push(addr.city);
-        if (addr.state) parts.push(addr.state);
         if (addr.pincode) parts.push(addr.pincode);
         vendorAddress = parts.join(', ');
+        console.log('✅ Vendor address constructed:', vendorAddress);
+      } else {
+        console.log('⚠️ No address found or address is null/empty');
+        console.log('  - Rows returned:', addressRows.length);
+        if (addressRows.length > 0) {
+          console.log('  - Address field value:', addressRows[0].address);
+        }
       }
     } catch (error) {
-      console.log('⚠️ Could not fetch warehouse address:', error.message);
+      console.log('❌ Error fetching warehouse address:', error.message);
     }
 
     // Convert manifest_ids to array if single value
@@ -4951,125 +4959,203 @@ router.post('/download-manifest-summary', async (req, res) => {
     // Pipe PDF to response
     doc.pipe(res);
     
-    // Top Section: Logo and Store Name
-    const topY = 40;
+    // Top Section: Logo and Store Name (Left aligned)
+    const topY = 50;
+    const leftMargin = 50;
     
-    // Add logo at top right (smaller)
+    // Add logo at top left
     if (logoBuffer) {
       try {
-        const logoWidth = 50;
-        const logoHeight = 50;
-        const logoX = doc.page.width - logoWidth - 50;
-        doc.image(logoBuffer, logoX, topY, { width: logoWidth, height: logoHeight, fit: [logoWidth, logoHeight] });
+        const logoWidth = 55;
+        const logoHeight = 55;
+        doc.image(logoBuffer, leftMargin, topY, { width: logoWidth, height: logoHeight, fit: [logoWidth, logoHeight] });
       } catch (error) {
         console.log('⚠️ Could not embed logo in PDF:', error.message);
       }
     }
     
-    // Add "Striker Store" at top center
-    doc.fontSize(18).font('Helvetica-Bold').fillColor('#1F2937');
-    doc.text('Striker Store', 0, topY + 5, { align: 'center', width: doc.page.width });
+    // Add "Striker Store" next to logo (aligned horizontally)
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#000000');
+    doc.text('Striker Store', leftMargin + 65, topY + 15);
     
-    doc.y = topY + 35;
+    doc.y = topY + 50;
     
-    // PDF Header
-    doc.fontSize(16).font('Helvetica-Bold').fillColor('#000000').text('MANIFEST SUMMARY REPORT', { align: 'center' });
-    doc.fontSize(8).font('Helvetica');
-    doc.y += 15;
-    doc.text(`Generated: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`, { align: 'center' });
-    doc.text(`Warehouse: ${vendor.warehouseId}`, { align: 'center' });
+    // PDF Header - Underlined
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#000000');
+    doc.text('Manifest Summary Report', leftMargin, doc.y, { underline: true });
+    doc.y += 20;
+    
+    // Header information - Left aligned
+    doc.fontSize(9).font('Helvetica');
+    doc.text(`Generated On: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`, leftMargin, doc.y);
+    doc.y += 12;
+    doc.text(`Warehouse ID: ${vendor.warehouseId}`, leftMargin, doc.y);
+    doc.y += 12;
     if (vendorAddress) {
-      doc.text(`Address: ${vendorAddress}`, { align: 'center' });
+      doc.text(`Warehouse Address: ${vendorAddress}`, leftMargin, doc.y);
+      doc.y += 12;
     }
-    doc.text(`Vendor: ${vendor.email}`, { align: 'center' });
     doc.y += 15;
     
     // Calculate grand totals
     let grandTotal = 0;
     
+    // Helper function to calculate dynamic row height based on text
+    function calculateRowHeight(text, maxWidth, fontSize) {
+      const avgCharWidth = fontSize * 0.5; // Approximate character width
+      const charsPerLine = Math.floor(maxWidth / avgCharWidth);
+      const lines = Math.ceil(text.length / charsPerLine);
+      const lineHeight = fontSize * 1.5;
+      const minHeight = 30;
+      return Math.max(minHeight, lines * lineHeight + 10);
+    }
+    
     // Process each manifest (COD and/or Prepaid)
     for (let i = 0; i < manifestData.length; i++) {
       const { manifest_id, payment_type, summary } = manifestData[i];
       
-      // Determine payment type label
-      const paymentTypeLabel = payment_type === 'C' ? 'COD' : 'Prepaid';
+      // Determine payment type label and icon
+      const paymentTypeLabel = payment_type === 'C' ? 'COD' : 'Pre-Paid';
+      const iconLetter = payment_type === 'C' ? 'C' : 'P';
       
-      // Manifest section header (no emojis - they don't render properly in PDF)
+      // Draw C/P icon box on the left (height matches text lines)
+      const iconBoxWidth = 42;
+      const iconBoxHeight = 35; // Height to match "COD MANIFEST" + "Manifest ID:" combined
+      const iconBoxX = leftMargin;
+      const iconBoxY = doc.y;
+      
+      // Icon box background
+      doc.rect(iconBoxX, iconBoxY, iconBoxWidth, iconBoxHeight).stroke('#000000');
+      
+      // Icon letter (centered in box)
+      doc.fontSize(22).font('Helvetica-Bold').fillColor('#000000');
+      const iconText = iconLetter;
+      const iconTextWidth = doc.widthOfString(iconText);
+      const iconTextHeight = 22; // Approximate font height
+      const iconTextX = iconBoxX + (iconBoxWidth - iconTextWidth) / 2;
+      const iconTextY = iconBoxY + (iconBoxHeight - iconTextHeight) / 2 + 2;
+      doc.text(iconText, iconTextX, iconTextY);
+      
+      // Manifest section header box next to icon box
+      const manifestHeaderX = iconBoxX + iconBoxWidth;
+      const manifestHeaderWidth = 440; // Width of the text box
+      
+      // Draw border box around manifest header text
+      doc.rect(manifestHeaderX, iconBoxY, manifestHeaderWidth, iconBoxHeight).stroke('#000000');
+      
+      // Manifest section header text inside the box
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#000000');
-      doc.text(`${paymentTypeLabel.toUpperCase()} MANIFEST`, { underline: true });
+      doc.text(`${paymentTypeLabel} MANIFEST`, manifestHeaderX + 15, iconBoxY + 5);
       doc.fontSize(9).font('Helvetica');
-      doc.y += 8;
-      doc.text(`Manifest ID: ${manifest_id}`);
-      doc.y += 10;
+      doc.text(`Manifest ID: ${manifest_id}`, manifestHeaderX + 15, iconBoxY + 19);
+      
+      // Move Y position below the icon box
+      doc.y = iconBoxY + iconBoxHeight + 15;
       
       // Table header
       const tableTop = doc.y;
-      const colWidths = { carrier: 120, paymentType: 80, orders: 50, orderIds: 245 };
-      const startX = 50;
-      const totalWidth = colWidths.carrier + colWidths.paymentType + colWidths.orders + colWidths.orderIds;
+      const colWidths = { carrier: 100, paymentType: 60, orders: 40, orderIds: 180, pickupDetails: 115 };
+      const startX = leftMargin;
+      const totalWidth = colWidths.carrier + colWidths.paymentType + colWidths.orders + colWidths.orderIds + colWidths.pickupDetails;
       
-      // Draw table header
-      doc.fontSize(10).font('Helvetica-Bold');
-      doc.rect(startX, tableTop, totalWidth, 25).fill('#3B82F6');
-      doc.fillColor('white').text('Carrier', startX + 5, tableTop + 8, { width: colWidths.carrier - 10, continued: false });
-      doc.text('Payment', startX + colWidths.carrier + 5, tableTop + 8, { width: colWidths.paymentType - 10, continued: false });
-      doc.text('Count', startX + colWidths.carrier + colWidths.paymentType + 5, tableTop + 8, { width: colWidths.orders - 10, align: 'center', continued: false });
-      doc.text('Order IDs', startX + colWidths.carrier + colWidths.paymentType + colWidths.orders + 5, tableTop + 8, { width: colWidths.orderIds - 10, continued: false });
+      // Draw table header with borders
+      const headerHeight = 25;
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#000000');
       
-      // Draw table rows
-      let currentY = tableTop + 25;
+      // Draw header cells with borders
+      let headerX = startX;
+      
+      // Carrier column
+      doc.rect(headerX, tableTop, colWidths.carrier, headerHeight).stroke();
+      doc.text('Carrier', headerX + 5, tableTop + 8, { width: colWidths.carrier - 10, continued: false });
+      headerX += colWidths.carrier;
+      
+      // Payment column
+      doc.rect(headerX, tableTop, colWidths.paymentType, headerHeight).stroke();
+      doc.text('Payment', headerX + 5, tableTop + 8, { width: colWidths.paymentType - 10, continued: false });
+      headerX += colWidths.paymentType;
+      
+      // Count column
+      doc.rect(headerX, tableTop, colWidths.orders, headerHeight).stroke();
+      doc.text('Count', headerX + 5, tableTop + 8, { width: colWidths.orders - 10, continued: false });
+      headerX += colWidths.orders;
+      
+      // Order IDs column
+      doc.rect(headerX, tableTop, colWidths.orderIds, headerHeight).stroke();
+      doc.text('Order IDs', headerX + 5, tableTop + 8, { width: colWidths.orderIds - 10, continued: false });
+      headerX += colWidths.orderIds;
+      
+      // Signature column
+      doc.rect(headerX, tableTop, colWidths.pickupDetails, headerHeight).stroke();
+      doc.text('Signature', headerX + 5, tableTop + 8, { width: colWidths.pickupDetails - 10, continued: false });
+      
+      // Draw table rows with dynamic height
+      let currentY = tableTop + headerHeight;
       doc.fillColor('black').font('Helvetica');
       let manifestTotal = 0;
       
       summary.forEach((row, index) => {
-        const bgColor = index % 2 === 0 ? '#F3F4F6' : '#FFFFFF';
-        const rowHeight = 20;
-        doc.rect(startX, currentY, totalWidth, rowHeight).fill(bgColor);
-        
         const friendlyPaymentType = row.payment_type === 'C' ? 'COD' : 'Prepaid';
+        const orderIdsText = row.order_ids || '';
         
-        doc.fillColor('black').fontSize(9);
-        doc.text(row.carrier_name || 'Unknown', startX + 5, currentY + 5, { width: colWidths.carrier - 10, continued: false });
-        doc.text(friendlyPaymentType, startX + colWidths.carrier + 5, currentY + 5, { width: colWidths.paymentType - 10, continued: false });
-        doc.text(row.order_count.toString(), startX + colWidths.carrier + colWidths.paymentType + 5, currentY + 5, { width: colWidths.orders - 10, align: 'center', continued: false });
-        doc.text(row.order_ids || '', startX + colWidths.carrier + colWidths.paymentType + colWidths.orders + 5, currentY + 5, { width: colWidths.orderIds - 10, continued: false });
+        // Remove "Shipway" from carrier name
+        const carrierName = (row.carrier_name || 'Unknown').replace(/Shipway\s*/gi, '');
+        
+        // Calculate dynamic row height based on order IDs length
+        const rowHeight = calculateRowHeight(orderIdsText, colWidths.orderIds - 10, 8);
+        
+        // Draw row cells with borders
+        let cellX = startX;
+        
+        // Carrier cell
+        doc.rect(cellX, currentY, colWidths.carrier, rowHeight).stroke();
+        doc.fontSize(8).text(carrierName, cellX + 5, currentY + 8, { width: colWidths.carrier - 10, continued: false });
+        cellX += colWidths.carrier;
+        
+        // Payment cell
+        doc.rect(cellX, currentY, colWidths.paymentType, rowHeight).stroke();
+        doc.text(friendlyPaymentType, cellX + 5, currentY + 8, { width: colWidths.paymentType - 10, continued: false });
+        cellX += colWidths.paymentType;
+        
+        // Count cell
+        doc.rect(cellX, currentY, colWidths.orders, rowHeight).stroke();
+        doc.text(row.order_count.toString(), cellX + 5, currentY + 8, { width: colWidths.orders - 10, align: 'center', continued: false });
+        cellX += colWidths.orders;
+        
+        // Order IDs cell (with text wrapping)
+        doc.rect(cellX, currentY, colWidths.orderIds, rowHeight).stroke();
+        doc.text(orderIdsText, cellX + 5, currentY + 8, { width: colWidths.orderIds - 10, continued: false });
+        cellX += colWidths.orderIds;
+        
+        // Signature cell (blank for manual signature)
+        doc.rect(cellX, currentY, colWidths.pickupDetails, rowHeight).stroke();
         
         currentY += rowHeight;
         manifestTotal += parseInt(row.order_count);
       });
       
-      // Manifest total
-      doc.rect(startX, currentY, totalWidth, 22).fill('#10B981');
-      doc.fillColor('white').font('Helvetica-Bold').fontSize(9);
-      doc.text(`Total ${paymentTypeLabel} Orders: ${manifestTotal}`, startX + 10, currentY + 6, { continued: false });
+      // Manifest total row
+      const totalRowHeight = 25;
+      doc.rect(startX, currentY, totalWidth, totalRowHeight).stroke();
+      doc.fillColor('black').font('Helvetica-Bold').fontSize(9);
+      doc.text(`Total ${paymentTypeLabel} Orders`, startX + 5, currentY + 8, { continued: true });
+      doc.text(` ${manifestTotal}`, { continued: false });
       
       grandTotal += manifestTotal;
       
       // Move Y position down after the table
-      doc.y = currentY + 30;
+      doc.y = currentY + totalRowHeight + 20;
       
       // Add spacing between manifests
       if (i < manifestData.length - 1) {
-        doc.strokeColor('#E5E7EB').lineWidth(0.5).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-        doc.y += 12;
+        doc.y += 10;
       }
     }
     
-    // Grand total (if multiple manifests)
-    if (manifestData.length > 1) {
-      doc.y += 8;
-      const grandTotalY = doc.y;
-      doc.fontSize(11).font('Helvetica-Bold').fillColor('#1F2937');
-      doc.rect(50, grandTotalY, 495, 22).fill('#FEF3C7');
-      doc.fillColor('#92400E').text(`GRAND TOTAL: ${grandTotal} Orders`, 50, grandTotalY + 5, { align: 'center' });
-      doc.y = grandTotalY + 30;
-    }
-    
-    // Footer - add at bottom without absolute positioning
-    doc.y += 15;
-    doc.fontSize(7).font('Helvetica').fillColor('#6B7280');
-    doc.text(`Report generated by ${vendor.email}`, { align: 'center' });
-    doc.text(`Generated on ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`, { align: 'center' });
+    // Grand total (always show)
+    doc.y += 10;
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#000000');
+    doc.text(`Grand Total: ${grandTotal} Orders`, leftMargin, doc.y);
     
     // Finalize PDF
     doc.end();
