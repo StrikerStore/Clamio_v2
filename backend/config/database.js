@@ -113,7 +113,9 @@ class Database {
           image VARCHAR(500),
           altText TEXT,
           totalImages INTEGER DEFAULT 0,
-          sku_id VARCHAR(100)
+          sku_id VARCHAR(100),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
@@ -133,6 +135,36 @@ class Database {
           console.log('ℹ️ sku_id column already exists in products table');
         } else {
           console.error('❌ Error adding sku_id column to products table:', error.message);
+        }
+      }
+
+      // Add created_at column if it doesn't exist
+      try {
+        await this.mysqlConnection.execute(`
+          ALTER TABLE products 
+          ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        `);
+        console.log('✅ Added created_at column to products table');
+      } catch (error) {
+        if (error.code === 'ER_DUP_FIELDNAME') {
+          console.log('ℹ️ created_at column already exists in products table');
+        } else {
+          console.error('❌ Error adding created_at column to products table:', error.message);
+        }
+      }
+
+      // Add updated_at column if it doesn't exist
+      try {
+        await this.mysqlConnection.execute(`
+          ALTER TABLE products 
+          ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        `);
+        console.log('✅ Added updated_at column to products table');
+      } catch (error) {
+        if (error.code === 'ER_DUP_FIELDNAME') {
+          console.log('ℹ️ updated_at column already exists in products table');
+        } else {
+          console.error('❌ Error adding updated_at column to products table:', error.message);
         }
       }
     } catch (error) {
