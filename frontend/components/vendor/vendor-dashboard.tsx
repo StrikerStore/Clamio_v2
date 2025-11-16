@@ -180,6 +180,7 @@ export function VendorDashboard() {
   const [upiId, setUpiId] = useState("")
   const [selectedMyOrders, setSelectedMyOrders] = useState<string[]>([])
   const [selectedUnclaimedOrders, setSelectedUnclaimedOrders] = useState<string[]>([])
+  const [selectedHandoverOrders, setSelectedHandoverOrders] = useState<string[]>([])
   const [bulkMarkReadyLoading, setBulkMarkReadyLoading] = useState(false)
   const [manifestDownloadLoading, setManifestDownloadLoading] = useState<string | null>(null)
   const [vendorAddress, setVendorAddress] = useState<null | {
@@ -730,6 +731,59 @@ export function VendorDashboard() {
       });
     } finally {
       setManifestDownloadLoading(null);
+    }
+  };
+
+  const handleBulkManifestDownload = async () => {
+    if (selectedHandoverOrders.length === 0) {
+      toast({
+        title: "No Orders Selected",
+        description: "Please select at least one order to download manifests",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Get filtered orders for handover tab
+      const handoverOrders = getFilteredOrdersForTab("handover");
+      
+      // Extract unique manifest_ids from selected orders
+      const uniqueManifestIds = new Set<string>();
+      
+      selectedHandoverOrders.forEach(orderId => {
+        const order = handoverOrders.find((o: any) => o.order_id === orderId);
+        if (order && order.manifest_id) {
+          uniqueManifestIds.add(order.manifest_id);
+        }
+      });
+
+      const manifestIdsArray = Array.from(uniqueManifestIds);
+
+      if (manifestIdsArray.length === 0) {
+        toast({
+          title: "No Manifest IDs Found",
+          description: "Selected orders do not have manifest IDs",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log('📥 Bulk downloading manifests:', manifestIdsArray);
+      
+      // Download all manifests in single PDF
+      await downloadManifestSummary(manifestIdsArray);
+      
+      // Clear selection after successful download
+      setSelectedHandoverOrders([]);
+      
+    } catch (error) {
+      console.error('Bulk manifest download error:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download manifests",
+        variant: "destructive",
+      });
     }
   };
 
@@ -2288,7 +2342,7 @@ export function VendorDashboard() {
 
                 {/* Filters */}
                 <div className={`flex flex-col gap-3 mb-2 md:mb-3 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-[300px]">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                       <Input
@@ -2325,7 +2379,7 @@ export function VendorDashboard() {
                   
                   {/* Status Filter - Desktop Only for Handover Tab */}
                   {!isMobile && activeTab === "handover" && (
-                    <div className="flex-1 min-w-0">
+                    <div className="w-[180px] flex-shrink-0">
                       <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
                         if (value === 'all') {
                           setSelectedStatuses([]);
@@ -2425,6 +2479,27 @@ export function VendorDashboard() {
                       </div>
                     )}
                   </div>
+                  
+                  {/* Bulk Manifest Download Button - Desktop Only for Handover Tab */}
+                  {!isMobile && activeTab === "handover" && (
+                    <Button
+                      onClick={handleBulkManifestDownload}
+                      disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 h-10"
+                    >
+                      {manifestDownloadLoading !== null ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Downloading...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4 mr-2" />
+                          Manifest Download ({selectedHandoverOrders.length})
+                        </>
+                      )}
+                    </Button>
+                  )}
                   
                   {/* Tab-specific Actions */}
                   {activeTab === "all-orders" && !isMobile && (
@@ -3032,22 +3107,44 @@ export function VendorDashboard() {
                 <TabsContent value="handover" className="mt-0">
                   {/* Mobile Card Layout */}
                   {isMobile ? (
-                    <div className="space-y-2.5 sm:space-y-3">
+                    <div className="space-y-2.5 sm:space-y-3 pb-32">
                       {getFilteredOrdersForTab("handover").map((order, index) => (
-                        <Card key={`${order.order_id}-${index}`} className="p-2.5 sm:p-3">
+                        <Card 
+                          key={`${order.order_id}-${index}`} 
+                          className="p-2.5 sm:p-3 cursor-pointer transition-colors hover:bg-gray-50"
+                          onClick={() => {
+                            if (selectedHandoverOrders.includes(order.order_id)) {
+                              setSelectedHandoverOrders(selectedHandoverOrders.filter((id) => id !== order.order_id))
+                            } else {
+                              setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id])
+                            }
+                          }}
+                        >
                           <div className="space-y-1.5 sm:space-y-2">
-                            {/* Top Row: Order Info | Total */}
+                            {/* Top Row: Checkbox | Order Info | Total */}
                             <div className="flex items-center justify-between gap-1.5 sm:gap-2">
                               <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
+                                {/* Checkbox */}
+                                <input
+                                  type="checkbox"
+                                  checked={selectedHandoverOrders.includes(order.order_id)}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    if (e.target.checked) {
+                                      setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id]);
+                                    } else {
+                                      setSelectedHandoverOrders(selectedHandoverOrders.filter(id => id !== order.order_id));
+                                    }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0"
+                                />
                                 {/* Order Info (with inline status badge) */}
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
                                     {(order.current_shipment_status || order.status) && (
-                                      <div className={`text-xs font-medium py-0.5 rounded-full text-center ${getShipmentBadgeClasses(order.current_shipment_status || order.status)} ${
-                                        (order.current_shipment_status || order.status).length <= 10 ? 'px-1.5' : 
-                                        (order.current_shipment_status || order.status).length <= 20 ? 'px-2' : 'px-2.5'
-                                      }`}>
+                                      <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
                                         {order.current_shipment_status || order.status}
                                       </div>
                                     )}
@@ -3072,16 +3169,19 @@ export function VendorDashboard() {
                                     src={product.image || product.product_image || "/placeholder.svg"}
                                     alt={product.product_name}
                                     className="w-10 h-10 rounded-md object-cover cursor-pointer"
-                                    onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})
+                                    }}
                                     onError={(e) => {
                                       e.currentTarget.src = "/placeholder.svg";
                                     }}
                                   />
                                   <div className="flex-1 min-w-0">
-                                    <h5 className="font-medium text-sm break-words leading-relaxed">{product.product_name}</h5>
-                                    <p className="text-xs text-gray-500 break-words">Code: {product.product_code}</p>
+                                    <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
+                                    <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code}</p>
                                   </div>
-                                  <div className="text-sm font-medium text-gray-700">
+                                  <div className="text-xs font-medium">
                                     {product.quantity || 0}
                                   </div>
                                 </div>
@@ -3151,6 +3251,20 @@ export function VendorDashboard() {
                     <Table>
                       <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
+                          <TableHead className="w-12">
+                            <input
+                              type="checkbox"
+                              checked={selectedHandoverOrders.length === getFilteredOrdersForTab("handover").length && getFilteredOrdersForTab("handover").length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedHandoverOrders(getFilteredOrdersForTab("handover").map((o: any) => o.order_id));
+                                } else {
+                                  setSelectedHandoverOrders([]);
+                                }
+                              }}
+                              className="w-4 h-4 cursor-pointer"
+                            />
+                          </TableHead>
                           <TableHead>Order ID</TableHead>
                           <TableHead>Order Date</TableHead>
                           <TableHead>Products</TableHead>
@@ -3162,6 +3276,21 @@ export function VendorDashboard() {
                       <TableBody>
                         {getFilteredOrdersForTab("handover").map((order, index) => (
                           <TableRow key={`${order.order_id}-${index}`}>
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                checked={selectedHandoverOrders.includes(order.order_id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id]);
+                                  } else {
+                                    setSelectedHandoverOrders(selectedHandoverOrders.filter(id => id !== order.order_id));
+                                  }
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-4 h-4 cursor-pointer"
+                              />
+                            </TableCell>
                             <TableCell className="font-medium">{order.order_id}</TableCell>
                             <TableCell>
                               {order.order_date ? (
@@ -3404,6 +3533,67 @@ export function VendorDashboard() {
                           <>
                             <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
                             <span className="truncate">Ready ({getReadyOrdersQuantitySum()})</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Bottom Buttons for Mobile Handover */}
+              {isMobile && activeTab === "handover" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex flex-col gap-2 sm:gap-3">
+                    {/* Select All Checkbox */}
+                    <div className="flex items-center gap-2 sm:gap-3 justify-end">
+                      <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0">
+                        <input
+                          type="checkbox"
+                          onChange={(e) => {
+                            const handoverOrders = getFilteredOrdersForTab("handover")
+                            if (e.target.checked) {
+                              setSelectedHandoverOrders(handoverOrders.map((o) => o.order_id))
+                            } else {
+                              setSelectedHandoverOrders([])
+                            }
+                          }}
+                          checked={
+                            selectedHandoverOrders.length > 0 &&
+                            selectedHandoverOrders.length === getFilteredOrdersForTab("handover").length
+                          }
+                          className="w-3.5 h-3.5 sm:w-4 sm:h-4"
+                        />
+                        <span className="text-sm sm:text-base font-medium">Select All</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 sm:gap-3">
+                      {/* Move to Top Button */}
+                      <Button
+                        onClick={scrollToTop}
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      </Button>
+                      
+                      {/* Bulk Manifest Download Button */}
+                      <Button 
+                        onClick={handleBulkManifestDownload}
+                        disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
+                      >
+                        {manifestDownloadLoading !== null ? (
+                          <>
+                            <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
+                            <span className="truncate">{isMobile ? 'Loading' : 'Downloading...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                            <span className="truncate">Manifest Download ({selectedHandoverOrders.length})</span>
                           </>
                         )}
                       </Button>
