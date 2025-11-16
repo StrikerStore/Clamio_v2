@@ -2896,9 +2896,9 @@ class Database {
   }
 
   /**
-   * Get Handover Orders (orders that have been manifested)
+   * Get Handover Orders (orders that have been manifested within last 24 hours)
    * @param {string} warehouseId - Vendor warehouse ID
-   * @returns {Array} Array of individual orders for Handover section
+   * @returns {Array} Array of individual orders for Handover section (< 24 hrs from handover_at)
    */
   async getHandoverOrders(warehouseId) {
     if (!this.mysqlConnection) {
@@ -2946,6 +2946,7 @@ class Database {
         AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
         AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
         AND l.is_manifest = 1
+        AND (l.handover_at IS NULL OR TIMESTAMPDIFF(HOUR, l.handover_at, NOW()) < 24)
         ORDER BY o.order_date DESC, o.order_id
       `, [warehouseId]);
       
@@ -2953,6 +2954,69 @@ class Database {
     } catch (error) {
       console.error('Error getting Handover Orders:', error);
       throw new Error('Failed to get Handover Orders from database');
+    }
+  }
+
+  /**
+   * Get Order Tracking Orders (orders that have been in handover for 24+ hours)
+   * @param {string} warehouseId - Vendor warehouse ID
+   * @returns {Array} Array of individual orders for Order Tracking section (>= 24 hrs from handover_at)
+   */
+  async getOrderTrackingOrders(warehouseId) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(`
+        SELECT 
+          o.*,
+          p.image as product_image,
+          c.status as claims_status,
+          c.claimed_by,
+          c.claimed_at,
+          c.last_claimed_by,
+          c.last_claimed_at,
+          c.clone_status,
+          c.cloned_order_id,
+          c.is_cloned_row,
+          c.label_downloaded,
+          l.label_url,
+          l.awb,
+          l.carrier_id,
+          l.carrier_name,
+          l.handover_at,
+          c.priority_carrier,
+          l.is_manifest,
+          l.manifest_id,
+          l.current_shipment_status,
+          l.is_handover,
+          CASE 
+            WHEN l.current_shipment_status IS NOT NULL AND l.current_shipment_status != '' 
+            THEN l.current_shipment_status 
+            ELSE c.status 
+          END as status
+        FROM orders o
+        LEFT JOIN products p ON (
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+        )
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+        LEFT JOIN labels l ON o.order_id = l.order_id
+        WHERE c.claimed_by = ? 
+        AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
+        AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
+        AND l.is_manifest = 1
+        AND l.handover_at IS NOT NULL
+        AND TIMESTAMPDIFF(HOUR, l.handover_at, NOW()) >= 24
+        ORDER BY o.order_date DESC, o.order_id
+      `, [warehouseId]);
+      
+      return rows;
+    } catch (error) {
+      console.error('Error getting Order Tracking Orders:', error);
+      throw new Error('Failed to get Order Tracking Orders from database');
     }
   }
 

@@ -946,6 +946,211 @@ router.get('/handover', async (req, res) => {
 });
 
 /**
+ * @route   GET /api/orders/order-tracking
+ * @desc    Get vendor's Order Tracking Orders (orders in handover for 24+ hours)
+ * @access  Vendor (token required)
+ */
+router.get('/order-tracking', async (req, res) => {
+  console.log('\n🔵 ORDER TRACKING ORDERS REQUEST START');
+  console.log('================================');
+  console.log('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('📥 Request Method:', req.method);
+  console.log('📥 Request URL:', req.url);
+  console.log('📥 Request IP:', req.ip);
+  
+  // Extract pagination parameters
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 50;
+  console.log('📄 Pagination params:', { page, limit });
+  
+  let token = req.headers['authorization'];
+  console.log('\n🔑 TOKEN ANALYSIS:');
+  console.log('  - Raw token:', token);
+  console.log('  - Token type:', typeof token);
+  console.log('  - Token length:', token ? token.length : 0);
+  console.log('  - Token JSON:', JSON.stringify(token));
+  
+  // Handle case where token might be an object
+  if (typeof token === 'object' && token !== null) {
+    console.log('\n⚠️  TOKEN RECEIVED AS OBJECT:');
+    console.log('  - Object keys:', Object.keys(token));
+    console.log('  - Object values:', Object.values(token));
+    console.log('  - Object stringify:', JSON.stringify(token));
+    
+    // Try to extract the actual token string
+    if (token.token) {
+      token = token.token;
+      console.log('  - Extracted from token.token:', token);
+    } else if (token.authorization) {
+      token = token.authorization;
+      console.log('  - Extracted from token.authorization:', token);
+    } else if (Object.values(token).length === 1) {
+      token = Object.values(token)[0];
+      console.log('  - Extracted from single value:', token);
+    } else {
+      console.log('❌ Cannot extract token from object');
+      token = null;
+    }
+  }
+  
+  console.log('🔵 ORDER TRACKING ORDERS REQUEST START');
+  console.log('  - token received:', token ? 'YES' : 'NO');
+  console.log('  - Full token:', token ? `"${token}"` : 'null');
+  console.log('  - Token length:', token ? token.length : 0);
+
+  if (!token) {
+    console.log('❌ ORDER TRACKING ORDERS FAILED: Missing token');
+    return res.status(400).json({ success: false, message: 'Authorization token required' });
+  }
+
+  // Load users from MySQL
+  const database = require('../config/database');
+  console.log('📂 Loading users from MySQL...');
+  
+  try {
+    // Wait for MySQL initialization
+    await database.waitForMySQLInitialization();
+    
+    if (!database.isMySQLAvailable()) {
+      console.log('❌ MySQL connection not available');
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+    
+    const vendor = await database.getUserByToken(token);
+    
+    if (!vendor || vendor.active_session !== 'TRUE') {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+    
+    console.log('✅ VENDOR FOUND');
+    console.log('  - warehouseId:', vendor.warehouseId);
+    
+    const warehouseId = vendor.warehouseId;
+
+    // Get Order Tracking Orders from MySQL
+    console.log('📂 Loading Order Tracking Orders from MySQL...');
+    
+    const trackingOrders = await database.getOrderTrackingOrders(warehouseId);
+    
+    console.log('📦 Order Tracking Orders loaded:', trackingOrders.length);
+    
+    // Group orders by order_id (exact same logic as original Excel flow)
+    const groupedOrders = {};
+    
+    trackingOrders.forEach(order => {
+      const orderId = order.order_id;
+      
+      if (!groupedOrders[orderId]) {
+        groupedOrders[orderId] = {
+          order_id: orderId,
+          customer_name: order.customer_name,
+          customer_phone: order.customer_phone,
+          customer_address: order.customer_address,
+          order_date: order.order_date,
+          total_value: 0,
+          total_products: 0,
+          total_quantity: 0,
+          status: order.status,
+          is_handover: order.is_handover,
+          manifest_id: order.manifest_id,
+          current_shipment_status: order.current_shipment_status,
+          handover_at: order.handover_at,
+          products: []
+        };
+      }
+      
+      const productValue = parseFloat(order.product_price) || 0;
+      const productQuantity = parseInt(order.quantity) || 1;
+      
+      groupedOrders[orderId].products.push({
+        unique_id: order.unique_id,
+        product_name: order.product_name,
+        product_code: order.product_code,
+        product_price: order.product_price,
+        quantity: order.quantity,
+        product_image: order.product_image,
+        status: order.status,
+        claimed_at: order.claimed_at,
+        label_downloaded: order.label_downloaded,
+        awb: order.awb,
+        carrier_name: order.carrier_name,
+        is_manifest: order.is_manifest,
+        current_shipment_status: order.current_shipment_status,
+        is_handover: order.is_handover,
+        handover_at: order.handover_at
+      });
+      
+      groupedOrders[orderId].total_value += productValue;
+      groupedOrders[orderId].total_products += 1;
+      groupedOrders[orderId].total_quantity += productQuantity;
+    });
+    
+    const groupedOrdersArray = Object.values(groupedOrders).sort((a, b) => {
+      return new Date(b.order_date) - new Date(a.order_date);
+    });
+    
+    console.log('📊 Grouped Order Tracking Orders processed:', groupedOrdersArray.length);
+    
+    const totalQuantityAcrossAllOrders = groupedOrdersArray.reduce((sum, order) => {
+      return sum + order.total_quantity;
+    }, 0);
+    
+    console.log('📊 Total quantity across all Order Tracking Orders:', totalQuantityAcrossAllOrders);
+    
+    if (groupedOrdersArray.length > 0) {
+      console.log('  - First order:', JSON.stringify(groupedOrdersArray[0], null, 2));
+    }
+    
+    const totalCount = groupedOrdersArray.length;
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedOrders = groupedOrdersArray.slice(startIndex, endIndex);
+    
+    const responseData = {
+      success: true,
+      message: 'Order Tracking Orders retrieved successfully',
+      data: {
+        trackingOrders: paginatedOrders,
+        pagination: {
+          current_page: page,
+          total_pages: Math.ceil(totalCount / limit),
+          total_count: totalCount,
+          limit: limit,
+          has_next: endIndex < totalCount,
+          has_prev: page > 1
+        },
+        summary: {
+          total_orders: totalCount,
+          total_products: groupedOrdersArray.reduce((sum, order) => sum + order.total_products, 0),
+          total_quantity: totalQuantityAcrossAllOrders,
+          total_value: groupedOrdersArray.reduce((sum, order) => sum + order.total_value, 0)
+        }
+      }
+    };
+    
+    console.log('✅ ORDER TRACKING ORDERS SUCCESS');
+    console.log('  - Order Tracking Orders Count:', responseData.data.trackingOrders.length);
+    
+    // Debug: Log each grouped order's total_quantity
+    if (responseData.data.trackingOrders.length > 0) {
+      responseData.data.trackingOrders.forEach((order, index) => {
+        console.log(`  - Order ${index + 1}: ${order.order_id} - ${order.total_quantity} items`);
+      });
+    }
+    
+    return res.json(responseData);
+    
+  } catch (error) {
+    console.error('❌ ORDER TRACKING ORDERS ERROR:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error: ' + error.message 
+    });
+  }
+});
+
+/**
  * @route   GET /api/orders/grouped
  * @desc    Get vendor's claimed orders grouped by order_id
  * @access  Vendor (token required)

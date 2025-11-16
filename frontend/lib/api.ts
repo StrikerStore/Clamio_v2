@@ -467,6 +467,62 @@ class ApiClient {
     })
   }
 
+  async getHandoverOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: getHandoverOrders called');
+    console.log('  - page:', page);
+    console.log('  - limit:', limit);
+    
+    // Use vendor token for handover orders endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/handover');
+    console.log('  - Method: GET');
+    console.log('  - Headers: Authorization');
+    console.log('  - Query params: page=' + page + ', limit=' + limit);
+
+    return this.makeRequest(`/orders/handover?page=${page}&limit=${limit}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': vendorToken
+      },
+    })
+  }
+
+  async getOrderTrackingOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: getOrderTrackingOrders called');
+    console.log('  - page:', page);
+    console.log('  - limit:', limit);
+    
+    // Use vendor token for order tracking endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/order-tracking');
+    console.log('  - Method: GET');
+    console.log('  - Headers: Authorization');
+    console.log('  - Query params: page=' + page + ', limit=' + limit);
+
+    return this.makeRequest(`/orders/order-tracking?page=${page}&limit=${limit}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': vendorToken
+      },
+    })
+  }
+
   async reverseOrder(unique_id: string): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: reverseOrder called');
     console.log('  - unique_id:', unique_id);
