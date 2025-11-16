@@ -3455,13 +3455,16 @@ router.post('/bulk-download-labels', async (req, res) => {
   const { order_ids, format = 'thermal' } = req.body;
   const token = req.headers['authorization'];
   
-  console.log('🔵 BULK DOWNLOAD LABELS REQUEST START');
-  console.log('  - order_ids:', order_ids);
-  console.log('  - format:', format);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  // Generate unique batch ID for this parallel processing operation
+  const batchId = `BATCH_${Date.now()}_${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+  
+  console.log(`🔵 [${batchId}] BULK DOWNLOAD LABELS REQUEST START`);
+  console.log(`  - [${batchId}] order_ids:`, order_ids);
+  console.log(`  - [${batchId}] format:`, format);
+  console.log(`  - [${batchId}] token received:`, token ? 'YES' : 'NO');
   
   if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
-    console.log('❌ BULK DOWNLOAD LABELS FAILED: Missing required fields');
+    console.log(`❌ [${batchId}] BULK DOWNLOAD LABELS FAILED: Missing required fields`);
     return res.status(400).json({ 
       success: false, 
       message: 'order_ids array and Authorization token required' 
@@ -3476,20 +3479,20 @@ router.post('/bulk-download-labels', async (req, res) => {
     await database.waitForMySQLInitialization();
     
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      console.log(`❌ [${batchId}] MySQL connection not available`);
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
     
     const vendor = await database.getUserByToken(token);
     
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      console.log(`❌ [${batchId}] VENDOR NOT FOUND OR INACTIVE`, vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    console.log(`✅ [${batchId}] VENDOR FOUND:`);
+    console.log(`  - [${batchId}] Email:`, vendor.email);
+    console.log(`  - [${batchId}] Warehouse ID:`, vendor.warehouseId);
 
     // Get orders from MySQL
     const orders = await database.getAllOrders();
@@ -3501,12 +3504,12 @@ router.post('/bulk-download-labels', async (req, res) => {
     // Process orders in parallel with controlled concurrency (6 at a time)
     const CONCURRENCY_LIMIT = 6;
     
-    console.log(`⚡ Processing ${order_ids.length} orders with concurrency limit of ${CONCURRENCY_LIMIT}`);
+    console.log(`⚡ [${batchId}] Processing ${order_ids.length} orders with concurrency limit of ${CONCURRENCY_LIMIT}`);
     
     // Helper function to process a single order (same logic as before)
     const processSingleOrder = async (orderId) => {
       try {
-        console.log(`🔄 Processing order: ${orderId}`);
+        console.log(`🔄 [${batchId}] Processing order: ${orderId}`);
         
         // Get all products for this order_id
         const orderProducts = orders.filter(order => order.order_id === orderId);
