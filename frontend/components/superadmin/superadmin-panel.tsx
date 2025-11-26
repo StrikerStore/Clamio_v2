@@ -292,12 +292,12 @@ export function SuperAdminPanel() {
         <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
           <div className="flex justify-between items-center py-3 sm:py-4">
             <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
-              <div className="w-7 h-7 sm:w-8 sm:h-8 bg-red-600 rounded-full flex items-center justify-center flex-shrink-0">
-                <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center flex-shrink-0">
+                <img src="/logo.png" alt="CLAIMIO Logo" className="w-full h-full object-contain" />
               </div>
               <div className="min-w-0">
                 <h1 className={`font-semibold text-gray-900 truncate ${isMobile ? 'text-sm' : 'text-lg sm:text-xl'}`}>
-                  {isMobile ? 'Admin' : 'Super Admin Panel'}
+                  {isMobile ? 'CLAIMIO Admin' : 'CLAIMIO Super Admin Panel'}
                 </h1>
                 {!isMobile && (
                   <p className="text-xs sm:text-sm text-gray-500 truncate">Welcome back, {user?.name}</p>

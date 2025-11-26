@@ -228,13 +228,12 @@ export function VendorDashboard() {
   const [handoverOrdersHasMore, setHandoverOrdersHasMore] = useState(true);
   const [handoverOrdersTotalCount, setHandoverOrdersTotalCount] = useState(0);
   const [handoverOrdersTotalQuantity, setHandoverOrdersTotalQuantity] = useState(0);
+  const [isLoadingMoreHandover, setIsLoadingMoreHandover] = useState(false);
 
-  // Order Tracking orders state
+  // Order Tracking orders state (no pagination - loads all orders at once)
   const [trackingOrders, setTrackingOrders] = useState<any[]>([]);
   const [trackingOrdersLoading, setTrackingOrdersLoading] = useState(true);
   const [trackingOrdersError, setTrackingOrdersError] = useState("");
-  const [trackingOrdersPage, setTrackingOrdersPage] = useState(1);
-  const [trackingOrdersHasMore, setTrackingOrdersHasMore] = useState(true);
   const [trackingOrdersTotalCount, setTrackingOrdersTotalCount] = useState(0);
   const [trackingOrdersTotalQuantity, setTrackingOrdersTotalQuantity] = useState(0);
 
@@ -516,7 +515,10 @@ export function VendorDashboard() {
         if (response.data.pagination) {
           setGroupedOrdersHasMore(response.data.pagination.hasMore);
           setGroupedOrdersTotalCount(response.data.pagination.total);
-          if (!resetPagination) {
+          // Increment page number for next load
+          if (resetPagination) {
+            setGroupedOrdersPage(2); // Set to 2 after initial load
+          } else {
             setGroupedOrdersPage(prev => prev + 1);
           }
         }
@@ -549,6 +551,8 @@ export function VendorDashboard() {
     if (resetPagination) {
       setHandoverOrdersLoading(true);
       setHandoverOrdersPage(1);
+    } else {
+      setIsLoadingMoreHandover(true);
     }
     
     setHandoverOrdersError("");
@@ -566,9 +570,23 @@ export function VendorDashboard() {
           setHandoverOrders(prev => [...prev, ...newOrders]);
         }
         
+        // Update pagination metadata
         setHandoverOrdersHasMore(response.data.pagination?.has_next || false);
-        setHandoverOrdersTotalCount(response.data.summary?.total_orders || 0);
-        setHandoverOrdersTotalQuantity(response.data.summary?.total_quantity || 0);
+        
+        // Always update total count from API (even if page is not fully loaded)
+        if (response.data.summary?.total_orders !== undefined) {
+          setHandoverOrdersTotalCount(response.data.summary.total_orders);
+        }
+        if (response.data.summary?.total_quantity !== undefined) {
+          setHandoverOrdersTotalQuantity(response.data.summary.total_quantity);
+        }
+        
+        // Increment page number for next load
+        if (resetPagination) {
+          setHandoverOrdersPage(2); // Set to 2 after initial load
+        } else {
+          setHandoverOrdersPage(prev => prev + 1);
+        }
       }
     } catch (err: any) {
       setHandoverOrdersError(err.message || "Failed to fetch handover orders");
@@ -577,39 +595,32 @@ export function VendorDashboard() {
       }
     } finally {
       setHandoverOrdersLoading(false);
+      setIsLoadingMoreHandover(false);
     }
   };
 
-  const fetchOrderTrackingOrders = async (resetPagination: boolean = true) => {
-    if (resetPagination) {
-      setTrackingOrdersLoading(true);
-      setTrackingOrdersPage(1);
-    }
-    
+  const fetchOrderTrackingOrders = async () => {
+    setTrackingOrdersLoading(true);
     setTrackingOrdersError("");
     
     try {
-      const page = resetPagination ? 1 : trackingOrdersPage;
-      const response = await apiClient.getOrderTrackingOrders(page, 50);
+      const response = await apiClient.getOrderTrackingOrders();
       
       if (response.success && response.data) {
-        const newOrders = response.data.trackingOrders || [];
+        const allOrders = response.data.trackingOrders || [];
+        setTrackingOrders(allOrders);
         
-        if (resetPagination) {
-          setTrackingOrders(newOrders);
-        } else {
-          setTrackingOrders(prev => [...prev, ...newOrders]);
+        // Update summary data
+        if (response.data.summary?.total_orders !== undefined) {
+          setTrackingOrdersTotalCount(response.data.summary.total_orders);
         }
-        
-        setTrackingOrdersHasMore(response.data.pagination?.has_next || false);
-        setTrackingOrdersTotalCount(response.data.summary?.total_orders || 0);
-        setTrackingOrdersTotalQuantity(response.data.summary?.total_quantity || 0);
+        if (response.data.summary?.total_quantity !== undefined) {
+          setTrackingOrdersTotalQuantity(response.data.summary.total_quantity);
+        }
       }
     } catch (err: any) {
       setTrackingOrdersError(err.message || "Failed to fetch order tracking orders");
-      if (resetPagination) {
-        setTrackingOrders([]);
-      }
+      setTrackingOrders([]);
     } finally {
       setTrackingOrdersLoading(false);
     }
@@ -854,7 +865,7 @@ export function VendorDashboard() {
 
     try {
       // Get filtered orders for handover tab
-      const handoverOrders = getFilteredOrdersForTab("handover");
+      const handoverOrders = getFilteredHandoverOrders();
       
       // Extract unique manifest_ids from selected orders
       const uniqueManifestIds = new Set<string>();
@@ -1340,7 +1351,7 @@ export function VendorDashboard() {
     // Apply status filter if any statuses are selected
     if (selectedStatuses.length > 0) {
       filtered = filtered.filter(order => 
-        selectedStatuses.includes(order.status)
+        selectedStatuses.includes(order.current_shipment_status || order.status)
       );
     }
     
@@ -1350,6 +1361,8 @@ export function VendorDashboard() {
       filtered = filtered.filter(order => {
         const orderId = String(order.order_id || '').toLowerCase();
         const customer = String(order.customer_name || '').toLowerCase();
+        const manifestId = String(order.manifest_id || '').toLowerCase();
+        const awb = String(order.products?.[0]?.awb || '').toLowerCase();
         
         // Search through products array
         if (Array.isArray(order.products) && order.products.length > 0) {
@@ -1358,9 +1371,9 @@ export function VendorDashboard() {
             const sku = String(product.product_code || '').toLowerCase();
             return name.includes(term) || sku.includes(term);
           });
-          return orderId.includes(term) || customer.includes(term) || productMatch;
+          return orderId.includes(term) || customer.includes(term) || manifestId.includes(term) || awb.includes(term) || productMatch;
         }
-        return orderId.includes(term) || customer.includes(term);
+        return orderId.includes(term) || customer.includes(term) || manifestId.includes(term) || awb.includes(term);
       });
     }
     
@@ -2138,20 +2151,25 @@ export function VendorDashboard() {
     }
   };
 
-  // Infinite scroll handler for My Orders
+  // Infinite scroll handler for all tabs
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    // Only apply infinite scroll for My Orders tab
-    if (activeTab !== 'my-orders') return;
-    
     const element = e.currentTarget;
     const scrolledToBottom = 
       element.scrollHeight - element.scrollTop <= element.clientHeight + 200;
     
-    // Load more when scrolled near bottom and there's more data
-    if (scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
-      console.log('📜 Infinite scroll triggered - loading more orders...');
+    // Handle My Orders tab
+    if (activeTab === 'my-orders' && scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
+      console.log('📜 Infinite scroll triggered - loading more My Orders...');
       fetchGroupedOrders(false); // false = don't reset pagination
     }
+    
+    // Handle Handover tab
+    if (activeTab === 'handover' && scrolledToBottom && handoverOrdersHasMore && !handoverOrdersLoading && !isLoadingMoreHandover) {
+      console.log('📜 Infinite scroll triggered - loading more Handover orders...');
+      fetchHandoverOrders(false); // false = don't reset pagination
+    }
+    
+    // Order Tracking tab loads all orders at once, no infinite scroll needed
   };
 
   // Helper function to trigger tab highlight animation
@@ -2164,6 +2182,10 @@ export function VendorDashboard() {
   };
 
   // Helper functions to calculate quantity sums for each tab (WITHOUT filters - for cards)
+  // IMPORTANT: 
+  // - All counts show PRODUCT totals (sum of quantities), not order counts
+  // - Cards ALWAYS show TOTAL (unfiltered) counts, regardless of any active filters
+  // - Example: 3 orders with one order having 3 products = 5 total products displayed
   const getTotalQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       // For My Orders card, use the absolute total (no filtering applied)
@@ -2205,7 +2227,11 @@ export function VendorDashboard() {
     }
   };
 
-  // Helper functions to calculate quantity sums for each tab (WITH filters - for tab content)
+  // Helper functions to calculate quantity sums for each tab (WITH filters - for tab headers)
+  // IMPORTANT:
+  // - All counts show PRODUCT totals (sum of quantities), not order counts
+  // - When NO filters: Shows same total as card (synchronized)
+  // - When filters ARE applied: Shows FILTERED product count (different from card)
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
@@ -2217,7 +2243,7 @@ export function VendorDashboard() {
       const hasFilters = hasSearchFilter || hasDateFilter || hasLabelFilter;
       
       if (!hasFilters) {
-        // No filters applied - use absolute total from API (all pages)
+        // No filters applied - use absolute total from API (all pages) - this matches the card
         console.log('🔢 TAB COUNT: No filters - using absolute total from API');
         return groupedOrdersTotalQuantity;
       } else {
@@ -2230,7 +2256,7 @@ export function VendorDashboard() {
         console.log('🔢 TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
         console.log('🔢 TAB COUNT: groupedOrders.length:', groupedOrders.length);
         
-        // Calculate total quantity from filtered orders
+        // Calculate total quantity (product count) from filtered orders
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
@@ -2239,50 +2265,75 @@ export function VendorDashboard() {
         return filteredTotal;
       }
     } else if (tabName === "handover") {
-      // For Handover tab, use filtered handover orders
-      const filteredOrders = getFilteredHandoverOrders();
+      const tabFilter = tabFilters["handover"];
       
-      // Calculate total quantity from filtered orders
-      const filteredTotal = filteredOrders.reduce((sum, order) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasStatusFilter = selectedStatuses.length > 0;
+      const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
       
-      return filteredTotal;
+      if (!hasFilters) {
+        // No filters applied - use absolute total from API (matches the card)
+        return handoverOrdersTotalQuantity;
+      } else {
+        // Filters applied - calculate from filtered orders
+        const filteredOrders = getFilteredHandoverOrders();
+        
+        // Calculate total quantity (product count) from filtered orders
+        const filteredTotal = filteredOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        
+        return filteredTotal;
+      }
     } else if (tabName === "order-tracking") {
-      // For Order Tracking tab, use filtered tracking orders
-      const filteredOrders = getFilteredTrackingOrders();
+      const tabFilter = tabFilters["order-tracking"];
       
-      // Calculate total quantity from filtered orders
-      const filteredTotal = filteredOrders.reduce((sum, order) => {
-        return sum + (order.total_quantity || 0);
-      }, 0);
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasStatusFilter = selectedTrackingStatuses.length > 0;
+      const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
       
-      return filteredTotal;
+      if (!hasFilters) {
+        // No filters applied - use absolute total from API (matches the card)
+        return trackingOrdersTotalQuantity;
+      } else {
+        // Filters applied - calculate from filtered orders
+        const filteredOrders = getFilteredTrackingOrders();
+        
+        // Calculate total quantity (product count) from filtered orders
+        const filteredTotal = filteredOrders.reduce((sum, order) => {
+          return sum + (order.total_quantity || 0);
+        }, 0);
+        
+        return filteredTotal;
+      }
     } else {
       // For All Orders tab, show filtered results (applies search, date filters)
       const filteredOrders = getFilteredOrdersForTab(tabName);
-      console.log('🔍 ALL ORDERS TAB DEBUG:');
-      console.log('  - Tab name:', tabName);
-      console.log('  - Filtered orders count:', filteredOrders.length);
-      console.log('  - Tab total quantity:', filteredOrders.reduce((sum, order) => {
-        return sum + (order.quantity || 0);
-      }, 0));
-      
-      // Debug: Check if there are any active filters
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
-      console.log('  - Active filters:');
-      console.log('    - Search term:', tabFilter.searchTerm);
-      console.log('    - Date from:', tabFilter.dateFrom);
-      console.log('    - Date to:', tabFilter.dateTo);
       
-      // Debug: Compare with unfiltered count
-      const unfilteredUnclaimed = orders.filter(order => order.status === 'unclaimed');
-      console.log('  - Unfiltered unclaimed orders:', unfilteredUnclaimed.length);
-      console.log('  - Difference:', unfilteredUnclaimed.length - filteredOrders.length);
+      // Check if any filters are applied
+      const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+      const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+      const hasFilters = hasSearchFilter || hasDateFilter;
       
-      return filteredOrders.reduce((sum, order) => {
-        return sum + (order.quantity || 0);
-      }, 0);
+      if (!hasFilters) {
+        // No filters applied - use the same calculation as the card
+        const unclaimedOrders = orders.filter(order => order.status === 'unclaimed');
+        const uniqueUnclaimedOrders = ensureUniqueOrders(unclaimedOrders, 'unique_id');
+        return uniqueUnclaimedOrders.reduce((sum, order) => {
+          return sum + (order.quantity || 0);
+        }, 0);
+      } else {
+        // Filters applied - calculate from filtered orders
+        // Calculate total quantity (product count) from filtered orders
+        return filteredOrders.reduce((sum, order) => {
+          return sum + (order.quantity || 0);
+        }, 0);
+      }
     }
   };
 
@@ -2379,12 +2430,12 @@ export function VendorDashboard() {
           <div className="flex items-center justify-between py-3 sm:py-4 gap-2 sm:gap-4">
             {/* Dashboard Name and Welcome */}
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg flex items-center justify-center flex-shrink-0">
+                <img src="/logo.png" alt="CLAIMIO Logo" className="w-full h-full object-contain" />
               </div>
               <div className="min-w-0">
                 <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                  {isMobile ? 'Clamio - Vendor' : 'Clamio - Vendor'}
+                  {isMobile ? 'CLAIMIO - Vendor' : 'CLAIMIO - Vendor'}
                 </h1>
                 {!isMobile && (
                 <p className="text-sm sm:text-base text-gray-600 truncate">
@@ -2968,7 +3019,7 @@ export function VendorDashboard() {
               <div 
                 ref={scrollableContentRef}
                 onScroll={handleScroll}
-                className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
+                className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : activeTab === 'order-tracking' ? 'pb-1' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
               >
                 <TabsContent value="all-orders" className="mt-0">
                   {/* Mobile Card Layout */}
@@ -3473,7 +3524,7 @@ export function VendorDashboard() {
                   {/* Mobile Card Layout */}
                   {isMobile ? (
                     <div className="space-y-2.5 sm:space-y-3 pb-32">
-                      {getFilteredOrdersForTab("handover").map((order, index) => (
+                      {getFilteredHandoverOrders().map((order, index) => (
                         <Card 
                           key={`${order.order_id}-${index}`} 
                           className="p-2.5 sm:p-3 cursor-pointer transition-colors hover:bg-gray-50"
@@ -3609,6 +3660,23 @@ export function VendorDashboard() {
                           </div>
                         </Card>
                       ))}
+                      
+                      {/* Loading More Indicator for Mobile Handover */}
+                      {isLoadingMoreHandover && (
+                        <div className="flex items-center justify-center p-4">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600 mx-auto mb-2"></div>
+                            <p className="text-xs text-gray-500">Loading more orders...</p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* End of List Indicator for Mobile Handover */}
+                      {!handoverOrdersHasMore && handoverOrders.length > 0 && (
+                        <div className="flex items-center justify-center p-4">
+                          <p className="text-xs text-gray-400">All orders loaded ({handoverOrdersTotalCount} total)</p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
@@ -3619,10 +3687,10 @@ export function VendorDashboard() {
                           <TableHead className="w-12">
                             <input
                               type="checkbox"
-                              checked={selectedHandoverOrders.length === getFilteredOrdersForTab("handover").length && getFilteredOrdersForTab("handover").length > 0}
+                              checked={selectedHandoverOrders.length === getFilteredHandoverOrders().length && getFilteredHandoverOrders().length > 0}
                               onChange={(e) => {
                                 if (e.target.checked) {
-                                  setSelectedHandoverOrders(getFilteredOrdersForTab("handover").map((o: any) => o.order_id));
+                                  setSelectedHandoverOrders(getFilteredHandoverOrders().map((o: any) => o.order_id));
                                 } else {
                                   setSelectedHandoverOrders([]);
                                 }
@@ -3639,7 +3707,7 @@ export function VendorDashboard() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {getFilteredOrdersForTab("handover").map((order, index) => (
+                        {getFilteredHandoverOrders().map((order, index) => (
                           <TableRow key={`${order.order_id}-${index}`}>
                             <TableCell>
                               <input
@@ -3776,6 +3844,23 @@ export function VendorDashboard() {
                         ))}
                       </TableBody>
                     </Table>
+                    
+                    {/* Loading More Indicator for Desktop Handover */}
+                    {isLoadingMoreHandover && (
+                      <div className="flex items-center justify-center p-6 border-t">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-2"></div>
+                          <p className="text-sm text-gray-500">Loading more orders...</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* End of List Indicator for Desktop Handover */}
+                    {!handoverOrdersHasMore && handoverOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                        <p className="text-sm text-gray-500">All orders loaded ({handoverOrdersTotalCount} total)</p>
+                      </div>
+                    )}
                   </div>
                   )}
                 </TabsContent>
@@ -3862,18 +3947,22 @@ export function VendorDashboard() {
                       <Button 
                         onClick={() => handleBulkDownloadLabels("my-orders")}
                         disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
-                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
+                        className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                       >
                         {bulkDownloadLoading ? (
                           <>
                             <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
-                            <span className="truncate">{isMobile ? 'Loading' : 'Generating...'}</span>
+                            <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Generating...'}</span>
                           </>
                         ) : (
-                          <>
-                            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                            <span className="truncate">Download ({selectedMyOrders.length})</span>
-                          </>
+                          <div className="flex items-center justify-center w-full">
+                            <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
+                            <span className="whitespace-nowrap flex items-center">
+                              <span className="hidden min-[360px]:inline">Download</span>
+                              <span className="inline min-[360px]:hidden">DL</span>
+                              <span className="ml-1">({selectedMyOrders.length})</span>
+                            </span>
+                          </div>
                         )}
                       </Button>
                       
@@ -3887,18 +3976,21 @@ export function VendorDashboard() {
                             .filter(order => selectedMyOrders.includes(order.order_id))
                             .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
                         }
-                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
+                        className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                       >
                         {bulkMarkReadyLoading ? (
                           <>
                             <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
-                            <span className="truncate">{isMobile ? 'Loading' : 'Processing...'}</span>
+                            <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Processing...'}</span>
                           </>
                         ) : (
-                          <>
-                            <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                            <span className="truncate">Ready ({selectedMyOrders.length})</span>
-                          </>
+                          <div className="flex items-center justify-center w-full">
+                            <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
+                            <span className="whitespace-nowrap flex items-center">
+                              <span>Ready</span>
+                              <span className="ml-1">({selectedMyOrders.length})</span>
+                            </span>
+                          </div>
                         )}
                       </Button>
                     </div>
@@ -3916,7 +4008,7 @@ export function VendorDashboard() {
                         <input
                           type="checkbox"
                           onChange={(e) => {
-                            const handoverOrders = getFilteredOrdersForTab("handover")
+                            const handoverOrders = getFilteredHandoverOrders()
                             if (e.target.checked) {
                               setSelectedHandoverOrders(handoverOrders.map((o) => o.order_id))
                             } else {
@@ -3925,7 +4017,7 @@ export function VendorDashboard() {
                           }}
                           checked={
                             selectedHandoverOrders.length > 0 &&
-                            selectedHandoverOrders.length === getFilteredOrdersForTab("handover").length
+                            selectedHandoverOrders.length === getFilteredHandoverOrders().length
                           }
                           className="w-3.5 h-3.5 sm:w-4 sm:h-4"
                         />
@@ -3999,7 +4091,7 @@ export function VendorDashboard() {
                   </div>
                 ) : isMobile ? (
                   /* Mobile Card Layout */
-                  <div className="space-y-2.5 sm:space-y-3 pb-32">
+                  <div className="space-y-2.5 sm:space-y-3 pb-32 mt-4">
                     {getFilteredTrackingOrders().length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-12">
                         <Truck className="w-16 h-16 text-gray-300 mb-4" />
@@ -4069,6 +4161,13 @@ export function VendorDashboard() {
                           </div>
                         </Card>
                       ))
+                    )}
+                    
+                    {/* Total count indicator for Order Tracking */}
+                    {trackingOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4">
+                        <p className="text-xs text-gray-400">Showing all {trackingOrdersTotalCount} orders</p>
+                      </div>
                     )}
                   </div>
                 ) : (
@@ -4169,6 +4268,13 @@ export function VendorDashboard() {
                         )}
                       </TableBody>
                     </Table>
+                    
+                    {/* Total count indicator for Desktop Order Tracking */}
+                    {trackingOrders.length > 0 && (
+                      <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                        <p className="text-sm text-gray-500">Showing all {trackingOrdersTotalCount} orders</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </TabsContent>

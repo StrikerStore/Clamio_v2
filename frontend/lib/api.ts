@@ -495,10 +495,8 @@ class ApiClient {
     })
   }
 
-  async getOrderTrackingOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
+  async getOrderTrackingOrders(): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: getOrderTrackingOrders called');
-    console.log('  - page:', page);
-    console.log('  - limit:', limit);
     
     // Use vendor token for order tracking endpoint
     const vendorToken = localStorage.getItem('vendorToken')
@@ -513,9 +511,8 @@ class ApiClient {
     console.log('📤 API CLIENT: Making request to /orders/order-tracking');
     console.log('  - Method: GET');
     console.log('  - Headers: Authorization');
-    console.log('  - Query params: page=' + page + ', limit=' + limit);
 
-    return this.makeRequest(`/orders/order-tracking?page=${page}&limit=${limit}`, {
+    return this.makeRequest(`/orders/order-tracking`, {
       method: 'GET',
       headers: {
         'Authorization': vendorToken

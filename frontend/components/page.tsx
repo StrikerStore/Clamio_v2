@@ -41,9 +41,9 @@ export default function LoginPage() {
         {/* Logo section with subtle gradient background */}
         <div className="text-center mb-4 sm:mb-8 animate-fade-in">
           <div className="mx-auto w-20 h-20 sm:w-28 sm:h-28 bg-gradient-to-br from-white/40 to-blue-50/30 backdrop-blur-xl rounded-2xl sm:rounded-3xl flex items-center justify-center mb-3 sm:mb-6 shadow-xl border border-white/30 transform hover:scale-105 transition-all duration-300 p-3 sm:p-4">
-            <img src="/logo.png" alt="CLAIMIO Logo" className="w-full h-full object-contain drop-shadow-md" />
+            <img src="/logo.png" alt="Claimio Logo" className="w-full h-full object-contain drop-shadow-md" />
           </div>
-          <h1 className="text-2xl sm:text-4xl font-bold text-slate-700 mb-1 sm:mb-2 drop-shadow-sm">CLAIMIO</h1>
+          <h1 className="text-2xl sm:text-4xl font-bold text-slate-700 mb-1 sm:mb-2 drop-shadow-sm">Claimio</h1>
           <p className="text-slate-600 text-sm sm:text-lg font-medium">Tap. Claim. Complete.</p>
         </div>
         

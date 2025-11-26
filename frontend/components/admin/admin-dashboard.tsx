@@ -1338,11 +1338,11 @@ export function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
           <div className="flex justify-between items-center py-3 sm:py-4">
             <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg flex items-center justify-center flex-shrink-0">
+                <img src="/logo.png" alt="CLAIMIO Logo" className="w-full h-full object-contain" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">Claimio - Admin</h1>
+                <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">CLAIMIO - Admin</h1>
                 {!isMobile && <p className="text-base text-gray-600 truncate">Welcome back, {user?.name}</p>}
               </div>
             </div>
