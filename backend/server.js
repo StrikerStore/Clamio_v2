@@ -15,12 +15,13 @@ const settlementRoutes = require('./routes/settlements');
 const notificationRoutes = require('./routes/notifications');
 const inventoryRoutes = require('./routes/inventory');
 const publicRoutes = require('./routes/public');
+const storeRoutes = require('./routes/stores');
 
 // Import database to initialize it
 const database = require('./config/database');
 const { fetchAndSaveShopifyProducts } = require('./services/shopifyProductFetcher');
-const shipwayService = require('./services/shipwayService');
 const cron = require('node-cron');
+const { runMultiStoreMigration } = require('./utils/migrationRunner');
 
 // Import vendor error tracking middleware
 const { trackVendorErrors, handleVendorErrors } = require('./middleware/vendorErrorTracking');
@@ -300,6 +301,7 @@ app.use('/api/orders', ordersRoutes);
 app.use('/api/settlements', settlementRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/inventory', inventoryRoutes);
+app.use('/api/stores', storeRoutes);
 
 
 /**
@@ -439,6 +441,20 @@ app.listen(PORT, async () => {
   
   // Log database initialization
   console.log('📁 Database initialized successfully');
+  
+  // Run database migrations on startup (if enabled)
+  // This is idempotent and safe to run on every server start
+  // Set RUN_MIGRATIONS=false in .env to disable automatic migrations
+  const runMigrations = process.env.RUN_MIGRATIONS !== 'false';
+  if (runMigrations) {
+    try {
+      await runMultiStoreMigration();
+    } catch (error) {
+      console.error('⚠️ Migration warning (server will continue):', error.message);
+    }
+  } else {
+    console.log('⚠️ Automatic migrations disabled (RUN_MIGRATIONS=false)');
+  }
 
   // Start periodic database health check (every 15 minutes)
   setInterval(async () => {
@@ -483,22 +499,26 @@ app.listen(PORT, async () => {
     }
   );
 
-  // Start Shipway order sync cron job (every hour)
+  // Start Multi-Store sync cron job (every hour)
+  const multiStoreSyncService = require('./services/multiStoreSyncService');
   cron.schedule('0 * * * *', async () => {
     try {
-      await shipwayService.syncOrdersToMySQL();
-      console.log('[Shipway Sync] Orders synced to MySQL.');
+      console.log('\n[Multi-Store Sync] Starting scheduled sync for all active stores...');
+      const result = await multiStoreSyncService.syncAllStores();
+      console.log(`[Multi-Store Sync] Completed! ${result.successfulStores}/${result.totalStores} stores synced, ${result.totalOrders} orders.`);
     } catch (err) {
-      console.error('[Shipway Sync] Failed:', err.message);
+      console.error('[Multi-Store Sync] Failed:', err.message);
     }
   });
+  
   // Run once immediately on startup
   (async () => {
     try {
-      await shipwayService.syncOrdersToMySQL();
-      console.log('[Shipway Sync] Orders synced to MySQL (startup).');
+      console.log('\n[Multi-Store Sync] Starting startup sync for all active stores...');
+      const result = await multiStoreSyncService.syncAllStores();
+      console.log(`[Multi-Store Sync] Startup sync completed! ${result.successfulStores}/${result.totalStores} stores synced, ${result.totalOrders} orders.`);
     } catch (err) {
-      console.error('[Shipway Sync] Startup sync failed:', err.message);
+      console.error('[Multi-Store Sync] Startup sync failed:', err.message);
     }
   })();
 

@@ -838,6 +838,79 @@ class ApiClient {
     return this.makeRequest('/shipway/carrier-format')
   }
 
+  // Store methods
+  async getStoresForFilter(): Promise<ApiResponse> {
+    return this.makeRequest('/stores/list-for-filter')
+  }
+
+  async getAllStores(): Promise<ApiResponse> {
+    return this.makeRequest('/stores')
+  }
+
+  async getStoreByCode(accountCode: string): Promise<ApiResponse> {
+    return this.makeRequest(`/stores/${accountCode}`)
+  }
+
+  async createStore(storeData: {
+    store_name: string
+    shipway_username: string
+    shipway_password: string
+    shopify_store_url: string
+    shopify_token: string
+    status: 'active' | 'inactive'
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/stores', {
+      method: 'POST',
+      body: JSON.stringify(storeData)
+    })
+  }
+
+  async updateStore(accountCode: string, storeData: {
+    store_name?: string
+    shipway_username?: string
+    shipway_password?: string
+    shopify_store_url?: string
+    shopify_token?: string
+    status?: 'active' | 'inactive'
+  }): Promise<ApiResponse> {
+    return this.makeRequest(`/stores/${accountCode}`, {
+      method: 'PUT',
+      body: JSON.stringify(storeData)
+    })
+  }
+
+  async deleteStore(accountCode: string): Promise<ApiResponse> {
+    return this.makeRequest(`/stores/${accountCode}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async toggleStoreStatus(accountCode: string): Promise<ApiResponse> {
+    return this.makeRequest(`/stores/${accountCode}/toggle-status`, {
+      method: 'PATCH'
+    })
+  }
+
+  async testShipwayConnection(credentials: {
+    shipway_username: string
+    shipway_password: string
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/stores/test-shipway', {
+      method: 'POST',
+      body: JSON.stringify(credentials)
+    })
+  }
+
+  async testShopifyConnection(credentials: {
+    shopify_store_url: string
+    shopify_token: string
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/stores/test-shopify', {
+      method: 'POST',
+      body: JSON.stringify(credentials)
+    })
+  }
+
   // Download label methods
   async downloadLabel(orderId: string, format: string = 'thermal'): Promise<ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader

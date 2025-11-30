@@ -1446,7 +1446,9 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
         created_at: order.created_at || order.order_date || 'N/A',
         claimed_at: order.claimed_at || null,
         claimed_by: order.claimed_by || null,
-        image: order.product_image || order.image || '/placeholder.svg'
+        image: order.product_image || order.image || '/placeholder.svg',
+        store_name: order.store_name || null,
+        account_code: order.account_code || null
       };
     });
 

@@ -53,6 +53,7 @@ class Database {
       
       console.log('✅ MySQL connection established with IST timezone (+05:30)');
       await this.createUtilityTable();
+      await this.createStoreInfoTable();
       await this.createCarriersTable();
       await this.createProductsTable();
       await this.createUsersTable();
@@ -1075,7 +1076,13 @@ class Database {
 
     try {
       const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM carriers ORDER BY priority ASC'
+        `SELECT 
+          c.*,
+          s.store_name,
+          s.account_code as store_account_code
+        FROM carriers c
+        LEFT JOIN store_info s ON c.account_code = s.account_code
+        ORDER BY c.priority ASC`
       );
       return rows;
     } catch (error) {
@@ -1185,11 +1192,11 @@ class Database {
     }
 
     try {
-      const { carrier_id, carrier_name, status, weight_in_kg, priority } = carrierData;
+      const { carrier_id, carrier_name, status, weight_in_kg, priority, account_code } = carrierData;
       
       const [result] = await this.mysqlConnection.execute(
-        'INSERT INTO carriers (carrier_id, carrier_name, status, weight_in_kg, priority) VALUES (?, ?, ?, ?, ?)',
-        [carrier_id, carrier_name, status || 'Active', weight_in_kg || null, priority]
+        'INSERT INTO carriers (carrier_id, carrier_name, status, weight_in_kg, priority, account_code) VALUES (?, ?, ?, ?, ?, ?)',
+        [carrier_id, carrier_name, status || 'Active', weight_in_kg || null, priority, account_code || 'STRI']
       );
 
       return {
@@ -1467,11 +1474,11 @@ class Database {
     }
 
     try {
-      const { id, name, image, altText, totalImages, sku_id } = productData;
+      const { id, name, image, altText, totalImages, sku_id, account_code } = productData;
       
       const [result] = await this.mysqlConnection.execute(
-        'INSERT INTO products (id, name, image, altText, totalImages, sku_id) VALUES (?, ?, ?, ?, ?, ?)',
-        [id, name, image || null, altText || null, totalImages || 0, sku_id || null]
+        'INSERT INTO products (id, name, image, altText, totalImages, sku_id, account_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [id, name, image || null, altText || null, totalImages || 0, sku_id || null, account_code || 'STRI']
       );
 
       return {
@@ -2524,8 +2531,8 @@ class Database {
           id, unique_id, order_id, customer_name, order_date,
           product_name, product_code, size, quantity, selling_price, order_total, payment_type,
           is_partial_paid, prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
-          pincode, is_in_new_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          pincode, is_in_new_order, account_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           order_date = VALUES(order_date),
           product_name = VALUES(product_name),
@@ -2541,7 +2548,8 @@ class Database {
           order_total_split = VALUES(order_total_split),
           collectable_amount = VALUES(collectable_amount),
           pincode = VALUES(pincode),
-          is_in_new_order = VALUES(is_in_new_order)`,
+          is_in_new_order = VALUES(is_in_new_order),
+          account_code = VALUES(account_code)`,
         [
           orderData.id || null,
           orderData.unique_id || null,
@@ -2561,7 +2569,8 @@ class Database {
           orderData.order_total_split || null,
           orderData.collectable_amount || null,
           orderData.pincode || null,
-          orderData.is_in_new_order !== undefined ? orderData.is_in_new_order : true
+          orderData.is_in_new_order !== undefined ? orderData.is_in_new_order : true,
+          orderData.account_code || 'STRI'
         ]
       );
 
@@ -2569,10 +2578,11 @@ class Database {
       await this.mysqlConnection.execute(
         `INSERT INTO claims (
           order_unique_id, order_id, status, claimed_by, claimed_at, last_claimed_by, 
-          last_claimed_at, clone_status, cloned_order_id, is_cloned_row, label_downloaded
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          last_claimed_at, clone_status, cloned_order_id, is_cloned_row, label_downloaded, account_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
-          order_id = VALUES(order_id)`,
+          order_id = VALUES(order_id),
+          account_code = VALUES(account_code)`,
         [
           orderData.unique_id || null,
           orderData.order_id || null,
@@ -2584,22 +2594,25 @@ class Database {
           orderData.clone_status || 'not_cloned',
           orderData.cloned_order_id || null,
           orderData.is_cloned_row || false,
-          orderData.label_downloaded || false
+          orderData.label_downloaded || false,
+          orderData.account_code || 'STRI'
         ]
       );
 
       // Use INSERT ... ON DUPLICATE KEY UPDATE for labels table
       await this.mysqlConnection.execute(
         `INSERT INTO labels (
-          order_id, handover_at, priority_carrier
-        ) VALUES (?, ?, ?)
+          order_id, handover_at, priority_carrier, account_code
+        ) VALUES (?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           handover_at = VALUES(handover_at),
-          priority_carrier = VALUES(priority_carrier)`,
+          priority_carrier = VALUES(priority_carrier),
+          account_code = VALUES(account_code)`,
         [
           orderData.order_id || null,
           orderData.handover_at || null,
-          orderData.priority_carrier || null
+          orderData.priority_carrier || null,
+          orderData.account_code || 'STRI'
         ]
       );
 
@@ -2838,6 +2851,7 @@ class Database {
           l.manifest_id,
           l.current_shipment_status,
           l.is_handover,
+          s.store_name,
           CASE 
             WHEN l.current_shipment_status IS NOT NULL AND l.current_shipment_status != '' 
             THEN l.current_shipment_status 
@@ -2851,6 +2865,7 @@ class Database {
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
         LEFT JOIN labels l ON o.order_id = l.order_id
+        LEFT JOIN store_info s ON o.account_code = s.account_code
         WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1 OR (c.status = 'unclaimed' AND c.status IS NOT NULL)) 
         ORDER BY o.order_date DESC, o.order_id, o.product_name
       `);
@@ -3240,9 +3255,9 @@ class Database {
       if (claimFields.length > 0) {
         // First, ensure a claim record exists for this unique_id
         await this.mysqlConnection.execute(`
-          INSERT INTO claims (order_unique_id, order_id) 
-          SELECT o.unique_id, o.order_id FROM orders o WHERE o.unique_id = ?
-          ON DUPLICATE KEY UPDATE order_unique_id = VALUES(order_unique_id)
+          INSERT INTO claims (order_unique_id, order_id, account_code) 
+          SELECT o.unique_id, o.order_id, o.account_code FROM orders o WHERE o.unique_id = ?
+          ON DUPLICATE KEY UPDATE order_unique_id = VALUES(order_unique_id), account_code = VALUES(account_code)
         `, [unique_id]);
 
         claimValues.push(unique_id);
@@ -3263,12 +3278,19 @@ class Database {
         if (orderRows.length > 0) {
           const orderId = orderRows[0].order_id;
 
+          // Get the account_code from orders table
+          const [orderData] = await this.mysqlConnection.execute(
+            'SELECT account_code FROM orders WHERE order_id = ? LIMIT 1',
+            [orderId]
+          );
+          const accountCode = orderData.length > 0 ? orderData[0].account_code : 'STRI';
+
           // Ensure a label record exists for this order_id
           await this.mysqlConnection.execute(`
-            INSERT INTO labels (order_id) 
-            VALUES (?)
-            ON DUPLICATE KEY UPDATE order_id = VALUES(order_id)
-          `, [orderId]);
+            INSERT INTO labels (order_id, account_code) 
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE order_id = VALUES(order_id), account_code = VALUES(account_code)
+          `, [orderId, accountCode]);
 
           labelValues.push(orderId);
           await this.mysqlConnection.execute(
@@ -3531,8 +3553,8 @@ class Database {
       const updateClause = updateFields.join(', ');
       
       const [result] = await this.mysqlConnection.execute(
-        `INSERT INTO labels (order_id, label_url, awb, carrier_id, carrier_name, priority_carrier, is_manifest, manifest_id) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
+        `INSERT INTO labels (order_id, label_url, awb, carrier_id, carrier_name, priority_carrier, is_manifest, manifest_id, account_code) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
          ON DUPLICATE KEY UPDATE ${updateClause}`,
         [
           labelData.order_id,
@@ -3543,6 +3565,7 @@ class Database {
           labelData.priority_carrier || null,
           labelData.is_manifest || 0,
           labelData.manifest_id || null,
+          labelData.account_code || 'STRI',
           ...updateValues
         ]
       );
@@ -3627,7 +3650,8 @@ class Database {
         'billing_country', 'billing_zipcode', 'billing_latitude', 'billing_longitude',
         'shipping_firstname', 'shipping_lastname', 'shipping_phone',
         'shipping_address', 'shipping_address2', 'shipping_city', 'shipping_state',
-        'shipping_country', 'shipping_zipcode', 'shipping_latitude', 'shipping_longitude'
+        'shipping_country', 'shipping_zipcode', 'shipping_latitude', 'shipping_longitude',
+        'account_code'
       ];
 
       const updateClauses = fields.map(field => `${field} = VALUES(${field})`).join(', ');
@@ -3659,7 +3683,8 @@ class Database {
         customerData.shipping_country || null,
         customerData.shipping_zipcode || null,
         customerData.shipping_latitude || null,
-        customerData.shipping_longitude || null
+        customerData.shipping_longitude || null,
+        customerData.account_code || 'STRI'
       ];
 
       await this.mysqlConnection.execute(
@@ -3801,6 +3826,13 @@ class Database {
     }
 
     try {
+      // Get account_code from orders table
+      const [orderData] = await this.mysqlConnection.execute(
+        'SELECT account_code FROM orders WHERE order_id = ? LIMIT 1',
+        [orderId]
+      );
+      const accountCode = orderData.length > 0 ? orderData[0].account_code : 'STRI';
+
       // Clear existing tracking data for this order to avoid duplicates
       await this.mysqlConnection.execute(
         'DELETE FROM order_tracking WHERE order_id = ?',
@@ -3811,14 +3843,15 @@ class Database {
       for (const event of trackingEvents) {
         await this.mysqlConnection.execute(`
           INSERT INTO order_tracking 
-          (order_id, order_type, shipment_status, timestamp, ndr_reason)
-          VALUES (?, ?, ?, ?, ?)
+          (order_id, order_type, shipment_status, timestamp, ndr_reason, account_code)
+          VALUES (?, ?, ?, ?, ?, ?)
         `, [
           orderId,
           orderType,
           event.name || 'Unknown',
           event.time || new Date(),
-          event.ndr_reason || null
+          event.ndr_reason || null,
+          accountCode
         ]);
       }
       
@@ -4178,6 +4211,289 @@ class Database {
       return rows;
     } catch (error) {
       console.error('Error getting handed over labels:', error);
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // STORE MANAGEMENT METHODS (Multi-Store Feature)
+  // ============================================================================
+
+  /**
+   * Create store_info table if it doesn't exist
+   */
+  async createStoreInfoTable() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      const createTableQuery = `
+        CREATE TABLE IF NOT EXISTS store_info (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          account_code VARCHAR(50) UNIQUE NOT NULL,
+          store_name VARCHAR(255) NOT NULL,
+          shipway_username VARCHAR(255) NOT NULL,
+          shipway_password_encrypted TEXT NOT NULL,
+          auth_token TEXT NOT NULL,
+          shopify_store_url VARCHAR(255) NOT NULL,
+          shopify_token TEXT NOT NULL,
+          status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          created_by VARCHAR(50),
+          last_synced_at TIMESTAMP NULL,
+          last_shopify_sync_at TIMESTAMP NULL,
+          INDEX idx_status (status),
+          INDEX idx_account_code (account_code)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+      
+      await this.mysqlConnection.execute(createTableQuery);
+      console.log('✅ store_info table created/verified');
+    } catch (error) {
+      console.error('❌ Error creating store_info table:', error.message);
+    }
+  }
+
+  /**
+   * Get store by account_code
+   * @param {string} accountCode - The account code to search for
+   * @returns {Object|null} Store object or null if not found
+   */
+  async getStoreByAccountCode(accountCode) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT * FROM store_info WHERE account_code = ?',
+        [accountCode]
+      );
+      
+      return rows.length > 0 ? rows[0] : null;
+    } catch (error) {
+      console.error('Error getting store by account code:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all stores
+   * @returns {Array} Array of store objects
+   */
+  async getAllStores() {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT * FROM store_info ORDER BY created_at DESC'
+      );
+      
+      return rows;
+    } catch (error) {
+      console.error('Error getting all stores:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get stores by status
+   * @param {string} status - 'active' or 'inactive'
+   * @returns {Array} Array of store objects
+   */
+  async getStoresByStatus(status) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT * FROM store_info WHERE status = ? ORDER BY store_name ASC',
+        [status]
+      );
+      
+      return rows;
+    } catch (error) {
+      console.error('Error getting stores by status:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all active stores
+   * @returns {Array} Array of active store objects
+   */
+  async getActiveStores() {
+    return this.getStoresByStatus('active');
+  }
+
+  /**
+   * Update store last sync timestamp
+   * @param {string} accountCode - The account code
+   */
+  async updateStoreLastSync(accountCode) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      await this.mysqlConnection.execute(
+        'UPDATE store_info SET last_synced_at = NOW() WHERE account_code = ?',
+        [accountCode]
+      );
+    } catch (error) {
+      console.error('Error updating store last sync:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update store Shopify sync timestamp
+   * @param {string} accountCode - The account code
+   */
+  async updateStoreShopifySync(accountCode) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      await this.mysqlConnection.execute(
+        'UPDATE store_info SET last_shopify_sync_at = NOW() WHERE account_code = ?',
+        [accountCode]
+      );
+    } catch (error) {
+      console.error('Error updating store Shopify sync:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new store
+   * @param {Object} storeData - Store data object
+   * @returns {Object} Result object
+   */
+  async createStore(storeData) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      await this.mysqlConnection.execute(
+        `INSERT INTO store_info (
+          account_code,
+          store_name,
+          shipway_username,
+          shipway_password_encrypted,
+          auth_token,
+          shopify_store_url,
+          shopify_token,
+          status,
+          created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          storeData.account_code,
+          storeData.store_name,
+          storeData.shipway_username,
+          storeData.shipway_password_encrypted,
+          storeData.auth_token,
+          storeData.shopify_store_url,
+          storeData.shopify_token,
+          storeData.status,
+          storeData.created_by
+        ]
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error creating store:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update store
+   * @param {string} accountCode - The account code
+   * @param {Object} updateData - Data to update
+   * @returns {Object} Result object
+   */
+  async updateStore(accountCode, updateData) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const fields = [];
+      const values = [];
+
+      // Build dynamic update query based on provided fields
+      if (updateData.store_name !== undefined) {
+        fields.push('store_name = ?');
+        values.push(updateData.store_name);
+      }
+      if (updateData.shipway_username !== undefined) {
+        fields.push('shipway_username = ?');
+        values.push(updateData.shipway_username);
+      }
+      if (updateData.shipway_password_encrypted !== undefined) {
+        fields.push('shipway_password_encrypted = ?');
+        values.push(updateData.shipway_password_encrypted);
+      }
+      if (updateData.auth_token !== undefined) {
+        fields.push('auth_token = ?');
+        values.push(updateData.auth_token);
+      }
+      if (updateData.shopify_store_url !== undefined) {
+        fields.push('shopify_store_url = ?');
+        values.push(updateData.shopify_store_url);
+      }
+      if (updateData.shopify_token !== undefined) {
+        fields.push('shopify_token = ?');
+        values.push(updateData.shopify_token);
+      }
+      if (updateData.status !== undefined) {
+        fields.push('status = ?');
+        values.push(updateData.status);
+      }
+
+      if (fields.length === 0) {
+        throw new Error('No fields to update');
+      }
+
+      values.push(accountCode);
+
+      await this.mysqlConnection.execute(
+        `UPDATE store_info SET ${fields.join(', ')} WHERE account_code = ?`,
+        values
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating store:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete store (soft delete by setting status to inactive)
+   * @param {string} accountCode - The account code
+   * @returns {Object} Result object
+   */
+  async deleteStore(accountCode) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      await this.mysqlConnection.execute(
+        'UPDATE store_info SET status = ? WHERE account_code = ?',
+        ['inactive', accountCode]
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting store:', error);
       throw error;
     }
   }

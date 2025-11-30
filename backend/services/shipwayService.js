@@ -20,12 +20,55 @@ function generateStableUniqueId(orderId, productCode, itemIndex = 0) {
 /**
  * Shipway API Service
  * Handles all interactions with Shipway API
+ * Now supports multi-store via account_code parameter
  */
 class ShipwayService {
-  constructor() {
+  constructor(accountCode = null) {
     this.baseURL = process.env.SHIPWAY_API_BASE_URL || 'https://app.shipway.com/api';
-    // Instead of API key, use Basic Auth header from environment variable
-    this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
+    this.accountCode = accountCode;
+    this.basicAuthHeader = null;
+    this.initialized = false;
+  }
+
+  /**
+   * Initialize service by fetching store credentials
+   * @returns {Promise<void>}
+   */
+  async initialize() {
+    if (this.initialized) {
+      return;
+    }
+
+    try {
+      if (this.accountCode) {
+        // Multi-store mode: fetch credentials from database
+        const store = await database.getStoreByAccountCode(this.accountCode);
+        
+        if (!store) {
+          throw new Error(`Store not found for account code: ${this.accountCode}`);
+        }
+        
+        if (store.status !== 'active') {
+          throw new Error(`Store is not active: ${this.accountCode}`);
+        }
+        
+        this.basicAuthHeader = store.auth_token;
+        console.log(`✅ ShipwayService initialized for store: ${this.accountCode}`);
+      } else {
+        // Legacy mode: use environment variable (backward compatibility)
+        this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
+        console.log(`✅ ShipwayService initialized in legacy mode (env variables)`);
+      }
+
+      if (!this.basicAuthHeader) {
+        throw new Error('Shipway API configuration error. No auth token available.');
+      }
+
+      this.initialized = true;
+    } catch (error) {
+      console.error('❌ ShipwayService initialization failed:', error.message);
+      throw error;
+    }
   }
 
   /**
@@ -34,6 +77,9 @@ class ShipwayService {
    * @returns {Object} Warehouse details from Shipway API
    */
   async getWarehouseById(warehouseId) {
+    // Initialize service if not already initialized
+    await this.initialize();
+    
     try {
       if (!warehouseId) {
         throw new Error('Warehouse ID is required');
@@ -614,6 +660,9 @@ class ShipwayService {
    * Stores raw API response in JSON file for reference.
    */
   async syncOrdersToMySQL() {
+    // Initialize service if not already initialized
+    await this.initialize();
+    
     const database = require('../config/database');
     const rawDataJsonPath = path.join(__dirname, '../data/raw_shipway_orders.json');
     const url = `${this.baseURL}/getorders`;
@@ -626,7 +675,7 @@ class ShipwayService {
       let page = 1;
       let hasMorePages = true;
       
-      console.log('🔄 Starting paginated fetch from Shipway API...');
+      console.log(`🔄 Starting paginated fetch from Shipway API${this.accountCode ? ` (${this.accountCode})` : ''}...`);
       
       while (hasMorePages) {
         const currentParams = { 
@@ -946,6 +995,8 @@ class ShipwayService {
           collectable_amount: collectableAmount,
           // Add pincode from s_zipcode, preserve existing if available
           pincode: existingClaim ? existingClaim.pincode : (order.s_zipcode || ''),
+          // Multi-store: Tag order with account_code
+          account_code: this.accountCode || 'STRI',
           // Note: store_code is stored in customer_info table (order-level), not in orders table (product-level)
           // Preserve existing claim data or use defaults for new orders
           status: existingClaim ? existingClaim.status : 'unclaimed',

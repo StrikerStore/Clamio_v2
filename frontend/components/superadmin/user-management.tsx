@@ -50,13 +50,17 @@ import {
   MoreHorizontal,
   Key,
   Eye,
-  EyeOff
+  EyeOff,
+  Store,
+  CheckCircle,
+  XCircle
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDeviceType } from "@/hooks/use-mobile"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 interface User {
   id: string
@@ -124,8 +128,29 @@ export function UserManagement() {
   const [warehouseVerified, setWarehouseVerified] = useState(false)
 
   // Mobile UI state
-  const [mobileTab, setMobileTab] = useState<'users' | 'create'>("users")
+  const [mobileTab, setMobileTab] = useState<'users' | 'create' | 'stores'>("users")
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
+
+  // Store management state
+  const [stores, setStores] = useState<any[]>([])
+  const [storesLoading, setStoresLoading] = useState(false)
+  const [updatingStore, setUpdatingStore] = useState(false)
+  const [isAddStoreOpen, setIsAddStoreOpen] = useState(false)
+  const [isEditStoreOpen, setIsEditStoreOpen] = useState(false)
+  const [editingStore, setEditingStore] = useState<any>(null)
+  const [isDeleteStoreConfirmOpen, setIsDeleteStoreConfirmOpen] = useState(false)
+  const [storeToDelete, setStoreToDelete] = useState<any>(null)
+  const [newStore, setNewStore] = useState({
+    store_name: "",
+    shipway_username: "",
+    shipway_password: "",
+    shopify_store_url: "",
+    shopify_token: "",
+    status: "active" as "active" | "inactive"
+  })
+  const [showPassword, setShowPassword] = useState(false)
+  const [showShopifyToken, setShowShopifyToken] = useState(false)
+  const [testingConnection, setTestingConnection] = useState<{ type: 'shipway' | 'shopify' | null, loading: boolean }>({ type: null, loading: false })
 
   const [formData, setFormData] = useState<CreateUserForm>({
     name: "",
@@ -552,6 +577,186 @@ export function UserManagement() {
     }
   }
 
+  // Store management functions
+  const fetchStores = async () => {
+    setStoresLoading(true)
+    try {
+      const response = await apiClient.getAllStores()
+      if (response.success) {
+        setStores(response.data || [])
+      } else {
+        setError(response.message || "Failed to fetch stores")
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to fetch stores")
+    } finally {
+      setStoresLoading(false)
+    }
+  }
+
+  const handleAddStore = async () => {
+    if (!newStore.store_name || !newStore.shipway_username || !newStore.shipway_password || 
+        !newStore.shopify_store_url || !newStore.shopify_token) {
+      setError("Please fill in all required fields")
+      return
+    }
+
+    try {
+      const response = await apiClient.createStore(newStore)
+      if (response.success) {
+        setSuccess(`${newStore.store_name} has been added successfully`)
+        setNewStore({
+          store_name: "",
+          shipway_username: "",
+          shipway_password: "",
+          shopify_store_url: "",
+          shopify_token: "",
+          status: "active"
+        })
+        setIsAddStoreOpen(false)
+        fetchStores()
+      } else {
+        setError(response.message || "Failed to create store")
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to create store")
+    }
+  }
+
+  const handleEditStore = (store: any) => {
+    setError("")
+    setSuccess("")
+    setEditingStore({ 
+      ...store,
+      shipway_password: store.shipway_password || '',
+      shopify_token: store.shopify_token || '',
+      shopify_store_url: store.shopify_store_url || '',
+      shipway_username: store.shipway_username || '',
+      store_name: store.store_name || '',
+      status: store.status || 'active'
+    })
+    setIsEditStoreOpen(true)
+  }
+
+  const handleUpdateStore = async (e?: React.MouseEvent) => {
+    e?.preventDefault()
+    e?.stopPropagation()
+    
+    if (!editingStore) return
+    
+    if (!editingStore.store_name || !editingStore.shipway_username || 
+        !editingStore.shopify_store_url || !editingStore.shopify_token) {
+      setError("Please fill in all required fields")
+      return
+    }
+
+    setError("")
+    setSuccess("")
+    setUpdatingStore(true)
+
+    try {
+      const updateData: any = {
+        store_name: editingStore.store_name,
+        shipway_username: editingStore.shipway_username,
+        shopify_store_url: editingStore.shopify_store_url,
+        shopify_token: editingStore.shopify_token,
+        status: editingStore.status
+      }
+      
+      if (editingStore.shipway_password && editingStore.shipway_password.trim() !== '') {
+        updateData.shipway_password = editingStore.shipway_password
+      }
+
+      const response = await apiClient.updateStore(editingStore.account_code, updateData)
+      if (response.success) {
+        setSuccess(`${editingStore.store_name} has been updated successfully`)
+        setTimeout(() => {
+          setIsEditStoreOpen(false)
+          setEditingStore(null)
+          setError("")
+          setSuccess("")
+          fetchStores()
+        }, 1000)
+      } else {
+        setError(response.message || "Failed to update store")
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to update store")
+    } finally {
+      setUpdatingStore(false)
+    }
+  }
+
+  const handleDeleteStoreClick = (store: any) => {
+    setStoreToDelete(store)
+    setIsDeleteStoreConfirmOpen(true)
+  }
+
+  const handleConfirmDeleteStore = async () => {
+    if (storeToDelete) {
+      try {
+        const response = await apiClient.deleteStore(storeToDelete.account_code)
+        if (response.success) {
+          setSuccess(`${storeToDelete.store_name} has been removed from the system`)
+          setStoreToDelete(null)
+          setIsDeleteStoreConfirmOpen(false)
+          fetchStores()
+        } else {
+          setError(response.message || "Failed to delete store")
+        }
+      } catch (error: any) {
+        setError(error?.message || "Failed to delete store")
+      }
+    }
+  }
+
+  const handleTestShipway = async (username: string, password: string) => {
+    if (!username || !password) {
+      setError("Please enter Shipway username and password")
+      return
+    }
+
+    setTestingConnection({ type: 'shipway', loading: true })
+    try {
+      const response = await apiClient.testShipwayConnection({ shipway_username: username, shipway_password: password })
+      if (response.success) {
+        setSuccess("Shipway credentials are valid")
+      } else {
+        setError(response.message || "Invalid Shipway credentials")
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to test Shipway connection")
+    } finally {
+      setTestingConnection({ type: null, loading: false })
+    }
+  }
+
+  const handleTestShopify = async (url: string, token: string) => {
+    if (!url || !token) {
+      setError("Please enter Shopify store URL and token")
+      return
+    }
+
+    setTestingConnection({ type: 'shopify', loading: true })
+    try {
+      const response = await apiClient.testShopifyConnection({ shopify_store_url: url, shopify_token: token })
+      if (response.success) {
+        setSuccess("Shopify credentials are valid")
+      } else {
+        setError(response.message || "Invalid Shopify credentials")
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to test Shopify connection")
+    } finally {
+      setTestingConnection({ type: null, loading: false })
+    }
+  }
+
+  // Fetch stores on component mount
+  useEffect(() => {
+    fetchStores()
+  }, [])
+
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -599,9 +804,14 @@ export function UserManagement() {
         <div className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10">
           <div className="px-4">
             <div className="flex items-center justify-between h-14">
-              <div className="min-w-0">
-                <h1 className="text-lg font-bold text-gray-900 truncate">Super Admin</h1>
-                <p className="text-xs text-gray-500 truncate">{currentUser?.email}</p>
+              <div className="flex items-center space-x-2 min-w-0">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <img src="/logo.png" alt="CLAIMIO Logo" className="w-full h-full object-contain" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-lg font-bold text-gray-900 truncate">Super Admin</h1>
+                  <p className="text-xs text-gray-500 truncate">{currentUser?.email}</p>
+                </div>
               </div>
               <Button 
                 variant="outline" 
@@ -620,7 +830,7 @@ export function UserManagement() {
         {/* Content */}
         <div className="px-4 py-4 pb-24 space-y-4">
           {/* Mobile Stats Cards */}
-          {mobileTab === 'users' && (
+          {(mobileTab === 'users' || mobileTab === 'stores') && (
             <div className={`grid gap-3 grid-cols-2`}>
               <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
                 <CardContent className="p-4">
@@ -760,7 +970,10 @@ export function UserManagement() {
                             <Badge variant={getRoleBadgeVariant(user.role)} className="text-xs">
                               {user.role}
                             </Badge>
-                            <Badge variant={getStatusBadgeVariant(user.status)} className="text-xs">
+                            <Badge 
+                              variant={getStatusBadgeVariant(user.status)} 
+                              className={`text-xs ${user.status === 'active' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}`}
+                            >
                               {user.status}
                             </Badge>
                           </div>
@@ -826,6 +1039,228 @@ export function UserManagement() {
                     </CardContent>
                   </Card>
                 ))
+              )}
+            </div>
+          )}
+
+          {/* Store Management */}
+          {mobileTab === 'stores' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Store Management</h3>
+                  <p className="text-sm text-gray-600 mt-1">Manage Shipway and Shopify stores</p>
+                </div>
+                <Dialog open={isAddStoreOpen} onOpenChange={setIsAddStoreOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Add New Store</DialogTitle>
+                      <DialogDescription>
+                        Create a new store with Shipway and Shopify credentials
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="store-name">Store Name *</Label>
+                        <Input
+                          id="store-name"
+                          value={newStore.store_name}
+                          onChange={(e) => setNewStore({ ...newStore, store_name: e.target.value })}
+                          placeholder="e.g., Striker Store"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm font-semibold">Shipway Credentials</Label>
+                        <div>
+                          <Label htmlFor="shipway-username">Shipway Username *</Label>
+                          <Input
+                            id="shipway-username"
+                            value={newStore.shipway_username}
+                            onChange={(e) => setNewStore({ ...newStore, shipway_username: e.target.value })}
+                            placeholder="Enter Shipway username"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="shipway-password">Shipway Password *</Label>
+                          <div className="relative">
+                            <Input
+                              id="shipway-password"
+                              type={showPassword ? "text" : "password"}
+                              value={newStore.shipway_password}
+                              onChange={(e) => setNewStore({ ...newStore, shipway_password: e.target.value })}
+                              placeholder="Enter Shipway password"
+                              className="pr-10"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                              onClick={() => setShowPassword(!showPassword)}
+                            >
+                              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => handleTestShipway(newStore.shipway_username, newStore.shipway_password)}
+                          disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                        >
+                          {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                            <>
+                              <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                              Testing...
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-3 h-3 mr-2" />
+                              Test Shipway Connection
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm font-semibold">Shopify Credentials</Label>
+                        <div>
+                          <Label htmlFor="shopify-url">Shopify Store URL *</Label>
+                          <Input
+                            id="shopify-url"
+                            value={newStore.shopify_store_url}
+                            onChange={(e) => setNewStore({ ...newStore, shopify_store_url: e.target.value })}
+                            placeholder="https://your-store.myshopify.com"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="shopify-token">Shopify Token *</Label>
+                          <div className="relative">
+                            <Input
+                              id="shopify-token"
+                              type={showShopifyToken ? "text" : "password"}
+                              value={newStore.shopify_token}
+                              onChange={(e) => setNewStore({ ...newStore, shopify_token: e.target.value })}
+                              placeholder="Enter Shopify access token"
+                              className="pr-10"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                              onClick={() => setShowShopifyToken(!showShopifyToken)}
+                            >
+                              {showShopifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => handleTestShopify(newStore.shopify_store_url, newStore.shopify_token)}
+                          disabled={testingConnection.loading && testingConnection.type === 'shopify'}
+                        >
+                          {testingConnection.loading && testingConnection.type === 'shopify' ? (
+                            <>
+                              <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                              Testing...
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-3 h-3 mr-2" />
+                              Test Shopify Connection
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="status">Status *</Label>
+                        <Select
+                          value={newStore.status}
+                          onValueChange={(value: "active" | "inactive") => setNewStore({ ...newStore, status: value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="inactive">Inactive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddStoreOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleAddStore}>Add Store</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              {/* Stores List */}
+              {storesLoading ? (
+                <div className="text-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
+                  <p className="text-sm text-gray-500 mt-2">Loading stores...</p>
+                </div>
+              ) : stores.length === 0 ? (
+                <Card>
+                  <CardContent className="p-6 text-center">
+                    <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-sm text-gray-500">No stores found. Add your first store to get started.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-3">
+                  {stores.map((store) => (
+                    <Card key={store.id} className="p-4">
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-base font-medium text-gray-900 truncate">{store.store_name}</h4>
+                            <p className="text-xs text-gray-600 truncate">Code: {store.account_code}</p>
+                          </div>
+                          <div className="flex space-x-1 flex-shrink-0">
+                            <Button size="sm" variant="outline" onClick={() => handleEditStore(store)} className="h-8 w-8 p-0">
+                              <Edit className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => handleDeleteStoreClick(store)} className="h-8 w-8 p-0">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge 
+                            variant={store.status === 'active' ? 'default' : 'destructive'}
+                            className={store.status === 'active' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
+                          >
+                            {store.status.toUpperCase()}
+                          </Badge>
+                        </div>
+                        <div className="text-xs text-gray-500 space-y-1">
+                          <p>Shipway: {store.shipway_username}</p>
+                          <p className="truncate">Shopify: {store.shopify_store_url || 'N/A'}</p>
+                          {store.last_synced_at && <p>Last synced: {new Date(store.last_synced_at).toLocaleDateString()}</p>}
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -955,12 +1390,15 @@ export function UserManagement() {
 
         {/* Bottom Nav */}
         <div className="fixed inset-x-0 bottom-0 z-20 bg-white border-t">
-          <div className="grid grid-cols-2">
+          <div className="grid grid-cols-3">
             <Button variant={mobileTab === 'users' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('users')}>
-              <Users className="h-4 w-4 mr-2" /> Users
+              <Users className="h-4 w-4 mr-1" /> Users
             </Button>
             <Button variant={mobileTab === 'create' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('create')}>
-              <UserPlus className="h-4 w-4 mr-2" /> Add
+              <UserPlus className="h-4 w-4 mr-1" /> Add
+            </Button>
+            <Button variant={mobileTab === 'stores' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('stores')}>
+              <Store className="h-4 w-4 mr-1" /> Stores
             </Button>
           </div>
         </div>
@@ -1174,9 +1612,9 @@ export function UserManagement() {
       <div className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className={`flex items-center justify-between ${isMobile ? 'h-14' : 'h-16'}`}>
-            <div className="flex items-center space-x-3 min-w-0">
-              <div className={`${isMobile ? 'w-8 h-8' : 'w-10 h-10'} bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center`}>
-                <Shield className={`${isMobile ? 'h-4 w-4' : 'h-5 w-5'} text-white`} />
+            <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+              <div className={`${isMobile ? 'w-8 h-8' : 'w-10 h-10 sm:w-12 sm:h-12'} rounded-lg flex items-center justify-center flex-shrink-0`}>
+                <img src="/logo.png" alt="CLAIMIO Logo" className="w-full h-full object-contain" />
               </div>
               <div className="min-w-0">
                 <h1 className={`font-bold text-gray-900 ${isMobile ? 'text-lg' : 'text-xl'}`}>
@@ -1285,7 +1723,7 @@ export function UserManagement() {
             </CardHeader>
             <CardContent>
               <Tabs defaultValue="users" className="space-y-6">
-                <TabsList className="grid w-full grid-cols-2 bg-gray-100 p-1 rounded-lg">
+                <TabsList className="grid w-full grid-cols-3 bg-gray-100 p-1 rounded-lg">
                   <TabsTrigger value="users" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
                     <Users className="h-4 w-4" />
                     All Users
@@ -1293,6 +1731,10 @@ export function UserManagement() {
                   <TabsTrigger value="create" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
                     <UserPlus className="h-4 w-4" />
                     Add User
+                  </TabsTrigger>
+                  <TabsTrigger value="stores" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                    <Store className="h-4 w-4" />
+                    Store Management
                   </TabsTrigger>
                 </TabsList>
 
@@ -1389,7 +1831,10 @@ export function UserManagement() {
                                     {getRoleIcon(user.role)}
                                     {user.role}
                                   </Badge>
-                                  <Badge variant={getStatusBadgeVariant(user.status)}>
+                                  <Badge 
+                                    variant={getStatusBadgeVariant(user.status)}
+                                    className={user.status === 'active' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
+                                  >
                                     {user.status}
                                   </Badge>
                                   
@@ -1719,6 +2164,240 @@ export function UserManagement() {
                     </CardContent>
                   </Card>
                 </TabsContent>
+
+                <TabsContent value="stores" className="space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">Store Management</h3>
+                      <p className="text-sm text-gray-600 mt-1">Manage Shipway and Shopify store accounts</p>
+                    </div>
+                    <Dialog open={isAddStoreOpen} onOpenChange={setIsAddStoreOpen}>
+                      <DialogTrigger asChild>
+                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Store
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle>Add New Store</DialogTitle>
+                          <DialogDescription>
+                            Create a new store with Shipway and Shopify credentials
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <Label htmlFor="store-name">Store Name *</Label>
+                            <Input
+                              id="store-name"
+                              value={newStore.store_name}
+                              onChange={(e) => setNewStore({ ...newStore, store_name: e.target.value })}
+                              placeholder="e.g., Striker Store"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label className="text-sm font-semibold">Shipway Credentials</Label>
+                            <div>
+                              <Label htmlFor="shipway-username">Shipway Username *</Label>
+                              <Input
+                                id="shipway-username"
+                                value={newStore.shipway_username}
+                                onChange={(e) => setNewStore({ ...newStore, shipway_username: e.target.value })}
+                                placeholder="Enter Shipway username"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="shipway-password">Shipway Password *</Label>
+                              <div className="relative">
+                                <Input
+                                  id="shipway-password"
+                                  type={showPassword ? "text" : "password"}
+                                  value={newStore.shipway_password}
+                                  onChange={(e) => setNewStore({ ...newStore, shipway_password: e.target.value })}
+                                  placeholder="Enter Shipway password"
+                                  className="pr-10"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                >
+                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="w-full"
+                              onClick={() => handleTestShipway(newStore.shipway_username, newStore.shipway_password)}
+                              disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                            >
+                              {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                                  Testing...
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="w-3 h-3 mr-2" />
+                                  Test Shipway Connection
+                                </>
+                              )}
+                            </Button>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label className="text-sm font-semibold">Shopify Credentials</Label>
+                            <div>
+                              <Label htmlFor="shopify-url">Shopify Store URL *</Label>
+                              <Input
+                                id="shopify-url"
+                                value={newStore.shopify_store_url}
+                                onChange={(e) => setNewStore({ ...newStore, shopify_store_url: e.target.value })}
+                                placeholder="https://your-store.myshopify.com"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="shopify-token">Shopify Token *</Label>
+                              <div className="relative">
+                                <Input
+                                  id="shopify-token"
+                                  type={showShopifyToken ? "text" : "password"}
+                                  value={newStore.shopify_token}
+                                  onChange={(e) => setNewStore({ ...newStore, shopify_token: e.target.value })}
+                                  placeholder="Enter Shopify access token"
+                                  className="pr-10"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                  onClick={() => setShowShopifyToken(!showShopifyToken)}
+                                >
+                                  {showShopifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="w-full"
+                              onClick={() => handleTestShopify(newStore.shopify_store_url, newStore.shopify_token)}
+                              disabled={testingConnection.loading && testingConnection.type === 'shopify'}
+                            >
+                              {testingConnection.loading && testingConnection.type === 'shopify' ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                                  Testing...
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle className="w-3 h-3 mr-2" />
+                                  Test Shopify Connection
+                                </>
+                              )}
+                            </Button>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="status">Status *</Label>
+                            <Select
+                              value={newStore.status}
+                              onValueChange={(value: "active" | "inactive") => setNewStore({ ...newStore, status: value })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="active">Active</SelectItem>
+                                <SelectItem value="inactive">Inactive</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setIsAddStoreOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button onClick={handleAddStore}>Add Store</Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+
+                  {/* Stores List */}
+                  {storesLoading ? (
+                    <div className="text-center py-8">
+                      <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
+                      <p className="text-sm text-gray-500 mt-2">Loading stores...</p>
+                    </div>
+                  ) : stores.length === 0 ? (
+                    <Card>
+                      <CardContent className="p-6 text-center">
+                        <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                        <p className="text-sm text-gray-500">No stores found. Add your first store to get started.</p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="rounded-md border overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Store Name</TableHead>
+                              <TableHead>Account Code</TableHead>
+                              <TableHead>Shipway Username</TableHead>
+                              <TableHead>Shopify URL</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Last Synced</TableHead>
+                              <TableHead>Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {stores.map((store) => (
+                              <TableRow key={store.id}>
+                                <TableCell className="font-medium">{store.store_name}</TableCell>
+                                <TableCell className="font-mono text-xs">{store.account_code}</TableCell>
+                                <TableCell>{store.shipway_username}</TableCell>
+                                <TableCell className="max-w-[200px] truncate">
+                                  {store.shopify_store_url || 'N/A'}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge 
+                                    variant={store.status === 'active' ? 'default' : 'destructive'}
+                                    className={store.status === 'active' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
+                                  >
+                                    {store.status.toUpperCase()}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {store.last_synced_at ? new Date(store.last_synced_at).toLocaleDateString() : 'Never'}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex space-x-2">
+                                    <Button size="sm" variant="outline" onClick={() => handleEditStore(store)}>
+                                      <Edit className="w-4 h-4" />
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => handleDeleteStoreClick(store)}>
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
               </Tabs>
             </CardContent>
           </Card>
@@ -2046,6 +2725,220 @@ export function UserManagement() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Edit Store Dialog */}
+      <Dialog open={isEditStoreOpen} onOpenChange={(open) => {
+        setIsEditStoreOpen(open)
+        if (!open) {
+          setError("")
+          setSuccess("")
+          setEditingStore(null)
+        }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Store</DialogTitle>
+            <DialogDescription>
+              Update store information and credentials
+            </DialogDescription>
+          </DialogHeader>
+          {editingStore && (
+            <div className="space-y-4">
+              {error && (
+                <Alert variant="destructive" className="border-red-200 bg-red-50">
+                  <AlertDescription className="text-red-800">{error}</AlertDescription>
+                </Alert>
+              )}
+              {success && (
+                <Alert className="border-green-200 bg-green-50">
+                  <AlertDescription className="text-green-800">{success}</AlertDescription>
+                </Alert>
+              )}
+              <div>
+                <Label htmlFor="edit-store-name">Store Name *</Label>
+                <Input
+                  id="edit-store-name"
+                  value={editingStore.store_name || ''}
+                  onChange={(e) => setEditingStore({ ...editingStore, store_name: e.target.value })}
+                  placeholder="e.g., Striker Store"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Shipway Credentials</Label>
+                <div>
+                  <Label htmlFor="edit-shipway-username">Shipway Username *</Label>
+                  <Input
+                    id="edit-shipway-username"
+                    value={editingStore.shipway_username || ''}
+                    onChange={(e) => setEditingStore({ ...editingStore, shipway_username: e.target.value })}
+                    placeholder="Enter Shipway username"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-shipway-password">Shipway Password (leave blank to keep current)</Label>
+                  <div className="relative">
+                    <Input
+                      id="edit-shipway-password"
+                      type={showPassword ? "text" : "password"}
+                      value={editingStore.shipway_password || ''}
+                      onChange={(e) => setEditingStore({ ...editingStore, shipway_password: e.target.value })}
+                      placeholder="Enter new password or leave blank"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => handleTestShipway(editingStore.shipway_username, editingStore.shipway_password || '')}
+                  disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                >
+                  {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                    <>
+                      <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                      Testing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-3 h-3 mr-2" />
+                      Test Shipway Connection
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Shopify Credentials</Label>
+                <div>
+                  <Label htmlFor="edit-shopify-url">Shopify Store URL *</Label>
+                  <Input
+                    id="edit-shopify-url"
+                    value={editingStore.shopify_store_url || ''}
+                    onChange={(e) => setEditingStore({ ...editingStore, shopify_store_url: e.target.value })}
+                    placeholder="https://your-store.myshopify.com"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-shopify-token">Shopify Token *</Label>
+                  <div className="relative">
+                    <Input
+                      id="edit-shopify-token"
+                      type={showShopifyToken ? "text" : "password"}
+                      value={editingStore.shopify_token || ''}
+                      onChange={(e) => setEditingStore({ ...editingStore, shopify_token: e.target.value })}
+                      placeholder="Enter Shopify access token"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowShopifyToken(!showShopifyToken)}
+                    >
+                      {showShopifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => handleTestShopify(editingStore.shopify_store_url || '', editingStore.shopify_token || '')}
+                  disabled={testingConnection.loading && testingConnection.type === 'shopify'}
+                >
+                  {testingConnection.loading && testingConnection.type === 'shopify' ? (
+                    <>
+                      <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                      Testing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-3 h-3 mr-2" />
+                      Test Shopify Connection
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              <div>
+                <Label htmlFor="edit-status">Status *</Label>
+                <Select
+                  value={editingStore.status || 'active'}
+                  onValueChange={(value: "active" | "inactive") => setEditingStore({ ...editingStore, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setIsEditStoreOpen(false)
+                setEditingStore(null)
+                setError("")
+                setSuccess("")
+              }}
+              disabled={updatingStore}
+            >
+              Cancel
+            </Button>
+            <Button 
+              type="button"
+              onClick={handleUpdateStore}
+              disabled={updatingStore}
+            >
+              {updatingStore ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                "Update Store"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Store Confirmation Dialog */}
+      <AlertDialog open={isDeleteStoreConfirmOpen} onOpenChange={setIsDeleteStoreConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {storeToDelete?.store_name}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setIsDeleteStoreConfirmOpen(false)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDeleteStore} className="bg-red-600 hover:bg-red-700">
+              Delete Store
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 } 

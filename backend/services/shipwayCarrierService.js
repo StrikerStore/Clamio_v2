@@ -4,10 +4,52 @@ const fs = require('fs');
 const database = require('../config/database');
 
 class ShipwayCarrierService {
-  constructor() {
+  constructor(accountCode = null) {
     this.apiUrl = 'https://app.shipway.com/api/getcarrier';
-    // Use the same Basic Auth header as other Shipway APIs
-    this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
+    this.accountCode = accountCode;
+    this.basicAuthHeader = null;
+    this.initialized = false;
+  }
+
+  /**
+   * Initialize service by fetching store credentials
+   * @returns {Promise<void>}
+   */
+  async initialize() {
+    if (this.initialized) {
+      return;
+    }
+
+    try {
+      if (this.accountCode) {
+        // Multi-store mode: fetch credentials from database
+        const store = await database.getStoreByAccountCode(this.accountCode);
+        
+        if (!store) {
+          throw new Error(`Store not found for account code: ${this.accountCode}`);
+        }
+        
+        if (store.status !== 'active') {
+          throw new Error(`Store is not active: ${this.accountCode}`);
+        }
+        
+        this.basicAuthHeader = store.auth_token;
+        console.log(`✅ ShipwayCarrierService initialized for store: ${this.accountCode}`);
+      } else {
+        // Legacy mode: use environment variable
+        this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
+        console.log(`✅ ShipwayCarrierService initialized in legacy mode`);
+      }
+
+      if (!this.basicAuthHeader) {
+        throw new Error('Shipway API configuration error. No auth token available.');
+      }
+
+      this.initialized = true;
+    } catch (error) {
+      console.error('❌ ShipwayCarrierService initialization failed:', error.message);
+      throw error;
+    }
   }
 
   /**
@@ -15,8 +57,11 @@ class ShipwayCarrierService {
    * @returns {Promise<Array>} Array of carrier data
    */
   async fetchCarriersFromShipway() {
+    // Initialize service if not already initialized
+    await this.initialize();
+    
     try {
-      console.log('🔵 SHIPWAY CARRIER: Fetching carriers from Shipway API...');
+      console.log(`🔵 SHIPWAY CARRIER: Fetching carriers from Shipway API${this.accountCode ? ` (${this.accountCode})` : ''}...`);
       
       if (!this.basicAuthHeader) {
         throw new Error('Shipway API configuration error. SHIPWAY_BASIC_AUTH_HEADER not found in environment variables.');
@@ -118,7 +163,8 @@ class ShipwayCarrierService {
             carrier_name: carrierName,
             status: status,
             weight_in_kg: weightInKg,
-            priority: priority
+            priority: priority,
+            account_code: this.accountCode || 'STRI' // Multi-store: Tag carrier with account_code
           });
 
           console.log(`  - Extracted: ${carrierId} - ${carrierName} (${status}) - Weight: ${weightInKg || 'N/A'} - Priority: ${priority}`);
@@ -329,8 +375,16 @@ class ShipwayCarrierService {
 
       console.log('📊 CSV Export: Carriers sorted by priority (1, 2, 3...)');
 
-      // Get headers from the first carrier object
-      const headers = Object.keys(sortedCarriers[0]);
+      // Define headers with store info first, then carrier details
+      const headers = [
+        'store_name',
+        'account_code',
+        'carrier_id',
+        'carrier_name',
+        'status',
+        'weight_in_kg',
+        'priority'
+      ];
       
       // Create CSV header row
       const csvHeader = headers.join(',');
@@ -338,7 +392,7 @@ class ShipwayCarrierService {
       // Create CSV data rows
       const csvRows = sortedCarriers.map(carrier => {
         return headers.map(header => {
-          const value = carrier[header];
+          const value = carrier[header] !== undefined && carrier[header] !== null ? carrier[header] : '';
           // Escape quotes and wrap in quotes if contains comma or newline
           const escapedValue = String(value).replace(/"/g, '""');
           return `"${escapedValue}"`;
@@ -390,8 +444,13 @@ class ShipwayCarrierService {
         throw new Error(`CSV is missing required columns: ${missingColumns.join(', ')}. Expected columns: ${requiredColumns.join(', ')}`);
       }
 
-      // Check for extra columns
-      const extraColumns = header.filter(col => !requiredColumns.includes(col));
+      // Optional columns (for reference only, not used in updates)
+      const optionalColumns = ['store_name', 'account_code'];
+      
+      // Check for extra columns (excluding optional ones)
+      const extraColumns = header.filter(col => 
+        !requiredColumns.includes(col) && !optionalColumns.includes(col)
+      );
       if (extraColumns.length > 0) {
         console.log('⚠️ Warning: CSV contains extra columns:', extraColumns);
       }
