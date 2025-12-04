@@ -22,7 +22,7 @@ class StoreController {
         id: store.id,
         account_code: store.account_code,
         store_name: store.store_name,
-        shipway_username: store.shipway_username,
+        username: store.username,
         shopify_store_url: store.shopify_store_url,
         status: store.status,
         created_at: store.created_at,
@@ -69,7 +69,7 @@ class StoreController {
         id: store.id,
         account_code: store.account_code,
         store_name: store.store_name,
-        shipway_username: store.shipway_username,
+        username: store.username,
         shopify_store_url: store.shopify_store_url,
         status: store.status,
         created_at: store.created_at,
@@ -131,9 +131,10 @@ class StoreController {
   async createStore(req, res) {
     try {
       const { 
-        store_name, 
-        shipway_username, 
-        shipway_password, 
+        store_name,
+        shipping_partner,
+        username, 
+        password, 
         shopify_store_url, 
         shopify_token,
         status
@@ -147,10 +148,17 @@ class StoreController {
         });
       }
       
-      if (!shipway_username || !shipway_password) {
+      if (!shipping_partner) {
         return res.status(400).json({
           success: false,
-          message: 'Shipway username and password are required'
+          message: 'Shipping partner is required'
+        });
+      }
+      
+      if (!username || !password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Username and password are required'
         });
       }
       
@@ -172,18 +180,19 @@ class StoreController {
       const accountCode = await generateUniqueAccountCode(store_name, database);
       console.log(`✅ Generated account code: ${accountCode} for store: ${store_name}`);
       
-      // Encrypt Shipway password
-      const encryptedPassword = encryptionService.encrypt(shipway_password);
+      // Encrypt password
+      const encryptedPassword = encryptionService.encrypt(password);
       
       // Generate Basic Auth token
-      const authToken = Buffer.from(`${shipway_username}:${shipway_password}`).toString('base64');
+      const authToken = Buffer.from(`${username}:${password}`).toString('base64');
       
       // Create store
       await database.createStore({
         account_code: accountCode,
         store_name: store_name,
-        shipway_username: shipway_username,
-        shipway_password_encrypted: encryptedPassword,
+        shipping_partner: shipping_partner,
+        username: username,
+        password_encrypted: encryptedPassword,
         auth_token: `Basic ${authToken}`,
         shopify_store_url: shopify_store_url,
         shopify_token: shopify_token,
@@ -192,6 +201,21 @@ class StoreController {
       });
       
       console.log(`✅ Store created: ${store_name} (${accountCode})`);
+
+      // Immediately sync this new store (orders, carriers, products) using multi-store sync service
+      let syncResult = null;
+      try {
+        console.log(`🚀 Triggering initial sync for new store: ${accountCode}`);
+        syncResult = await multiStoreSyncService.syncStore(accountCode);
+        console.log(`✅ Initial sync completed for new store: ${accountCode}`);
+      } catch (syncError) {
+        console.error(`⚠️ Initial sync failed for new store ${accountCode}:`, syncError.message);
+        // Don't fail store creation if sync fails – just report it in response
+        syncResult = {
+          success: false,
+          error: syncError.message
+        };
+      }
       
       res.json({
         success: true,
@@ -199,7 +223,8 @@ class StoreController {
         data: {
           account_code: accountCode,
           store_name: store_name,
-          status: status
+          status: status,
+          sync_result: syncResult
         }
       });
       
@@ -221,8 +246,8 @@ class StoreController {
       const { accountCode } = req.params;
       const { 
         store_name, 
-        shipway_username, 
-        shipway_password, 
+        username, 
+        password, 
         shopify_store_url, 
         shopify_token,
         status
@@ -244,24 +269,24 @@ class StoreController {
         updateData.store_name = store_name;
       }
       
-      if (shipway_username !== undefined) {
-        updateData.shipway_username = shipway_username;
+      if (username !== undefined) {
+        updateData.username = username;
       }
       
       // Handle password update and auth token regeneration
-      if (shipway_password !== undefined && shipway_password !== '') {
+      if (password !== undefined && password !== '') {
         // Encrypt new password
-        updateData.shipway_password_encrypted = encryptionService.encrypt(shipway_password);
+        updateData.password_encrypted = encryptionService.encrypt(password);
         
         // Regenerate auth token with new password
-        const username = shipway_username !== undefined ? shipway_username : existingStore.shipway_username;
-        updateData.auth_token = `Basic ${Buffer.from(`${username}:${shipway_password}`).toString('base64')}`;
-      } else if (shipway_username !== undefined && shipway_username !== existingStore.shipway_username) {
+        const currentUsername = username !== undefined ? username : existingStore.username;
+        updateData.auth_token = `Basic ${Buffer.from(`${currentUsername}:${password}`).toString('base64')}`;
+      } else if (username !== undefined && username !== existingStore.username) {
         // Username changed but password not provided - regenerate auth token with existing password
-        if (existingStore.shipway_password_encrypted) {
+        if (existingStore.password_encrypted) {
           try {
-            const existingPassword = encryptionService.decrypt(existingStore.shipway_password_encrypted);
-            updateData.auth_token = `Basic ${Buffer.from(`${shipway_username}:${existingPassword}`).toString('base64')}`;
+            const existingPassword = encryptionService.decrypt(existingStore.password_encrypted);
+            updateData.auth_token = `Basic ${Buffer.from(`${username}:${existingPassword}`).toString('base64')}`;
           } catch (error) {
             console.error('Error decrypting existing password for auth token regeneration:', error);
             // Continue without regenerating auth token if decryption fails
@@ -390,17 +415,17 @@ class StoreController {
    */
   async testShipwayConnection(req, res) {
     try {
-      const { shipway_username, shipway_password } = req.body;
+      const { username, password } = req.body;
       
-      if (!shipway_username || !shipway_password) {
+      if (!username || !password) {
         return res.status(400).json({
           success: false,
-          message: 'Shipway username and password are required'
+          message: 'Username and password are required'
         });
       }
       
       // Generate auth token
-      const authToken = Buffer.from(`${shipway_username}:${shipway_password}`).toString('base64');
+      const authToken = Buffer.from(`${username}:${password}`).toString('base64');
       
       // Test connection by calling Shipway API
       const response = await axios.get('https://app.shipway.com/api/getorders', {
@@ -456,16 +481,30 @@ class StoreController {
         });
       }
       
+      // Normalize the Shopify store URL
+      let normalizedUrl = shopify_store_url.trim();
+      
+      // Remove protocol if present
+      normalizedUrl = normalizedUrl.replace(/^https?:\/\//, '');
+      
+      // Remove trailing slash
+      normalizedUrl = normalizedUrl.replace(/\/$/, '');
+      
+      // Remove /admin path if present
+      normalizedUrl = normalizedUrl.replace(/\/admin.*$/, '');
+      
+      // Construct the API URL
+      const apiUrl = `https://${normalizedUrl}/admin/api/2024-01/shop.json`;
+      
+      console.log(`[Test Shopify] Testing connection to: ${apiUrl}`);
+      
       // Test connection by calling Shopify API
-      const response = await axios.get(
-        `https://${shopify_store_url}/admin/api/2024-01/shop.json`,
-        {
-          headers: {
-            'X-Shopify-Access-Token': shopify_token
-          },
-          timeout: 10000
-        }
-      );
+      const response = await axios.get(apiUrl, {
+        headers: {
+          'X-Shopify-Access-Token': shopify_token
+        },
+        timeout: 10000
+      });
       
       if (response.status === 200 && response.data.shop) {
         res.json({
@@ -486,13 +525,44 @@ class StoreController {
     } catch (error) {
       console.error('Test Shopify connection error:', error.message);
       
-      if (error.response && error.response.status === 401) {
-        res.status(401).json({
+      if (error.response) {
+        // Handle different HTTP error statuses
+        const status = error.response.status;
+        const statusText = error.response.statusText;
+        
+        if (status === 401) {
+          return res.status(401).json({
+            success: false,
+            message: 'Shopify connection failed: Invalid token or unauthorized access'
+          });
+        } else if (status === 404) {
+          return res.status(404).json({
+            success: false,
+            message: 'Shopify connection failed: Store not found. Please check the store URL.'
+          });
+        } else if (status === 403) {
+          return res.status(403).json({
+            success: false,
+            message: 'Shopify connection failed: Access forbidden. Please check your token permissions.'
+          });
+        } else {
+          return res.status(status).json({
+            success: false,
+            message: `Shopify connection failed: ${statusText || 'HTTP error'} (${status})`
+          });
+        }
+      } else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        return res.status(500).json({
           success: false,
-          message: 'Shopify connection failed: Invalid token'
+          message: 'Shopify connection failed: Unable to reach Shopify server. Please check the store URL.'
+        });
+      } else if (error.code === 'ETIMEDOUT') {
+        return res.status(500).json({
+          success: false,
+          message: 'Shopify connection failed: Request timed out. Please try again.'
         });
       } else {
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: 'Shopify connection failed',
           error: error.message
@@ -524,6 +594,28 @@ class StoreController {
       res.status(500).json({
         success: false,
         message: 'Failed to sync stores',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get all available shipping partners
+   */
+  async getShippingPartners(req, res) {
+    try {
+      const shippingPartners = await database.getShippingPartners();
+      
+      res.json({
+        success: true,
+        data: shippingPartners
+      });
+      
+    } catch (error) {
+      console.error('Get shipping partners error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch shipping partners',
         error: error.message
       });
     }

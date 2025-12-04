@@ -83,26 +83,32 @@ class Database {
       const createTableQuery = `
         CREATE TABLE IF NOT EXISTS utility (
           id INT AUTO_INCREMENT PRIMARY KEY,
-          parameter VARCHAR(255) UNIQUE NOT NULL,
-          value TEXT NOT NULL,
+          parameter VARCHAR(255) NOT NULL,
+          value VARCHAR(500) NOT NULL,
           created_by VARCHAR(255) DEFAULT 'system',
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_parameter (parameter)
+          INDEX idx_parameter (parameter),
+          UNIQUE KEY unique_parameter_value (parameter, value)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createTableQuery);
       console.log('✅ Utility table created/verified');
       
-      // Initialize with default parameter
-      const initQuery = `
-        INSERT INTO utility (parameter, value, created_by)
-        VALUES ('number_of_day_of_order_include', '60', 'system')
-        ON DUPLICATE KEY UPDATE modified_at = modified_at
-      `;
+      // Initialize with default parameters
+      const initQueries = [
+        `INSERT INTO utility (parameter, value, created_by)
+         VALUES ('number_of_day_of_order_include', '60', 'system')
+         ON DUPLICATE KEY UPDATE modified_at = modified_at`,
+        `INSERT INTO utility (parameter, value, created_by)
+         VALUES ('shipping_partner', 'Shipway', 'system')
+         ON DUPLICATE KEY UPDATE modified_at = modified_at`
+      ];
       
-      await this.mysqlConnection.execute(initQuery);
+      for (const query of initQueries) {
+        await this.mysqlConnection.execute(query);
+      }
       console.log('✅ Utility table initialized with default parameters');
     } catch (error) {
       console.error('❌ Error creating utility table:', error.message);
@@ -119,22 +125,62 @@ class Database {
       const createTableQuery = `
         CREATE TABLE IF NOT EXISTS carriers (
           id INT AUTO_INCREMENT PRIMARY KEY,
-          carrier_id VARCHAR(100) UNIQUE NOT NULL,
+          carrier_id VARCHAR(100) NOT NULL,
           carrier_name VARCHAR(255) NOT NULL,
           status VARCHAR(50) DEFAULT 'Active',
           weight_in_kg DECIMAL(10,2),
           priority INTEGER NOT NULL,
+          account_code VARCHAR(50) NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           INDEX idx_priority (priority),
-          INDEX idx_carrier_id (carrier_id)
+          INDEX idx_carrier_id (carrier_id),
+          INDEX idx_account_code (account_code),
+          UNIQUE KEY unique_carrier_store (carrier_id, account_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createTableQuery);
       console.log('✅ Carriers table created/verified');
+
+      // Add account_code column if it doesn't exist (for existing tables)
+      await this.addAccountCodeToCarriersIfNotExists();
     } catch (error) {
       console.error('❌ Error creating carriers table:', error.message);
+    }
+  }
+
+  /**
+   * Add account_code column to existing carriers table if it doesn't exist (migration)
+   */
+  async addAccountCodeToCarriersIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if account_code column exists in carriers table
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM carriers LIKE 'account_code'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding account_code column to existing carriers table...');
+        
+        // Add account_code column as NOT NULL (will require data migration for existing rows)
+        await this.mysqlConnection.execute(
+          `ALTER TABLE carriers ADD COLUMN account_code VARCHAR(50) NOT NULL AFTER priority`
+        );
+        
+        // Add index for account_code
+        await this.mysqlConnection.execute(
+          `ALTER TABLE carriers ADD INDEX idx_account_code (account_code)`
+        );
+        
+        console.log('✅ account_code column added to carriers table');
+      } else {
+        console.log('✅ account_code column already exists in carriers table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding account_code column to carriers table:', error.message);
     }
   }
 
@@ -153,8 +199,10 @@ class Database {
           altText TEXT,
           totalImages INTEGER DEFAULT 0,
           sku_id VARCHAR(100),
+          account_code VARCHAR(50) NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_account_code (account_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
@@ -176,6 +224,9 @@ class Database {
           console.error('❌ Error adding sku_id column to products table:', error.message);
         }
       }
+
+      // Add account_code column if it doesn't exist (for existing tables)
+      await this.addAccountCodeToProductsIfNotExists();
 
       // Add created_at column if it doesn't exist
       try {
@@ -208,6 +259,40 @@ class Database {
       }
     } catch (error) {
       console.error('❌ Error creating products table:', error.message);
+    }
+  }
+
+  /**
+   * Add account_code column to existing products table if it doesn't exist (migration)
+   */
+  async addAccountCodeToProductsIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if account_code column exists in products table
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM products LIKE 'account_code'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding account_code column to existing products table...');
+        
+        // Add account_code column as NOT NULL (will require data migration for existing rows)
+        await this.mysqlConnection.execute(
+          `ALTER TABLE products ADD COLUMN account_code VARCHAR(50) NOT NULL AFTER sku_id`
+        );
+        
+        // Add index for account_code
+        await this.mysqlConnection.execute(
+          `ALTER TABLE products ADD INDEX idx_account_code (account_code)`
+        );
+        
+        console.log('✅ account_code column added to products table');
+      } else {
+        console.log('✅ account_code column already exists in products table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding account_code column to products table:', error.message);
     }
   }
 
@@ -353,11 +438,13 @@ class Database {
           collectable_amount DECIMAL(10,2),
           pincode VARCHAR(20),
           is_in_new_order BOOLEAN DEFAULT 1,
+          account_code VARCHAR(50) NOT NULL,
           INDEX idx_unique_id (unique_id),
           INDEX idx_order_id (order_id),
           INDEX idx_pincode (pincode),
           INDEX idx_order_date (order_date),
-          INDEX idx_size (size)
+          INDEX idx_size (size),
+          INDEX idx_account_code (account_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
@@ -369,6 +456,9 @@ class Database {
 
       // Increase id column size if needed (migration)
       await this.increaseIdColumnSizeIfNeeded();
+
+      // Add account_code column if it doesn't exist (for existing tables)
+      await this.addAccountCodeToOrdersIfNotExists();
 
       // Create labels table for caching label URLs
       await this.createLabelsTable();
@@ -423,6 +513,40 @@ class Database {
   /**
    * Increase id column size if it's too small (migration)
    */
+  /**
+   * Add account_code column to existing orders table if it doesn't exist (migration)
+   */
+  async addAccountCodeToOrdersIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if account_code column exists in orders table
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM orders LIKE 'account_code'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding account_code column to existing orders table...');
+        
+        // Add account_code column as NOT NULL (will require data migration for existing rows)
+        await this.mysqlConnection.execute(
+          `ALTER TABLE orders ADD COLUMN account_code VARCHAR(50) NOT NULL AFTER is_in_new_order`
+        );
+        
+        // Add index for account_code
+        await this.mysqlConnection.execute(
+          `ALTER TABLE orders ADD INDEX idx_account_code (account_code)`
+        );
+        
+        console.log('✅ account_code column added to orders table');
+      } else {
+        console.log('✅ account_code column already exists in orders table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding account_code column to orders table:', error.message);
+    }
+  }
+
   async increaseIdColumnSizeIfNeeded() {
     if (!this.mysqlConnection) return;
 
@@ -515,6 +639,7 @@ class Database {
           is_handover TINYINT(1) DEFAULT 0,
           current_shipment_status VARCHAR(100) NULL,
           manifest_id VARCHAR(100) NULL,
+          account_code VARCHAR(50) NOT NULL,
           INDEX idx_order_id (order_id),
           INDEX idx_awb (awb),
           INDEX idx_carrier_id (carrier_id),
@@ -522,7 +647,8 @@ class Database {
           INDEX idx_is_manifest (is_manifest),
           INDEX idx_is_handover (is_handover),
           INDEX idx_current_shipment_status (current_shipment_status),
-          INDEX idx_manifest_id (manifest_id)
+          INDEX idx_manifest_id (manifest_id),
+          INDEX idx_account_code (account_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
@@ -593,9 +719,46 @@ class Database {
           console.error('❌ Error adding manifest_id column to labels table:', error.message);
         }
       }
+
+      // Add account_code column if it doesn't exist (for existing tables)
+      await this.addAccountCodeToLabelsIfNotExists();
       
       } catch (error) {
       console.error('❌ Error creating labels table:', error.message);
+    }
+  }
+
+  /**
+   * Add account_code column to existing labels table if it doesn't exist (migration)
+   */
+  async addAccountCodeToLabelsIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if account_code column exists in labels table
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM labels LIKE 'account_code'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding account_code column to existing labels table...');
+        
+        // Add account_code column as NOT NULL (will require data migration for existing rows)
+        await this.mysqlConnection.execute(
+          `ALTER TABLE labels ADD COLUMN account_code VARCHAR(50) NOT NULL AFTER manifest_id`
+        );
+        
+        // Add index for account_code
+        await this.mysqlConnection.execute(
+          `ALTER TABLE labels ADD INDEX idx_account_code (account_code)`
+        );
+        
+        console.log('✅ account_code column added to labels table');
+      } else {
+        console.log('✅ account_code column already exists in labels table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding account_code column to labels table:', error.message);
     }
   }
 
@@ -616,6 +779,7 @@ class Database {
           shipment_status VARCHAR(100) NOT NULL,
           timestamp DATETIME NOT NULL,
           ndr_reason VARCHAR(255) NULL,
+          account_code VARCHAR(50) NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           
@@ -625,14 +789,52 @@ class Database {
           INDEX idx_timestamp (timestamp),
           INDEX idx_shipment_status (shipment_status),
           INDEX idx_order_timestamp (order_id, timestamp),
-          INDEX idx_order_type_status (order_id, order_type)
+          INDEX idx_order_type_status (order_id, order_type),
+          INDEX idx_account_code (account_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createOrderTrackingTableQuery);
       console.log('✅ Order tracking table created/verified');
+
+      // Add account_code column if it doesn't exist (for existing tables)
+      await this.addAccountCodeToOrderTrackingIfNotExists();
     } catch (error) {
       console.error('❌ Error creating order tracking table:', error.message);
+    }
+  }
+
+  /**
+   * Add account_code column to existing order_tracking table if it doesn't exist (migration)
+   */
+  async addAccountCodeToOrderTrackingIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if account_code column exists in order_tracking table
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM order_tracking LIKE 'account_code'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding account_code column to existing order_tracking table...');
+        
+        // Add account_code column as NOT NULL (will require data migration for existing rows)
+        await this.mysqlConnection.execute(
+          `ALTER TABLE order_tracking ADD COLUMN account_code VARCHAR(50) NOT NULL AFTER ndr_reason`
+        );
+        
+        // Add index for account_code
+        await this.mysqlConnection.execute(
+          `ALTER TABLE order_tracking ADD INDEX idx_account_code (account_code)`
+        );
+        
+        console.log('✅ account_code column added to order_tracking table');
+      } else {
+        console.log('✅ account_code column already exists in order_tracking table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding account_code column to order_tracking table:', error.message);
     }
   }
 
@@ -671,51 +873,58 @@ class Database {
           shipping_zipcode VARCHAR(20),
           shipping_latitude VARCHAR(20),
           shipping_longitude VARCHAR(20),
+          account_code VARCHAR(50) NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           
           INDEX idx_email (email),
           INDEX idx_billing_zipcode (billing_zipcode),
-          INDEX idx_shipping_zipcode (shipping_zipcode)
+          INDEX idx_shipping_zipcode (shipping_zipcode),
+          INDEX idx_account_code (account_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
       await this.mysqlConnection.execute(createCustomerInfoTableQuery);
       console.log('✅ Customer info table created/verified');
 
-      // Add store_code column to existing customer_info table if it doesn't exist (migration)
-      await this.addStoreCodeToCustomerInfoIfNotExists();
+      // Add account_code column to existing customer_info table if it doesn't exist (migration)
+      await this.addAccountCodeToCustomerInfoIfNotExists();
     } catch (error) {
       console.error('❌ Error creating customer info table:', error.message);
     }
   }
 
   /**
-   * Add store_code column to existing customer_info table if it doesn't exist (migration)
+   * Add account_code column to existing customer_info table if it doesn't exist (migration)
    */
-  async addStoreCodeToCustomerInfoIfNotExists() {
+  async addAccountCodeToCustomerInfoIfNotExists() {
     if (!this.mysqlConnection) return;
 
     try {
-      // Check if store_code column exists in customer_info table
+      // Check if account_code column exists in customer_info table
       const [columns] = await this.mysqlConnection.execute(
-        `SHOW COLUMNS FROM customer_info LIKE 'store_code'`
+        `SHOW COLUMNS FROM customer_info LIKE 'account_code'`
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding store_code column to existing customer_info table...');
+        console.log('🔄 Adding account_code column to existing customer_info table...');
         
-        // Add store_code column after order_id
+        // Add account_code column as NOT NULL (will require data migration for existing rows)
         await this.mysqlConnection.execute(
-          `ALTER TABLE customer_info ADD COLUMN store_code VARCHAR(10) DEFAULT '1' AFTER order_id`
+          `ALTER TABLE customer_info ADD COLUMN account_code VARCHAR(50) NOT NULL AFTER shipping_longitude`
         );
         
-        console.log('✅ store_code column added to customer_info table');
+        // Add index for account_code
+        await this.mysqlConnection.execute(
+          `ALTER TABLE customer_info ADD INDEX idx_account_code (account_code)`
+        );
+        
+        console.log('✅ account_code column added to customer_info table');
       } else {
-        console.log('✅ store_code column already exists in customer_info table');
+        console.log('✅ account_code column already exists in customer_info table');
       }
     } catch (error) {
-      console.error('❌ Error adding store_code column to customer_info table:', error.message);
+      console.error('❌ Error adding account_code column to customer_info table:', error.message);
     }
   }
 
@@ -782,10 +991,12 @@ class Database {
           is_cloned_row BOOLEAN DEFAULT FALSE,
           label_downloaded BOOLEAN DEFAULT FALSE,
           priority_carrier TEXT,
+          account_code VARCHAR(50) NOT NULL,
           INDEX idx_order_unique_id (order_unique_id),
           INDEX idx_order_id (order_id),
           INDEX idx_claimed_by (claimed_by),
-          INDEX idx_status (status)
+          INDEX idx_status (status),
+          INDEX idx_account_code (account_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
@@ -794,11 +1005,48 @@ class Database {
       
       // Add priority_carrier column if it doesn't exist (migration for existing tables)
       await this.addPriorityCarrierColumnToClaims();
+
+      // Add account_code column if it doesn't exist (for existing tables)
+      await this.addAccountCodeToClaimsIfNotExists();
       
       // Migrate existing claims data from orders table if claims table is empty
       await this.migrateClaimsData();
     } catch (error) {
       console.error('❌ Error creating claims table:', error.message);
+    }
+  }
+
+  /**
+   * Add account_code column to existing claims table if it doesn't exist (migration)
+   */
+  async addAccountCodeToClaimsIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if account_code column exists in claims table
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM claims LIKE 'account_code'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding account_code column to existing claims table...');
+        
+        // Add account_code column as NOT NULL (will require data migration for existing rows)
+        await this.mysqlConnection.execute(
+          `ALTER TABLE claims ADD COLUMN account_code VARCHAR(50) NOT NULL AFTER priority_carrier`
+        );
+        
+        // Add index for account_code
+        await this.mysqlConnection.execute(
+          `ALTER TABLE claims ADD INDEX idx_account_code (account_code)`
+        );
+        
+        console.log('✅ account_code column added to claims table');
+      } else {
+        console.log('✅ account_code column already exists in claims table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding account_code column to claims table:', error.message);
     }
   }
 
@@ -1092,6 +1340,39 @@ class Database {
   }
 
   /**
+   * Get carriers by account_code (store-specific)
+   * @param {string} accountCode - The account code to filter by
+   * @returns {Promise<Array>} Array of carriers for the specified store
+   */
+  async getCarriersByAccountCode(accountCode) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    if (!accountCode) {
+      throw new Error('account_code is required');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        `SELECT 
+          c.*,
+          s.store_name,
+          s.account_code as store_account_code
+        FROM carriers c
+        LEFT JOIN store_info s ON c.account_code = s.account_code
+        WHERE c.account_code = ?
+        ORDER BY c.priority ASC`,
+        [accountCode]
+      );
+      return rows;
+    } catch (error) {
+      console.error('Error getting carriers by account_code:', error);
+      throw new Error('Failed to get carriers from database');
+    }
+  }
+
+  /**
    * Get a utility parameter value from the database
    * @param {string} parameter - The parameter name
    * @returns {Promise<string|null>} The parameter value or null if not found
@@ -1160,20 +1441,49 @@ class Database {
   }
 
   /**
-   * Get carrier by carrier_id
-   * @param {string} carrierId - Carrier ID
-   * @returns {Promise<Object|null>} Carrier object or null if not found
+   * Get all shipping partners from utility table
+   * @returns {Promise<Array>} Array of shipping partner names
    */
-  async getCarrierById(carrierId) {
+  async getShippingPartners() {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
     }
 
     try {
       const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM carriers WHERE carrier_id = ?',
-        [carrierId]
+        'SELECT value FROM utility WHERE parameter = ? ORDER BY value ASC',
+        ['shipping_partner']
       );
+      return rows.map(row => row.value);
+    } catch (error) {
+      console.error('Error getting shipping partners:', error);
+      throw new Error('Failed to get shipping partners from database');
+    }
+  }
+
+  /**
+   * Get carrier by carrier_id
+   * @param {string} carrierId - Carrier ID
+   * @returns {Promise<Object|null>} Carrier object or null if not found
+   */
+  async getCarrierById(carrierId, accountCode = null) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      let query, params;
+      if (accountCode) {
+        // Check by both carrier_id and account_code (store-specific)
+        query = 'SELECT * FROM carriers WHERE carrier_id = ? AND account_code = ?';
+        params = [carrierId, accountCode];
+      } else {
+        // Legacy: check by carrier_id only (for backward compatibility)
+        query = 'SELECT * FROM carriers WHERE carrier_id = ?';
+        params = [carrierId];
+      }
+      
+      const [rows] = await this.mysqlConnection.execute(query, params);
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
       console.error('Error getting carrier by ID:', error);
@@ -1194,9 +1504,13 @@ class Database {
     try {
       const { carrier_id, carrier_name, status, weight_in_kg, priority, account_code } = carrierData;
       
+      if (!account_code) {
+        throw new Error('account_code is required for creating carrier');
+      }
+      
       const [result] = await this.mysqlConnection.execute(
         'INSERT INTO carriers (carrier_id, carrier_name, status, weight_in_kg, priority, account_code) VALUES (?, ?, ?, ?, ?, ?)',
-        [carrier_id, carrier_name, status || 'Active', weight_in_kg || null, priority, account_code || 'STRI']
+        [carrier_id, carrier_name, status || 'Active', weight_in_kg || null, priority, account_code]
       );
 
       return {
@@ -1222,7 +1536,7 @@ class Database {
    * @param {Object} updateData - Data to update
    * @returns {Promise<Object|null>} Updated carrier object or null if not found
    */
-  async updateCarrier(carrierId, updateData) {
+  async updateCarrier(carrierId, updateData, accountCode = null) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
     }
@@ -1247,15 +1561,30 @@ class Database {
         fields.push('priority = ?');
         values.push(updateData.priority);
       }
+      if (updateData.account_code !== undefined) {
+        fields.push('account_code = ?');
+        values.push(updateData.account_code);
+      }
 
       if (fields.length === 0) {
         throw new Error('No fields to update');
       }
 
+      // Build WHERE clause - use account_code if provided
+      let whereClause = 'carrier_id = ?';
       values.push(carrierId);
+      
+      if (accountCode) {
+        whereClause += ' AND account_code = ?';
+        values.push(accountCode);
+      } else if (updateData.account_code) {
+        // Use account_code from updateData if not provided as parameter
+        whereClause += ' AND account_code = ?';
+        values.push(updateData.account_code);
+      }
 
       const [result] = await this.mysqlConnection.execute(
-        `UPDATE carriers SET ${fields.join(', ')} WHERE carrier_id = ?`,
+        `UPDATE carriers SET ${fields.join(', ')} WHERE ${whereClause}`,
         values
       );
 
@@ -1263,7 +1592,9 @@ class Database {
         return null;
       }
 
-      return await this.getCarrierById(carrierId);
+      // Use accountCode from parameter or updateData
+      const finalAccountCode = accountCode || updateData.account_code || null;
+      return await this.getCarrierById(carrierId, finalAccountCode);
     } catch (error) {
       console.error('Error updating carrier:', error);
       throw new Error('Failed to update carrier in database');
@@ -1310,7 +1641,7 @@ class Database {
    * @param {Array} carriers - Array of carriers in the desired order
    * @returns {Promise<void>}
    */
-  async reorderCarrierPriorities(carriers) {
+  async reorderCarrierPriorities(carriers, accountCode = null) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
     }
@@ -1321,14 +1652,22 @@ class Database {
       // Update priorities sequentially starting from 1
       for (let i = 0; i < carriers.length; i++) {
         const newPriority = i + 1;
+        const carrier = carriers[i];
+        const carrierAccountCode = accountCode || carrier.account_code;
+        
+        if (!carrierAccountCode) {
+          throw new Error('account_code is required for reordering priorities');
+        }
+
+        // Update with both carrier_id and account_code to ensure store-specific update
         await this.mysqlConnection.execute(
-          'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
-          [newPriority, carriers[i].carrier_id]
+          'UPDATE carriers SET priority = ? WHERE carrier_id = ? AND account_code = ?',
+          [newPriority, carrier.carrier_id, carrierAccountCode]
         );
       }
 
       await this.mysqlConnection.commit();
-      console.log(`✅ Reordered ${carriers.length} carrier priorities sequentially`);
+      console.log(`✅ Reordered ${carriers.length} carrier priorities sequentially${accountCode ? ` for store ${accountCode}` : ''}`);
     } catch (error) {
       await this.mysqlConnection.rollback();
       console.error('Error reordering carrier priorities:', error);
@@ -1341,16 +1680,24 @@ class Database {
    * @param {string} carrierId - Carrier ID
    * @returns {Promise<boolean>} True if deleted, false if not found
    */
-  async deleteCarrier(carrierId) {
+  async deleteCarrier(carrierId, accountCode = null) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
     }
 
     try {
-      const [result] = await this.mysqlConnection.execute(
-        'DELETE FROM carriers WHERE carrier_id = ?',
-        [carrierId]
-      );
+      let query, params;
+      if (accountCode) {
+        // Delete by both carrier_id and account_code (store-specific)
+        query = 'DELETE FROM carriers WHERE carrier_id = ? AND account_code = ?';
+        params = [carrierId, accountCode];
+      } else {
+        // Legacy: delete by carrier_id only (for backward compatibility)
+        query = 'DELETE FROM carriers WHERE carrier_id = ?';
+        params = [carrierId];
+      }
+
+      const [result] = await this.mysqlConnection.execute(query, params);
 
       return result.affectedRows > 0;
     } catch (error) {
@@ -1374,10 +1721,12 @@ class Database {
       let updated = 0;
 
       for (const carrier of carriers) {
-        const existing = await this.getCarrierById(carrier.carrier_id);
+        // Check by both carrier_id and account_code (store-specific)
+        const accountCode = carrier.account_code || null;
+        const existing = await this.getCarrierById(carrier.carrier_id, accountCode);
         
         if (existing) {
-          await this.updateCarrier(carrier.carrier_id, carrier);
+          await this.updateCarrier(carrier.carrier_id, carrier, accountCode);
           updated++;
         } else {
           await this.createCarrier(carrier);
@@ -1476,9 +1825,13 @@ class Database {
     try {
       const { id, name, image, altText, totalImages, sku_id, account_code } = productData;
       
+      if (!account_code) {
+        throw new Error('account_code is required for creating product');
+      }
+      
       const [result] = await this.mysqlConnection.execute(
         'INSERT INTO products (id, name, image, altText, totalImages, sku_id, account_code) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [id, name, image || null, altText || null, totalImages || 0, sku_id || null, account_code || 'STRI']
+        [id, name, image || null, altText || null, totalImages || 0, sku_id || null, account_code]
       );
 
       return {
@@ -2521,6 +2874,10 @@ class Database {
       throw new Error('MySQL connection not available');
     }
 
+    if (!orderData.account_code) {
+      throw new Error('account_code is required for creating order');
+    }
+
     try {
       // Extract size from product_code
       const extractedSize = this.extractSizeFromSku(orderData.product_code);
@@ -2570,7 +2927,7 @@ class Database {
           orderData.collectable_amount || null,
           orderData.pincode || null,
           orderData.is_in_new_order !== undefined ? orderData.is_in_new_order : true,
-          orderData.account_code || 'STRI'
+          orderData.account_code
         ]
       );
 
@@ -2595,7 +2952,7 @@ class Database {
           orderData.cloned_order_id || null,
           orderData.is_cloned_row || false,
           orderData.label_downloaded || false,
-          orderData.account_code || 'STRI'
+          orderData.account_code
         ]
       );
 
@@ -2612,7 +2969,7 @@ class Database {
           orderData.order_id || null,
           orderData.handover_at || null,
           orderData.priority_carrier || null,
-          orderData.account_code || 'STRI'
+          orderData.account_code
         ]
       );
 
@@ -2752,12 +3109,13 @@ class Database {
           l.is_manifest
         FROM orders o
         LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
-        LEFT JOIN labels l ON o.order_id = l.order_id
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+        LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         WHERE o.unique_id = ?
       `, [unique_id]);
       
@@ -2801,12 +3159,13 @@ class Database {
           l.is_manifest
         FROM orders o
         LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
-        LEFT JOIN labels l ON o.order_id = l.order_id
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+        LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         WHERE o.order_id = ? 
         ORDER BY o.product_name
       `, [order_id]);
@@ -2822,13 +3181,14 @@ class Database {
    * Get all orders from MySQL
    * @returns {Array} Array of all orders
    */
-  async getAllOrders() {
+  async getAllOrders(cutoffDate = null) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
     }
 
     try {
-      const [rows] = await this.mysqlConnection.execute(`
+      // Build query with optional date filter using parameterized query
+      let query = `
         SELECT 
           o.*,
           p.image as product_image,
@@ -2859,16 +3219,29 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
-        LEFT JOIN labels l ON o.order_id = l.order_id
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+        LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         LEFT JOIN store_info s ON o.account_code = s.account_code
-        WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1 OR (c.status = 'unclaimed' AND c.status IS NOT NULL)) 
-        ORDER BY o.order_date DESC, o.order_id, o.product_name
-      `);
+        WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1 OR (c.status = 'unclaimed' AND c.status IS NOT NULL))`;
+      
+      const params = [];
+      
+      // Add date filter if cutoffDate is provided
+      if (cutoffDate) {
+        query += ` AND o.order_date >= ?`;
+        // Format date for MySQL (YYYY-MM-DD HH:MM:SS)
+        const mysqlDate = cutoffDate.toISOString().slice(0, 19).replace('T', ' ');
+        params.push(mysqlDate);
+      }
+      
+      query += ` ORDER BY o.order_date DESC, o.order_id, o.product_name`;
+      
+      const [rows] = await this.mysqlConnection.execute(query, params);
       
       return rows;
     } catch (error) {
@@ -2910,12 +3283,13 @@ class Database {
           l.is_manifest
         FROM orders o
         LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
-        LEFT JOIN labels l ON o.order_id = l.order_id
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+        LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         WHERE c.claimed_by = ? AND (o.is_in_new_order = 1 OR c.label_downloaded = 1) 
         ORDER BY c.claimed_at DESC
       `, [warehouseId]);
@@ -2968,12 +3342,13 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
-        LEFT JOIN labels l ON o.order_id = l.order_id
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+        LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         WHERE c.claimed_by = ? 
         AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
         AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
@@ -3028,11 +3403,12 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE c.claimed_by = ? 
         AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
@@ -3089,12 +3465,13 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
-        LEFT JOIN labels l ON o.order_id = l.order_id
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+        LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         WHERE c.claimed_by = ? 
         AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
         AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
@@ -3154,12 +3531,13 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-        LEFT JOIN claims c ON o.unique_id = c.order_unique_id
-        LEFT JOIN labels l ON o.order_id = l.order_id
+        LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+        LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         WHERE c.claimed_by = ? 
         AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
         AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
@@ -3283,7 +3661,10 @@ class Database {
             'SELECT account_code FROM orders WHERE order_id = ? LIMIT 1',
             [orderId]
           );
-          const accountCode = orderData.length > 0 ? orderData[0].account_code : 'STRI';
+          if (orderData.length === 0 || !orderData[0].account_code) {
+            throw new Error(`Order ${orderId} not found or missing account_code`);
+          }
+          const accountCode = orderData[0].account_code;
 
           // Ensure a label record exists for this order_id
           await this.mysqlConnection.execute(`
@@ -3292,9 +3673,10 @@ class Database {
             ON DUPLICATE KEY UPDATE order_id = VALUES(order_id), account_code = VALUES(account_code)
           `, [orderId, accountCode]);
 
-          labelValues.push(orderId);
+          // CRITICAL: Filter by both order_id AND account_code to ensure store-specific update
+          labelValues.push(orderId, accountCode);
           await this.mysqlConnection.execute(
-            `UPDATE labels SET ${labelFields.join(', ')} WHERE order_id = ?`,
+            `UPDATE labels SET ${labelFields.join(', ')} WHERE order_id = ? AND account_code = ?`,
             labelValues
           );
         }
@@ -3376,11 +3758,12 @@ class Database {
         `SELECT o.*, p.image as product_image
          FROM orders o
          LEFT JOIN products p ON (
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id
+          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          AND o.account_code = p.account_code
         )
-         LEFT JOIN claims c ON o.unique_id = c.order_unique_id
+         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
          WHERE (o.order_id LIKE ? OR o.customer_name LIKE ? OR o.product_name LIKE ? 
          OR o.product_code LIKE ? OR o.pincode LIKE ?)
          AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
@@ -3485,16 +3868,22 @@ class Database {
    * @param {string} orderId - Order ID (can be clone order ID)
    * @returns {Object|null} Label data or null if not found
    */
-  async getLabelByOrderId(orderId) {
+  async getLabelByOrderId(orderId, accountCode = null) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
     }
 
     try {
-      const [rows] = await this.mysqlConnection.execute(
-        'SELECT * FROM labels WHERE order_id = ?',
-        [orderId]
-      );
+      let query = 'SELECT * FROM labels WHERE order_id = ?';
+      const params = [orderId];
+      
+      // If account_code is provided, filter by it to ensure store-specific label retrieval
+      if (accountCode) {
+        query += ' AND account_code = ?';
+        params.push(accountCode);
+      }
+      
+      const [rows] = await this.mysqlConnection.execute(query, params);
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
       console.error('Error getting label by order ID:', error);
@@ -3510,6 +3899,10 @@ class Database {
   async upsertLabel(labelData) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
+    }
+
+    if (!labelData.account_code) {
+      throw new Error('account_code is required for creating/updating label');
     }
 
     try {
@@ -3565,12 +3958,13 @@ class Database {
           labelData.priority_carrier || null,
           labelData.is_manifest || 0,
           labelData.manifest_id || null,
-          labelData.account_code || 'STRI',
+          labelData.account_code,
           ...updateValues
         ]
       );
 
-      return await this.getLabelByOrderId(labelData.order_id);
+      // CRITICAL: Retrieve label with account_code to ensure store-specific retrieval
+      return await this.getLabelByOrderId(labelData.order_id, labelData.account_code);
     } catch (error) {
       console.error('Error creating/updating label:', error);
       throw new Error('Failed to save label to database');
@@ -3643,9 +4037,13 @@ class Database {
       throw new Error('MySQL connection not available');
     }
 
+    if (!customerData.account_code) {
+      throw new Error('account_code is required for creating/updating customer info');
+    }
+
     try {
       const fields = [
-        'store_code', 'email', 'billing_firstname', 'billing_lastname', 'billing_phone',
+        'email', 'billing_firstname', 'billing_lastname', 'billing_phone',
         'billing_address', 'billing_address2', 'billing_city', 'billing_state',
         'billing_country', 'billing_zipcode', 'billing_latitude', 'billing_longitude',
         'shipping_firstname', 'shipping_lastname', 'shipping_phone',
@@ -3660,7 +4058,6 @@ class Database {
 
       const values = [
         customerData.order_id,
-        customerData.store_code || '1',
         customerData.email || null,
         customerData.billing_firstname || null,
         customerData.billing_lastname || null,
@@ -3684,7 +4081,7 @@ class Database {
         customerData.shipping_zipcode || null,
         customerData.shipping_latitude || null,
         customerData.shipping_longitude || null,
-        customerData.account_code || 'STRI'
+        customerData.account_code
       ];
 
       await this.mysqlConnection.execute(
@@ -3774,11 +4171,12 @@ class Database {
 
     try {
       const [rows] = await this.mysqlConnection.execute(`
-        SELECT DISTINCT c.order_id 
+        SELECT DISTINCT c.order_id, o.account_code 
         FROM claims c
-        INNER JOIN orders o ON c.order_id = o.order_id
+        INNER JOIN orders o ON c.order_id = o.order_id AND c.account_code = o.account_code
         WHERE c.label_downloaded = 1 
         AND c.order_id IS NOT NULL
+        AND o.account_code IS NOT NULL
         ORDER BY c.order_id
       `);
       return rows;
@@ -3800,16 +4198,51 @@ class Database {
 
     try {
       const [rows] = await this.mysqlConnection.execute(`
-        SELECT DISTINCT c.order_id 
+        SELECT DISTINCT c.order_id, o.account_code 
         FROM claims c
-        INNER JOIN orders o ON c.order_id = o.order_id
+        INNER JOIN orders o ON c.order_id = o.order_id AND c.account_code = o.account_code
         WHERE c.label_downloaded = 1 
         AND c.order_id IS NOT NULL
+        AND o.account_code IS NOT NULL
         ORDER BY c.order_id
       `);
       return rows;
     } catch (error) {
       console.error('Error getting inactive orders for tracking:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get orders that need auto-manifest (is_handover = 1 but is_manifest = 0)
+   * @returns {Array} Array of orders needing manifest with account_code
+   */
+  async getOrdersNeedingAutoManifest() {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(`
+        SELECT DISTINCT 
+          l.order_id,
+          l.awb,
+          l.current_shipment_status,
+          l.is_handover,
+          l.is_manifest,
+          o.account_code,
+          o.customer_name,
+          o.product_name
+        FROM labels l
+        INNER JOIN orders o ON l.order_id = o.order_id AND l.account_code = o.account_code
+        WHERE l.is_handover = 1 
+        AND (l.is_manifest = 0 OR l.is_manifest IS NULL)
+        AND o.account_code IS NOT NULL
+        ORDER BY l.order_id
+      `);
+      return rows;
+    } catch (error) {
+      console.error('Error getting orders needing auto-manifest:', error);
       throw error;
     }
   }
@@ -3831,7 +4264,10 @@ class Database {
         'SELECT account_code FROM orders WHERE order_id = ? LIMIT 1',
         [orderId]
       );
-      const accountCode = orderData.length > 0 ? orderData[0].account_code : 'STRI';
+      if (orderData.length === 0 || !orderData[0].account_code) {
+        throw new Error(`Order ${orderId} not found or missing account_code`);
+      }
+      const accountCode = orderData[0].account_code;
 
       // Clear existing tracking data for this order to avoid duplicates
       await this.mysqlConnection.execute(
@@ -4087,8 +4523,8 @@ class Database {
             ELSE 'unknown'
           END as expected_tab
         FROM labels l
-        INNER JOIN orders o ON o.order_id = l.order_id
-        INNER JOIN claims c ON o.unique_id = c.order_unique_id
+        INNER JOIN orders o ON o.order_id = l.order_id AND o.account_code = l.account_code
+        INNER JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
         WHERE l.is_manifest = 1
         AND (l.handover_at IS NOT NULL OR c.status IN ('claimed', 'ready_for_handover'))
         ORDER BY l.handover_at DESC
@@ -4171,7 +4607,7 @@ class Database {
           o.customer_name,
           o.product_name
         FROM labels l
-        LEFT JOIN orders o ON l.order_id = o.order_id
+        LEFT JOIN orders o ON l.order_id = o.order_id AND l.account_code = o.account_code
         ORDER BY l.updated_at DESC
       `);
       
@@ -4203,7 +4639,7 @@ class Database {
           o.customer_name,
           o.product_name
         FROM labels l
-        LEFT JOIN orders o ON l.order_id = o.order_id
+        LEFT JOIN orders o ON l.order_id = o.order_id AND l.account_code = o.account_code
         WHERE l.is_handover = 1
         ORDER BY l.updated_at DESC
       `);
@@ -4231,8 +4667,9 @@ class Database {
           id INT AUTO_INCREMENT PRIMARY KEY,
           account_code VARCHAR(50) UNIQUE NOT NULL,
           store_name VARCHAR(255) NOT NULL,
-          shipway_username VARCHAR(255) NOT NULL,
-          shipway_password_encrypted TEXT NOT NULL,
+          shipping_partner VARCHAR(255) NOT NULL,
+          username VARCHAR(255) NOT NULL,
+          password_encrypted TEXT NOT NULL,
           auth_token TEXT NOT NULL,
           shopify_store_url VARCHAR(255) NOT NULL,
           shopify_token TEXT NOT NULL,
@@ -4243,7 +4680,8 @@ class Database {
           last_synced_at TIMESTAMP NULL,
           last_shopify_sync_at TIMESTAMP NULL,
           INDEX idx_status (status),
-          INDEX idx_account_code (account_code)
+          INDEX idx_account_code (account_code),
+          INDEX idx_shipping_partner (shipping_partner)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
       
@@ -4273,6 +4711,105 @@ class Database {
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
       console.error('Error getting store by account code:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get store by Shopify URL or token
+   * @param {string} shopifyUrl - The Shopify store URL (e.g., 'seq5t1-mz.myshopify.com')
+   * @param {string} shopifyToken - The Shopify access token (optional, used as fallback)
+   * @returns {Object|null} Store object or null if not found
+   */
+  async getStoreByShopifyCredentials(shopifyUrl, shopifyToken = null) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      // Extract store domain from URL if full URL is provided
+      let storeDomain = shopifyUrl;
+      if (shopifyUrl.includes('://')) {
+        // Extract domain from full URL (e.g., 'https://seq5t1-mz.myshopify.com/admin/api/...')
+        const urlMatch = shopifyUrl.match(/https?:\/\/([^\/]+)/);
+        if (urlMatch) {
+          storeDomain = urlMatch[1];
+        }
+      }
+      
+      // Remove 'admin/api' part if present and clean up
+      storeDomain = storeDomain.split('/')[0].trim();
+      
+      // Remove protocol if still present
+      storeDomain = storeDomain.replace(/^https?:\/\//, '');
+      
+      console.log(`🔍 [Store Lookup] Searching for store with domain: ${storeDomain}`);
+      
+      // Try exact match first (ACTIVE stores only)
+      let [rows] = await this.mysqlConnection.execute(
+        'SELECT * FROM store_info WHERE shopify_store_url = ? AND status = "active"',
+        [storeDomain]
+      );
+      
+      // Try with https:// prefix
+      if (rows.length === 0) {
+        [rows] = await this.mysqlConnection.execute(
+          'SELECT * FROM store_info WHERE shopify_store_url = ? AND status = "active"',
+          [`https://${storeDomain}`]
+        );
+      }
+      
+      // Try with http:// prefix
+      if (rows.length === 0) {
+        [rows] = await this.mysqlConnection.execute(
+          'SELECT * FROM store_info WHERE shopify_store_url = ? AND status = "active"',
+          [`http://${storeDomain}`]
+        );
+      }
+      
+      // Try partial match (LIKE)
+      if (rows.length === 0) {
+        [rows] = await this.mysqlConnection.execute(
+          'SELECT * FROM store_info WHERE shopify_store_url LIKE ? AND status = "active"',
+          [`%${storeDomain}%`]
+        );
+      }
+      
+      // If still not found and token is provided, try to find by token (ACTIVE stores only)
+      if (rows.length === 0 && shopifyToken) {
+        console.log(`🔍 [Store Lookup] Trying to find store by Shopify token...`);
+        [rows] = await this.mysqlConnection.execute(
+          'SELECT * FROM store_info WHERE shopify_token = ? AND status = "active"',
+          [shopifyToken]
+        );
+      }
+      
+      if (rows.length > 0) {
+        console.log(`✅ [Store Lookup] Found store: ${rows[0].store_name} (account_code: ${rows[0].account_code})`);
+        return rows[0];
+      } else {
+        // Log all available stores for debugging
+        try {
+          const [allStores] = await this.mysqlConnection.execute(
+            'SELECT account_code, store_name, shopify_store_url, status FROM store_info'
+          );
+          console.log(`❌ [Store Lookup] Store not found. Searched domain: "${storeDomain}", Token provided: ${shopifyToken ? 'Yes' : 'No'}`);
+          if (allStores.length === 0) {
+            console.log(`   ⚠️ No stores found in store_info table. Please add a store first.`);
+          } else {
+            console.log(`   Available stores in database (${allStores.length}):`);
+            allStores.forEach(store => {
+              console.log(`     - ${store.store_name} (${store.account_code}): "${store.shopify_store_url}" [${store.status}]`);
+            });
+            console.log(`   💡 Tip: Make sure shopify_store_url matches the domain "${storeDomain}" or use the Shopify token to match.`);
+          }
+        } catch (logError) {
+          console.error(`❌ [Store Lookup] Error fetching store list for debugging:`, logError.message);
+        }
+        return null;
+      }
+    } catch (error) {
+      console.error('Error getting store by Shopify credentials:', error);
       throw error;
     }
   }
@@ -4384,19 +4921,21 @@ class Database {
         `INSERT INTO store_info (
           account_code,
           store_name,
-          shipway_username,
-          shipway_password_encrypted,
+          shipping_partner,
+          username,
+          password_encrypted,
           auth_token,
           shopify_store_url,
           shopify_token,
           status,
           created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           storeData.account_code,
           storeData.store_name,
-          storeData.shipway_username,
-          storeData.shipway_password_encrypted,
+          storeData.shipping_partner,
+          storeData.username,
+          storeData.password_encrypted,
           storeData.auth_token,
           storeData.shopify_store_url,
           storeData.shopify_token,
@@ -4432,13 +4971,13 @@ class Database {
         fields.push('store_name = ?');
         values.push(updateData.store_name);
       }
-      if (updateData.shipway_username !== undefined) {
-        fields.push('shipway_username = ?');
-        values.push(updateData.shipway_username);
+      if (updateData.username !== undefined) {
+        fields.push('username = ?');
+        values.push(updateData.username);
       }
-      if (updateData.shipway_password_encrypted !== undefined) {
-        fields.push('shipway_password_encrypted = ?');
-        values.push(updateData.shipway_password_encrypted);
+      if (updateData.password_encrypted !== undefined) {
+        fields.push('password_encrypted = ?');
+        values.push(updateData.password_encrypted);
       }
       if (updateData.auth_token !== undefined) {
         fields.push('auth_token = ?');

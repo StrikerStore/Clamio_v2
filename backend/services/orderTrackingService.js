@@ -1,16 +1,19 @@
 const axios = require('axios');
+const database = require('../config/database');
 
 /**
  * Order Tracking Service
  * Handles fetching and storing order tracking data from Shipway API
  * Supports dual cron logic: active orders (hourly) and inactive orders (daily)
+ * Now supports multi-store via account_code from orders
  */
 class OrderTrackingService {
   constructor() {
     this.isActiveSyncRunning = false;
     this.isInactiveSyncRunning = false;
     this.shipwayApiUrl = 'https://app.shipway.com/api/Ndr/OrderDetails';
-    this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
+    // Store credentials cache: account_code -> auth_token
+    this.storeCredentialsCache = new Map();
   }
 
   /**
@@ -49,7 +52,7 @@ class OrderTrackingService {
         const batch = activeOrders.slice(i, i + batchSize);
         
         // Process batch in parallel
-        const batchPromises = batch.map(order => this.processOrderTracking(order.order_id, 'active'));
+        const batchPromises = batch.map(order => this.processOrderTracking(order.order_id, 'active', order.account_code));
         const batchResults = await Promise.allSettled(batchPromises);
         
         batchResults.forEach((result, index) => {
@@ -137,7 +140,7 @@ class OrderTrackingService {
         const batch = inactiveOrders.slice(i, i + batchSize);
         
         // Process batch in parallel
-        const batchPromises = batch.map(order => this.processOrderTracking(order.order_id, 'inactive'));
+        const batchPromises = batch.map(order => this.processOrderTracking(order.order_id, 'inactive', order.account_code));
         const batchResults = await Promise.allSettled(batchPromises);
         
         batchResults.forEach((result, index) => {
@@ -183,13 +186,18 @@ class OrderTrackingService {
    * Process tracking data for a single order
    * @param {string} orderId - The order ID to fetch tracking for
    * @param {string} orderType - 'active' or 'inactive'
+   * @param {string} accountCode - The account_code for the store
    */
-  async processOrderTracking(orderId, orderType) {
+  async processOrderTracking(orderId, orderType, accountCode) {
     try {
-      console.log(`🔄 [Tracking] Fetching tracking data for order ${orderId} (${orderType})`);
+      if (!accountCode) {
+        throw new Error('account_code is required for processing order tracking');
+      }
+
+      console.log(`🔄 [Tracking] Fetching tracking data for order ${orderId} (${orderType}, store: ${accountCode})`);
       
       // Fetch tracking data from Shipway API
-      const trackingData = await this.fetchTrackingFromShipway(orderId);
+      const trackingData = await this.fetchTrackingFromShipway(orderId, accountCode);
       
       if (!trackingData || !trackingData.shipment_status_history) {
         console.log(`⚠️ [Tracking] No tracking data found for order ${orderId}`);
@@ -239,22 +247,63 @@ class OrderTrackingService {
   }
 
   /**
+   * Get store credentials for a given account_code
+   * @param {string} accountCode - The account_code to get credentials for
+   * @returns {string} The auth_token for the store
+   */
+  async getStoreCredentials(accountCode) {
+    if (!accountCode) {
+      throw new Error('account_code is required for fetching tracking data');
+    }
+
+    // Check cache first
+    if (this.storeCredentialsCache.has(accountCode)) {
+      return this.storeCredentialsCache.get(accountCode);
+    }
+
+    // Fetch from database
+    await database.waitForMySQLInitialization();
+    const store = await database.getStoreByAccountCode(accountCode);
+    
+    if (!store) {
+      throw new Error(`Store not found for account_code: ${accountCode}`);
+    }
+    
+    if (store.status !== 'active') {
+      throw new Error(`Store is not active: ${accountCode}`);
+    }
+    
+    if (!store.auth_token) {
+      throw new Error(`Store auth_token not found for account_code: ${accountCode}`);
+    }
+
+    // Cache the credentials
+    this.storeCredentialsCache.set(accountCode, store.auth_token);
+    
+    return store.auth_token;
+  }
+
+  /**
    * Fetch tracking data from Shipway API
    * @param {string} orderId - The order ID to fetch tracking for
+   * @param {string} accountCode - The account_code for the store
    */
-  async fetchTrackingFromShipway(orderId) {
+  async fetchTrackingFromShipway(orderId, accountCode) {
     try {
-      if (!this.basicAuthHeader) {
-        throw new Error('Shipway API configuration error. SHIPWAY_BASIC_AUTH_HEADER not found.');
+      if (!accountCode) {
+        throw new Error('account_code is required for fetching tracking data');
       }
 
-      console.log(`📡 [API] Calling Shipway OrderDetails API for order ${orderId}`);
+      // Get store-specific credentials
+      const basicAuthHeader = await this.getStoreCredentials(accountCode);
+
+      console.log(`📡 [API] Calling Shipway OrderDetails API for order ${orderId} (store: ${accountCode})`);
       
       const response = await axios.post(this.shipwayApiUrl, {
         order_id: orderId
       }, {
         headers: {
-          'Authorization': this.basicAuthHeader,
+          'Authorization': basicAuthHeader,
           'Content-Type': 'application/json'
         },
         timeout: 30000 // 30 second timeout

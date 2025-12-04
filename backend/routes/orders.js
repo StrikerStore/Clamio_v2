@@ -1399,8 +1399,30 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
       });
     }
     
-    const orders = await database.getAllOrders();
-    console.log('📦 Orders loaded from MySQL:', orders.length);
+    // Get date filter from utility table (same as sync uses)
+    let numberOfDays = 60; // default
+    try {
+      const daysValue = await database.getUtilityParameter('number_of_day_of_order_include');
+      if (daysValue) {
+        numberOfDays = parseInt(daysValue, 10);
+        console.log(`📅 Using ${numberOfDays} days from utility configuration for frontend filter`);
+      } else {
+        console.log(`⚠️ Utility parameter not found, using default: ${numberOfDays} days`);
+      }
+    } catch (dbError) {
+      console.log(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`, dbError.message);
+    }
+    
+    // Calculate cutoff date
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - numberOfDays);
+    cutoffDate.setHours(0, 0, 0, 0); // Start of day
+    
+    console.log(`📅 Filtering orders from last ${numberOfDays} days (since ${cutoffDate.toISOString()})`);
+    
+    // Pass cutoffDate to getAllOrders to filter at SQL level (more efficient)
+    const orders = await database.getAllOrders(cutoffDate);
+    console.log(`📦 Orders loaded from MySQL (with ${numberOfDays}-day date filter): ${orders.length}`);
     
     const allUsers = await database.getAllUsers();
     const vendors = allUsers.filter(user => user.role === 'vendor');
@@ -2190,8 +2212,15 @@ router.post('/download-label', async (req, res) => {
       // Store label in cache after successful generation
       if (labelResponse.success && labelResponse.data.shipping_url) {
         try {
+          // Get account_code from the first claimed product
+          const accountCode = claimedProducts[0]?.account_code;
+          if (!accountCode) {
+            throw new Error(`account_code not found for order ${order_id}. Cannot store label without store information.`);
+          }
+          
           const labelDataToStore = {
             order_id: order_id,
+            account_code: accountCode,
             label_url: labelResponse.data.shipping_url,
             awb: labelResponse.data.awb,
             carrier_id: labelResponse.data.carrier_id,
@@ -2420,6 +2449,13 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
       throw new Error(`Customer info not found for order ID: ${orderId}. Please sync orders from Shipway first.`);
     }
     
+    // Get account_code from the first product (all products in an order have the same account_code)
+    const accountCode = products[0]?.account_code || customerInfo.account_code;
+    if (!accountCode) {
+      throw new Error(`account_code not found for order ID: ${orderId}. Cannot generate label without store information.`);
+    }
+    console.log(`  - Using account_code: ${accountCode} for label generation`);
+    
     // Convert customer_info to originalOrder format expected by prepareShipwayRequestBody
     const originalOrder = {
       order_id: orderId,
@@ -2518,8 +2554,8 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
         
         console.log(`   📡 Calling Shipway API...`);
         
-        // Call Shipway API
-        response = await callShipwayPushOrderAPI(requestBody, true);
+        // Call Shipway API with account_code for store-specific credentials
+        response = await callShipwayPushOrderAPI(requestBody, true, accountCode);
         
         // If we reach here, API call succeeded
         assignedCarrier = {
@@ -3053,8 +3089,16 @@ async function retryOperation(operation, maxAttempts, stepName, inputData) {
 async function prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix = null) {
   console.log('📋 Capturing input data for clone process...');
   
-  // Generate unique clone ID
-  const cloneOrderId = await generateUniqueCloneId(originalOrderId, forceCloneSuffix);
+  // Extract account_code from claimed products FIRST (CRITICAL: Must match the store)
+  const accountCode = claimedProducts[0]?.account_code;
+  if (!accountCode) {
+    throw new Error(`account_code not found for order ${originalOrderId}. Cannot create clone without store information.`);
+  }
+  
+  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
+  
+  // Generate unique clone ID (with account_code for store-specific verification)
+  const cloneOrderId = await generateUniqueCloneId(originalOrderId, forceCloneSuffix, accountCode);
   
   // Get customer info from database
   const database = require('../config/database');
@@ -3102,6 +3146,7 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
     ),
     originalOrder: { ...originalOrder }, // Copy original order data
     cloneOrderId,
+    accountCode, // CRITICAL: Store account_code for store-specific operations
     timestamp: new Date().toISOString() // Fixed timestamp for consistency
   };
   
@@ -3110,8 +3155,8 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
 }
 
 // Generate unique clone order ID
-async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null) {
-    const database = require('../config/database');
+async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, accountCode = null) {
+  const database = require('../config/database');
   
   // If forceCloneSuffix is provided, use it directly (for retry scenarios)
   if (forceCloneSuffix) {
@@ -3143,20 +3188,27 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null) {
     cloneOrderId = `${originalOrderId}_${counter}`;
   }
     
-    // Additional check: Verify with Shipway API to ensure no conflicts
+  // Additional check: Verify with Shipway API to ensure no conflicts
+  // CRITICAL: Use account_code to fetch orders from the correct store
+  if (accountCode) {
     try {
-      const shipwayService = require('../services/shipwayService');
+      const ShipwayService = require('../services/shipwayService');
+      const shipwayService = new ShipwayService(accountCode);
+      await shipwayService.initialize();
       const shipwayOrders = await shipwayService.fetchOrdersFromShipway();
       
       while (shipwayOrders.some(order => order.order_id === cloneOrderId)) {
         counter++;
         cloneOrderId = `${originalOrderId}_${counter}`;
-      console.log(`  - Clone ID exists in Shipway, incrementing to ${cloneOrderId}`);
+        console.log(`  - Clone ID exists in Shipway (store: ${accountCode}), incrementing to ${cloneOrderId}`);
       }
     } catch (shipwayError) {
-      console.log('  - Warning: Could not verify clone ID with Shipway:', shipwayError.message);
+      console.log(`  - Warning: Could not verify clone ID with Shipway (store: ${accountCode}):`, shipwayError.message);
       console.log('  - Proceeding with MySQL-only check');
     }
+  } else {
+    console.log('  - Warning: No account_code provided, skipping Shipway verification');
+  }
     
   console.log(`  - Generated unique Clone Order ID: ${cloneOrderId}`);
   return cloneOrderId;
@@ -3164,12 +3216,18 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null) {
 
 // Step 1: Create clone order (NO label generation)
 async function createCloneOrderOnly(inputData) {
-  const { cloneOrderId, claimedProducts, originalOrder, vendor } = inputData;
+  const { cloneOrderId, claimedProducts, originalOrder, vendor, accountCode } = inputData;
   
   console.log(`🔒 Creating clone with consistent data:`);
   console.log(`  - Clone ID: ${cloneOrderId}`);
   console.log(`  - Products count: ${claimedProducts.length}`);
+  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
   console.log(`  - Timestamp: ${inputData.timestamp}`);
+  
+  // CRITICAL: Use account_code from inputData (already validated in prepareInputData)
+  if (!accountCode) {
+    throw new Error(`account_code not found in inputData for clone order ${cloneOrderId}. Cannot create clone without store information.`);
+  }
   
   const requestBody = prepareShipwayRequestBody(
     cloneOrderId, 
@@ -3179,7 +3237,7 @@ async function createCloneOrderOnly(inputData) {
     false // NO label generation
   );
   
-  const response = await callShipwayPushOrderAPI(requestBody, false);
+  const response = await callShipwayPushOrderAPI(requestBody, false, accountCode);
   
   if (!response.success) {
     throw new Error(`Failed to create clone order: ${response.message || 'Unknown error'}`);
@@ -3191,36 +3249,51 @@ async function createCloneOrderOnly(inputData) {
 
 // Step 2: Verify clone exists
 async function verifyCloneExists(inputData) {
-  const { cloneOrderId } = inputData;
+  const { cloneOrderId, accountCode } = inputData;
   
   console.log(`🔒 Verifying clone exists with consistent data:`);
   console.log(`  - Clone ID: ${cloneOrderId}`);
+  console.log(`  - Account Code: ${accountCode} (for store-specific verification)`);
   console.log(`  - Timestamp: ${inputData.timestamp}`);
   
-  // Call Shipway API to verify clone order exists
-  const shipwayService = require('../services/shipwayService');
+  // CRITICAL: Use account_code to fetch orders from the correct store
+  if (!accountCode) {
+    throw new Error(`account_code not found in inputData. Cannot verify clone without store information.`);
+  }
+  
+  // Call Shipway API to verify clone order exists (using store-specific credentials)
+  const ShipwayService = require('../services/shipwayService');
+  const shipwayService = new ShipwayService(accountCode);
+  await shipwayService.initialize();
   const shipwayOrders = await shipwayService.fetchOrdersFromShipway();
   
   const cloneExists = shipwayOrders.some(order => order.order_id === cloneOrderId);
   
   if (!cloneExists) {
-    throw new Error(`Clone order ${cloneOrderId} not found in Shipway`);
+    throw new Error(`Clone order ${cloneOrderId} not found in Shipway for store ${accountCode}`);
   }
   
-  console.log('✅ Clone order verified in Shipway');
+  console.log(`✅ Clone order verified in Shipway (store: ${accountCode})`);
   return { success: true, verified: true };
 }
 
 // Step 3: Update original order
 async function updateOriginalOrder(inputData) {
-  const { originalOrderId, remainingProducts, originalOrder, vendor } = inputData;
+  const { originalOrderId, remainingProducts, originalOrder, vendor, accountCode } = inputData;
   
   console.log(`🔒 Updating original with consistent data:`);
   console.log(`  - Original ID: ${originalOrderId}`);
   console.log(`  - Remaining products: ${remainingProducts.length}`);
+  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
   console.log(`  - Timestamp: ${inputData.timestamp}`);
     
-    if (remainingProducts.length > 0) {
+  if (remainingProducts.length > 0) {
+    // CRITICAL: Use account_code from inputData (already validated in prepareInputData)
+    // All products in the same order should have the same account_code
+    if (!accountCode) {
+      throw new Error(`account_code not found in inputData for original order ${originalOrderId}. Cannot update order without store information.`);
+    }
+    
     const requestBody = prepareShipwayRequestBody(
       originalOrderId,
       remainingProducts,
@@ -3229,7 +3302,7 @@ async function updateOriginalOrder(inputData) {
       false // NO label generation
     );
     
-    const response = await callShipwayPushOrderAPI(requestBody, false);
+    const response = await callShipwayPushOrderAPI(requestBody, false, accountCode);
     
     if (!response.success) {
       throw new Error(`Failed to update original order: ${response.message || 'Unknown error'}`);
@@ -3245,24 +3318,32 @@ async function updateOriginalOrder(inputData) {
 
 // Step 4: Verify original order update
 async function verifyOriginalOrderUpdate(inputData) {
-  const { originalOrderId, remainingProducts } = inputData;
+  const { originalOrderId, remainingProducts, accountCode } = inputData;
   
   console.log(`🔒 Verifying original order update with consistent data:`);
   console.log(`  - Original ID: ${originalOrderId}`);
   console.log(`  - Expected remaining products: ${remainingProducts.length}`);
+  console.log(`  - Account Code: ${accountCode} (for store-specific verification)`);
   console.log(`  - Timestamp: ${inputData.timestamp}`);
   
-  // Call Shipway API to verify original order was updated correctly
-  const shipwayService = require('../services/shipwayService');
+  // CRITICAL: Use account_code to fetch orders from the correct store
+  if (!accountCode) {
+    throw new Error(`account_code not found in inputData. Cannot verify original order update without store information.`);
+  }
+  
+  // Call Shipway API to verify original order was updated correctly (using store-specific credentials)
+  const ShipwayService = require('../services/shipwayService');
+  const shipwayService = new ShipwayService(accountCode);
+  await shipwayService.initialize();
   const shipwayOrders = await shipwayService.fetchOrdersFromShipway();
   
   const originalOrder = shipwayOrders.find(order => order.order_id === originalOrderId);
   
   if (!originalOrder && remainingProducts.length > 0) {
-    throw new Error(`Original order ${originalOrderId} not found in Shipway after update`);
+    throw new Error(`Original order ${originalOrderId} not found in Shipway for store ${accountCode} after update`);
   }
   
-  console.log('✅ Original order update verified in Shipway');
+  console.log(`✅ Original order update verified in Shipway (store: ${accountCode})`);
   return { success: true, verified: true };
 }
 
@@ -3330,12 +3411,13 @@ async function generateLabelForClone(inputData) {
 
 // Step 7: Mark label as downloaded and store in labels table
 async function markLabelAsDownloaded(inputData, labelResponse) {
-  const { claimedProducts, cloneOrderId } = inputData;
+  const { claimedProducts, cloneOrderId, accountCode } = inputData;
   const database = require('../config/database');
   
   console.log(`🔒 Marking label as downloaded and storing in labels table:`);
   console.log(`  - Clone Order ID: ${cloneOrderId}`);
   console.log(`  - Products count: ${claimedProducts.length}`);
+  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
   console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
   console.log(`  - AWB: ${labelResponse.data.awb}`);
   
@@ -3351,8 +3433,14 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
     }
     
     // Store label URL and carrier info in labels table (one entry per order_id, no duplicates)
+    // CRITICAL: Use account_code from inputData (already validated in prepareInputData)
+    if (!accountCode) {
+      throw new Error(`account_code not found in inputData for clone order ${cloneOrderId}. Cannot store label without store information.`);
+    }
+    
     const labelDataToStore = {
       order_id: cloneOrderId,
+      account_code: accountCode,
       label_url: labelResponse.data.shipping_url,
       awb: labelResponse.data.awb,
       carrier_id: labelResponse.data.carrier_id,
@@ -3546,33 +3634,59 @@ async function callShipwayCreateManifestAPI(orderIds) {
 /**
  * Call Shipway PUSH Order API
  */
-async function callShipwayPushOrderAPI(requestBody, generateLabel = false) {
+async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accountCode = null) {
   try {
     console.log('🔄 Calling Shipway PUSH Order API');
     console.log('  - Generate label:', generateLabel);
     console.log('  - Order ID:', requestBody.order_id);
+    console.log('  - Account Code:', accountCode || 'NOT PROVIDED (using default)');
     console.log('  - API Type:', generateLabel ? 'PUSH Order with Label Generation' : 'PUSH Order (Edit Only)');
     
-    // Get basic auth credentials from environment
-    const username = process.env.SHIPWAY_USERNAME;
-    const password = process.env.SHIPWAY_PASSWORD;
-    const basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
-    
-    console.log('🔍 Debug: Environment variables check');
-    console.log('  - SHIPWAY_USERNAME:', username ? 'SET' : 'NOT SET');
-    console.log('  - SHIPWAY_PASSWORD:', password ? 'SET' : 'NOT SET');
-    console.log('  - SHIPWAY_BASIC_AUTH_HEADER:', basicAuthHeader ? 'SET' : 'NOT SET');
-    
+    // Get store-specific credentials if account_code is provided
     let authHeader;
-    if (basicAuthHeader) {
-      authHeader = basicAuthHeader;
-      console.log('✅ Using SHIPWAY_BASIC_AUTH_HEADER');
-    } else if (username && password) {
+    const database = require('../config/database');
+    const encryptionService = require('../services/encryptionService');
+    
+    if (accountCode) {
+      console.log(`🔍 Fetching store credentials for account_code: ${accountCode}`);
+      const store = await database.getStoreByAccountCode(accountCode);
+      
+      if (!store) {
+        throw new Error(`Store not found for account_code: ${accountCode}`);
+      }
+      
+      if (!store.username || !store.password_encrypted) {
+        throw new Error(`Store credentials not configured for account_code: ${accountCode}`);
+      }
+      
+      // Decrypt password
+      const password = encryptionService.decrypt(store.password_encrypted);
+      const username = store.username;
+      
+      // Generate Basic Auth header from store credentials
       authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-      console.log('✅ Using SHIPWAY_USERNAME and SHIPWAY_PASSWORD');
+      console.log(`✅ Using store-specific credentials for ${accountCode} (${store.store_name})`);
     } else {
-      console.log('❌ No Shipway credentials found');
-      throw new Error('Shipway credentials not configured');
+      // Fallback to environment variables (for backward compatibility)
+      const username = process.env.SHIPWAY_USERNAME;
+      const password = process.env.SHIPWAY_PASSWORD;
+      const basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
+      
+      console.log('🔍 Debug: Environment variables check');
+      console.log('  - SHIPWAY_USERNAME:', username ? 'SET' : 'NOT SET');
+      console.log('  - SHIPWAY_PASSWORD:', password ? 'SET' : 'NOT SET');
+      console.log('  - SHIPWAY_BASIC_AUTH_HEADER:', basicAuthHeader ? 'SET' : 'NOT SET');
+      
+      if (basicAuthHeader) {
+        authHeader = basicAuthHeader;
+        console.log('✅ Using SHIPWAY_BASIC_AUTH_HEADER (fallback)');
+      } else if (username && password) {
+        authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
+        console.log('✅ Using SHIPWAY_USERNAME and SHIPWAY_PASSWORD (fallback)');
+      } else {
+        console.log('❌ No Shipway credentials found');
+        throw new Error('Shipway credentials not configured');
+      }
     }
     
     // For original order editing (no label generation), remove generate_label parameter
@@ -3781,8 +3895,15 @@ router.post('/bulk-download-labels', async (req, res) => {
           
           // Store label and carrier info for direct download
           if (labelResponse.success && labelResponse.data.shipping_url) {
+            // Get account_code from the first claimed product
+            const accountCode = claimedProducts[0]?.account_code;
+            if (!accountCode) {
+              throw new Error(`account_code not found for order ${orderId}. Cannot store label without store information.`);
+            }
+            
             await database.upsertLabel({
               order_id: orderId,
+              account_code: accountCode,
               label_url: labelResponse.data.shipping_url,
               awb: labelResponse.data.awb,
               carrier_id: labelResponse.data.carrier_id,
@@ -4351,10 +4472,21 @@ router.post('/mark-ready', async (req, res) => {
 
     console.log('✅ Shipway manifest API successful');
 
+    // Get account_code from the first claimed product
+    const accountCode = claimedProducts[0]?.account_code;
+    if (!accountCode) {
+      console.log('❌ ACCOUNT_CODE NOT FOUND for order:', order_id);
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Store information not found for this order. Cannot mark as ready.' 
+      });
+    }
+
     // Set is_manifest = 1 and manifest_id in labels table
     console.log('🔄 Setting is_manifest = 1 and manifest_id in labels table...');
     const labelData = {
       order_id: order_id,
+      account_code: accountCode,
       is_manifest: 1,
       manifest_id: manifestResponse.manifest_id
     };
@@ -4545,10 +4677,22 @@ router.post('/bulk-mark-ready', async (req, res) => {
                 order.claimed_by === vendor.warehouseId && order.claims_status === 'claimed'
               );
 
+              // Get account_code from the first claimed product
+              const accountCode = claimedProducts[0]?.account_code;
+              if (!accountCode) {
+                console.error(`❌ ACCOUNT_CODE NOT FOUND for COD order ${order_id}`);
+                failedOrders.push({
+                  order_id: order_id,
+                  reason: 'Store information not found for this order'
+                });
+                continue;
+              }
+
               // Set is_manifest = 1 and manifest_id in labels table
               console.log(`🔄 Setting manifest data for COD order ${order_id}...`);
               const labelData = {
                 order_id: order_id,
+                account_code: accountCode,
                 is_manifest: 1,
                 manifest_id: codManifestResponse.manifest_id
               };
@@ -4609,10 +4753,22 @@ router.post('/bulk-mark-ready', async (req, res) => {
                 order.claimed_by === vendor.warehouseId && order.claims_status === 'claimed'
               );
 
+              // Get account_code from the first claimed product
+              const accountCode = claimedProducts[0]?.account_code;
+              if (!accountCode) {
+                console.error(`❌ ACCOUNT_CODE NOT FOUND for Prepaid order ${order_id}`);
+                failedOrders.push({
+                  order_id: order_id,
+                  reason: 'Store information not found for this order'
+                });
+                continue;
+              }
+
               // Set is_manifest = 1 and manifest_id in labels table
               console.log(`🔄 Setting manifest data for Prepaid order ${order_id}...`);
               const labelData = {
                 order_id: order_id,
+                account_code: accountCode,
                 is_manifest: 1,
                 manifest_id: prepaidManifestResponse.manifest_id
               };
@@ -4730,18 +4886,18 @@ router.post('/refresh', async (req, res) => {
     console.log('  - Email:', vendor.email);
     console.log('  - Warehouse ID:', vendor.warehouseId);
 
-    // Import shipwayService
-    const shipwayService = require('../services/shipwayService');
+    // Use multiStoreSyncService to sync orders for all active stores
+    const multiStoreSyncService = require('../services/multiStoreSyncService');
     
-    console.log('🔄 Starting orders sync from Shipway...');
-    const result = await shipwayService.syncOrdersToMySQL();
+    console.log('🔄 Starting orders sync from Shipway for all stores...');
+    const result = await multiStoreSyncService.syncAllStores();
     
     console.log('✅ Orders synced successfully');
     console.log('  - Result:', result);
     
     return res.json({
       success: true,
-      message: 'Orders refreshed successfully from Shipway',
+      message: `Orders refreshed successfully from Shipway. ${result.successfulStores}/${result.totalStores} stores synced, ${result.totalOrders} orders processed.`,
       data: {
         sync_result: result,
         timestamp: new Date().toISOString()
@@ -4851,8 +5007,18 @@ router.post('/reverse', async (req, res) => {
     if (isLabelDownloaded) {
       console.log('🔄 CASE 2: Label downloaded - calling Shipway cancel API');
       
-      // Get AWB number from labels table
-      const label = await database.getLabelByOrderId(order.order_id);
+      // Get account_code from order to use correct store credentials
+      const accountCode = order.account_code;
+      if (!accountCode) {
+        console.log('❌ ACCOUNT_CODE NOT FOUND for order:', order.order_id);
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Store information not found for this order. Cannot cancel shipment.' 
+        });
+      }
+      
+      // Get AWB number from labels table (with account_code filter for store-specific retrieval)
+      const label = await database.getLabelByOrderId(order.order_id, accountCode);
       
       if (!label || !label.awb) {
         console.log('❌ AWB NOT FOUND for order:', order.order_id);
@@ -4864,18 +5030,27 @@ router.post('/reverse', async (req, res) => {
 
       console.log('✅ AWB FOUND:', label.awb);
 
-      // Call Shipway cancel API
-      const shipwayService = require('../services/shipwayService');
+      // Call Shipway cancel API with store-specific credentials
+      const ShipwayService = require('../services/shipwayService');
+      const shipwayService = new ShipwayService(accountCode);
+      
+      // Initialize the service to load store credentials
+      await shipwayService.initialize();
       
       try {
         const cancelResult = await shipwayService.cancelShipment([label.awb]);
         console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
       } catch (cancelError) {
-        console.log('❌ SHIPWAY CANCEL FAILED:', cancelError.message);
+        console.error('❌ SHIPWAY CANCEL FAILED:');
+        console.error('  - Error message:', cancelError.message);
+        console.error('  - Error stack:', cancelError.stack);
+        console.error('  - Account Code:', accountCode);
+        console.error('  - AWB:', label.awb);
         return res.status(500).json({
           success: false,
-          message: 'Failed to cancel shipment. Please try after sometime.',
-          error: 'shipway_cancel_failed'
+          message: cancelError.message || 'Failed to cancel shipment. Please try after sometime.',
+          error: 'shipway_cancel_failed',
+          details: cancelError.message
         });
       }
 
@@ -5075,8 +5250,18 @@ router.post('/reverse-grouped', async (req, res) => {
     if (isLabelDownloaded) {
       console.log('🔄 CASE 2: Label downloaded - calling Shipway cancel API');
       
-      // Get AWB number from labels table (only one AWB for the entire order_id)
-      const label = await database.getLabelByOrderId(order_id);
+      // Get account_code from order to use correct store credentials
+      const accountCode = firstValidOrder.account_code;
+      if (!accountCode) {
+        console.log('❌ ACCOUNT_CODE NOT FOUND for order:', order_id);
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Store information not found for this order. Cannot cancel shipment.' 
+        });
+      }
+      
+      // Get AWB number from labels table (only one AWB for the entire order_id, with account_code filter)
+      const label = await database.getLabelByOrderId(order_id, accountCode);
       
       if (!label || !label.awb) {
         console.log('❌ AWB NOT FOUND for order:', order_id);
@@ -5088,18 +5273,27 @@ router.post('/reverse-grouped', async (req, res) => {
 
       console.log('✅ AWB FOUND:', label.awb);
 
-      // Call Shipway cancel API (only once for the entire order)
-      const shipwayService = require('../services/shipwayService');
+      // Call Shipway cancel API with store-specific credentials (only once for the entire order)
+      const ShipwayService = require('../services/shipwayService');
+      const shipwayService = new ShipwayService(accountCode);
+      
+      // Initialize the service to load store credentials
+      await shipwayService.initialize();
       
       try {
         const cancelResult = await shipwayService.cancelShipment([label.awb]);
         console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
       } catch (cancelError) {
-        console.log('❌ SHIPWAY CANCEL FAILED:', cancelError.message);
+        console.error('❌ SHIPWAY CANCEL FAILED:');
+        console.error('  - Error message:', cancelError.message);
+        console.error('  - Error stack:', cancelError.stack);
+        console.error('  - Account Code:', accountCode);
+        console.error('  - AWB:', label.awb);
         return res.status(500).json({
           success: false,
-          message: 'Failed to cancel shipment. Please try after sometime.',
-          error: 'shipway_cancel_failed'
+          message: cancelError.message || 'Failed to cancel shipment. Please try after sometime.',
+          error: 'shipway_cancel_failed',
+          details: cancelError.message
         });
       }
 

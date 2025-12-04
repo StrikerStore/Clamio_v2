@@ -142,15 +142,20 @@ export function UserManagement() {
   const [storeToDelete, setStoreToDelete] = useState<any>(null)
   const [newStore, setNewStore] = useState({
     store_name: "",
-    shipway_username: "",
-    shipway_password: "",
+    shipping_partner: "",
+    username: "",
+    password: "",
     shopify_store_url: "",
     shopify_token: "",
     status: "active" as "active" | "inactive"
   })
+  const [shippingPartners, setShippingPartners] = useState<string[]>([])
   const [showPassword, setShowPassword] = useState(false)
   const [showShopifyToken, setShowShopifyToken] = useState(false)
   const [testingConnection, setTestingConnection] = useState<{ type: 'shipway' | 'shopify' | null, loading: boolean }>({ type: null, loading: false })
+  const [shipwayTestResult, setShipwayTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [shopifyTestResult, setShopifyTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [isAddingStore, setIsAddingStore] = useState(false)
 
   const [formData, setFormData] = useState<CreateUserForm>({
     name: "",
@@ -196,7 +201,19 @@ export function UserManagement() {
 
   useEffect(() => {
     loadUsers()
+    fetchShippingPartners()
   }, [])
+
+  const fetchShippingPartners = async () => {
+    try {
+      const response = await apiClient.getShippingPartners()
+      if (response.success && Array.isArray(response.data)) {
+        setShippingPartners(response.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch shipping partners:', error)
+    }
+  }
 
   const handleLogout = async () => {
     setLogoutLoading(true)
@@ -595,24 +612,28 @@ export function UserManagement() {
   }
 
   const handleAddStore = async () => {
-    if (!newStore.store_name || !newStore.shipway_username || !newStore.shipway_password || 
+    if (!newStore.store_name || !newStore.shipping_partner || !newStore.username || !newStore.password || 
         !newStore.shopify_store_url || !newStore.shopify_token) {
       setError("Please fill in all required fields")
       return
     }
 
+    setIsAddingStore(true)
     try {
       const response = await apiClient.createStore(newStore)
       if (response.success) {
-        setSuccess(`${newStore.store_name} has been added successfully`)
+        setSuccess(`${newStore.store_name} has been added successfully. Syncing orders, carriers, and products...`)
         setNewStore({
           store_name: "",
-          shipway_username: "",
-          shipway_password: "",
+          shipping_partner: "",
+          username: "",
+          password: "",
           shopify_store_url: "",
           shopify_token: "",
           status: "active"
         })
+        setShipwayTestResult(null)
+        setShopifyTestResult(null)
         setIsAddStoreOpen(false)
         fetchStores()
       } else {
@@ -620,6 +641,8 @@ export function UserManagement() {
       }
     } catch (error: any) {
       setError(error?.message || "Failed to create store")
+    } finally {
+      setIsAddingStore(false)
     }
   }
 
@@ -628,10 +651,10 @@ export function UserManagement() {
     setSuccess("")
     setEditingStore({ 
       ...store,
-      shipway_password: store.shipway_password || '',
+      password: store.password || '',
       shopify_token: store.shopify_token || '',
       shopify_store_url: store.shopify_store_url || '',
-      shipway_username: store.shipway_username || '',
+      username: store.username || '',
       store_name: store.store_name || '',
       status: store.status || 'active'
     })
@@ -644,7 +667,7 @@ export function UserManagement() {
     
     if (!editingStore) return
     
-    if (!editingStore.store_name || !editingStore.shipway_username || 
+    if (!editingStore.store_name || !editingStore.username || 
         !editingStore.shopify_store_url || !editingStore.shopify_token) {
       setError("Please fill in all required fields")
       return
@@ -657,14 +680,14 @@ export function UserManagement() {
     try {
       const updateData: any = {
         store_name: editingStore.store_name,
-        shipway_username: editingStore.shipway_username,
+        username: editingStore.username,
         shopify_store_url: editingStore.shopify_store_url,
         shopify_token: editingStore.shopify_token,
         status: editingStore.status
       }
       
-      if (editingStore.shipway_password && editingStore.shipway_password.trim() !== '') {
-        updateData.shipway_password = editingStore.shipway_password
+      if (editingStore.password && editingStore.password.trim() !== '') {
+        updateData.password = editingStore.password
       }
 
       const response = await apiClient.updateStore(editingStore.account_code, updateData)
@@ -712,20 +735,40 @@ export function UserManagement() {
 
   const handleTestShipway = async (username: string, password: string) => {
     if (!username || !password) {
-      setError("Please enter Shipway username and password")
+      setShipwayTestResult({ success: false, message: "Please enter username and password" })
+      setError("Please enter username and password")
       return
     }
 
     setTestingConnection({ type: 'shipway', loading: true })
+    setShipwayTestResult(null) // Clear previous result
     try {
-      const response = await apiClient.testShipwayConnection({ shipway_username: username, shipway_password: password })
-      if (response.success) {
-        setSuccess("Shipway credentials are valid")
+      const response = await apiClient.testShipwayConnection({ username: username, password: password })
+      
+      // Handle response - check for success property (handle both boolean true and string "true")
+      const isSuccess = response?.success === true || response?.success === 'true' || response?.success === 1
+      
+      if (isSuccess) {
+        const successMessage = response.message || "Connection successful! Credentials are valid."
+        setShipwayTestResult({ success: true, message: successMessage })
+        setSuccess("Shipping partner credentials are valid")
       } else {
-        setError(response.message || "Invalid Shipway credentials")
+        const errorMessage = response?.message || "Invalid credentials"
+        setShipwayTestResult({ success: false, message: errorMessage })
+        setError(errorMessage)
       }
     } catch (error: any) {
-      setError(error?.message || "Failed to test Shipway connection")
+      // Extract error message from various possible error formats
+      let errorMessage = "Failed to test connection"
+      if (error?.message) {
+        errorMessage = error.message
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      setShipwayTestResult({ success: false, message: errorMessage })
+      setError(errorMessage)
     } finally {
       setTestingConnection({ type: null, loading: false })
     }
@@ -733,20 +776,33 @@ export function UserManagement() {
 
   const handleTestShopify = async (url: string, token: string) => {
     if (!url || !token) {
-      setError("Please enter Shopify store URL and token")
+      setShopifyTestResult({ success: false, message: "Please enter Shopify store URL and token" })
       return
     }
 
     setTestingConnection({ type: 'shopify', loading: true })
+    setShopifyTestResult(null) // Clear previous result
     try {
       const response = await apiClient.testShopifyConnection({ shopify_store_url: url, shopify_token: token })
       if (response.success) {
+        setShopifyTestResult({ success: true, message: response.message || "Connection successful! Credentials are valid." })
         setSuccess("Shopify credentials are valid")
       } else {
+        setShopifyTestResult({ success: false, message: response.message || "Invalid Shopify credentials" })
         setError(response.message || "Invalid Shopify credentials")
       }
     } catch (error: any) {
-      setError(error?.message || "Failed to test Shopify connection")
+      // Extract error message from various possible error formats
+      let errorMessage = "Failed to test Shopify connection"
+      if (error?.message) {
+        errorMessage = error.message
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      setShopifyTestResult({ success: false, message: errorMessage })
+      setError(errorMessage)
     } finally {
       setTestingConnection({ type: null, loading: false })
     }
@@ -1062,7 +1118,7 @@ export function UserManagement() {
                     <DialogHeader>
                       <DialogTitle>Add New Store</DialogTitle>
                       <DialogDescription>
-                        Create a new store with Shipway and Shopify credentials
+                        Create a new store with shipping partner and Shopify credentials
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
@@ -1076,26 +1132,50 @@ export function UserManagement() {
                         />
                       </div>
 
-                      <div className="space-y-2">
-                        <Label className="text-sm font-semibold">Shipway Credentials</Label>
+                      <div>
+                        <Label htmlFor="shipping-partner">Shipping Partner *</Label>
+                        <Select
+                          value={newStore.shipping_partner}
+                          onValueChange={(value) => {
+                            setNewStore({ ...newStore, shipping_partner: value, username: "", password: "" })
+                            setShipwayTestResult(null)
+                            setShopifyTestResult(null)
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select shipping partner" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {shippingPartners.map((partner) => (
+                              <SelectItem key={partner} value={partner}>
+                                {partner}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {newStore.shipping_partner && (
+                        <div className="space-y-2">
+                          <Label className="text-sm font-semibold">{newStore.shipping_partner} Credentials</Label>
+                          <div>
+                            <Label htmlFor="shipping-username">Username *</Label>
+                            <Input
+                              id="shipping-username"
+                              value={newStore.username}
+                              onChange={(e) => setNewStore({ ...newStore, username: e.target.value })}
+                              placeholder={`Enter ${newStore.shipping_partner} username`}
+                            />
+                          </div>
                         <div>
-                          <Label htmlFor="shipway-username">Shipway Username *</Label>
-                          <Input
-                            id="shipway-username"
-                            value={newStore.shipway_username}
-                            onChange={(e) => setNewStore({ ...newStore, shipway_username: e.target.value })}
-                            placeholder="Enter Shipway username"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="shipway-password">Shipway Password *</Label>
+                          <Label htmlFor="shipping-password">Password *</Label>
                           <div className="relative">
                             <Input
-                              id="shipway-password"
+                              id="shipping-password"
                               type={showPassword ? "text" : "password"}
-                              value={newStore.shipway_password}
-                              onChange={(e) => setNewStore({ ...newStore, shipway_password: e.target.value })}
-                              placeholder="Enter Shipway password"
+                              value={newStore.password}
+                              onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
+                              placeholder={`Enter ${newStore.shipping_partner} password`}
                               className="pr-10"
                             />
                             <Button
@@ -1114,7 +1194,7 @@ export function UserManagement() {
                           variant="outline"
                           size="sm"
                           className="w-full"
-                          onClick={() => handleTestShipway(newStore.shipway_username, newStore.shipway_password)}
+                          onClick={() => handleTestShipway(newStore.username, newStore.password)}
                           disabled={testingConnection.loading && testingConnection.type === 'shipway'}
                         >
                           {testingConnection.loading && testingConnection.type === 'shipway' ? (
@@ -1125,11 +1205,26 @@ export function UserManagement() {
                           ) : (
                             <>
                               <CheckCircle className="w-3 h-3 mr-2" />
-                              Test Shipway Connection
+                              Test {newStore.shipping_partner} Connection
                             </>
                           )}
                         </Button>
+                        {shipwayTestResult && (
+                          <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                            shipwayTestResult.success 
+                              ? 'bg-green-50 text-green-800 border border-green-200' 
+                              : 'bg-red-50 text-red-800 border border-red-200'
+                          }`}>
+                            {shipwayTestResult.success ? (
+                              <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                            ) : (
+                              <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                            )}
+                            <span className="flex-1">{shipwayTestResult.message}</span>
+                          </div>
+                        )}
                       </div>
+                      )}
 
                       <div className="space-y-2">
                         <Label className="text-sm font-semibold">Shopify Credentials</Label>
@@ -1184,6 +1279,20 @@ export function UserManagement() {
                             </>
                           )}
                         </Button>
+                        {shopifyTestResult && (
+                          <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                            shopifyTestResult.success 
+                              ? 'bg-green-50 text-green-800 border border-green-200' 
+                              : 'bg-red-50 text-red-800 border border-red-200'
+                          }`}>
+                            {shopifyTestResult.success ? (
+                              <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                            ) : (
+                              <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                            )}
+                            <span className="flex-1">{shopifyTestResult.message}</span>
+                          </div>
+                        )}
                       </div>
 
                       <div>
@@ -1206,7 +1315,19 @@ export function UserManagement() {
                       <Button variant="outline" onClick={() => setIsAddStoreOpen(false)}>
                         Cancel
                       </Button>
-                      <Button onClick={handleAddStore}>Add Store</Button>
+                      <Button 
+                        onClick={handleAddStore}
+                        disabled={isAddingStore}
+                      >
+                        {isAddingStore ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Adding Store...
+                          </>
+                        ) : (
+                          'Add Store'
+                        )}
+                      </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
@@ -1253,7 +1374,7 @@ export function UserManagement() {
                           </Badge>
                         </div>
                         <div className="text-xs text-gray-500 space-y-1">
-                          <p>Shipway: {store.shipway_username}</p>
+                          <p>Shipway: {store.username}</p>
                           <p className="truncate">Shopify: {store.shopify_store_url || 'N/A'}</p>
                           {store.last_synced_at && <p>Last synced: {new Date(store.last_synced_at).toLocaleDateString()}</p>}
                         </div>
@@ -2182,7 +2303,7 @@ export function UserManagement() {
                         <DialogHeader>
                           <DialogTitle>Add New Store</DialogTitle>
                           <DialogDescription>
-                            Create a new store with Shipway and Shopify credentials
+                            Create a new store with shipping partner and Shopify credentials
                           </DialogDescription>
                         </DialogHeader>
                         <div className="space-y-4">
@@ -2196,26 +2317,48 @@ export function UserManagement() {
                             />
                           </div>
 
-                          <div className="space-y-2">
-                            <Label className="text-sm font-semibold">Shipway Credentials</Label>
-                            <div>
-                              <Label htmlFor="shipway-username">Shipway Username *</Label>
-                              <Input
-                                id="shipway-username"
-                                value={newStore.shipway_username}
-                                onChange={(e) => setNewStore({ ...newStore, shipway_username: e.target.value })}
-                                placeholder="Enter Shipway username"
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="shipway-password">Shipway Password *</Label>
-                              <div className="relative">
+                          <div>
+                            <Label htmlFor="shipping-partner">Shipping Partner *</Label>
+                            <Select
+                              value={newStore.shipping_partner}
+                              onValueChange={(value) => {
+                                setNewStore({ ...newStore, shipping_partner: value, username: "", password: "" })
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select shipping partner" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {shippingPartners.map((partner) => (
+                                  <SelectItem key={partner} value={partner}>
+                                    {partner}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {newStore.shipping_partner && (
+                            <div className="space-y-2">
+                              <Label className="text-sm font-semibold">{newStore.shipping_partner} Credentials</Label>
+                              <div>
+                                <Label htmlFor="shipping-username">Username *</Label>
                                 <Input
-                                  id="shipway-password"
-                                  type={showPassword ? "text" : "password"}
-                                  value={newStore.shipway_password}
-                                  onChange={(e) => setNewStore({ ...newStore, shipway_password: e.target.value })}
-                                  placeholder="Enter Shipway password"
+                                  id="shipping-username"
+                                  value={newStore.username}
+                                  onChange={(e) => setNewStore({ ...newStore, username: e.target.value })}
+                                  placeholder={`Enter ${newStore.shipping_partner} username`}
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="shipping-password">Password *</Label>
+                                <div className="relative">
+                                  <Input
+                                    id="shipping-password"
+                                    type={showPassword ? "text" : "password"}
+                                    value={newStore.password}
+                                  onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
+                                  placeholder={`Enter ${newStore.shipping_partner} password`}
                                   className="pr-10"
                                 />
                                 <Button
@@ -2234,7 +2377,7 @@ export function UserManagement() {
                               variant="outline"
                               size="sm"
                               className="w-full"
-                              onClick={() => handleTestShipway(newStore.shipway_username, newStore.shipway_password)}
+                              onClick={() => handleTestShipway(newStore.username, newStore.password)}
                               disabled={testingConnection.loading && testingConnection.type === 'shipway'}
                             >
                               {testingConnection.loading && testingConnection.type === 'shipway' ? (
@@ -2245,11 +2388,26 @@ export function UserManagement() {
                               ) : (
                                 <>
                                   <CheckCircle className="w-3 h-3 mr-2" />
-                                  Test Shipway Connection
+                                  Test {newStore.shipping_partner} Connection
                                 </>
                               )}
                             </Button>
+                            {shipwayTestResult && (
+                              <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                                shipwayTestResult.success 
+                                  ? 'bg-green-50 text-green-800 border border-green-200' 
+                                  : 'bg-red-50 text-red-800 border border-red-200'
+                              }`}>
+                                {shipwayTestResult.success ? (
+                                  <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                                )}
+                                <span className="flex-1">{shipwayTestResult.message}</span>
+                              </div>
+                            )}
                           </div>
+                          )}
 
                           <div className="space-y-2">
                             <Label className="text-sm font-semibold">Shopify Credentials</Label>
@@ -2304,6 +2462,20 @@ export function UserManagement() {
                                 </>
                               )}
                             </Button>
+                            {shopifyTestResult && (
+                              <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                                shopifyTestResult.success 
+                                  ? 'bg-green-50 text-green-800 border border-green-200' 
+                                  : 'bg-red-50 text-red-800 border border-red-200'
+                              }`}>
+                                {shopifyTestResult.success ? (
+                                  <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                                )}
+                                <span className="flex-1">{shopifyTestResult.message}</span>
+                              </div>
+                            )}
                           </div>
 
                           <div>
@@ -2326,7 +2498,19 @@ export function UserManagement() {
                           <Button variant="outline" onClick={() => setIsAddStoreOpen(false)}>
                             Cancel
                           </Button>
-                          <Button onClick={handleAddStore}>Add Store</Button>
+                          <Button 
+                        onClick={handleAddStore}
+                        disabled={isAddingStore}
+                      >
+                        {isAddingStore ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Adding Store...
+                          </>
+                        ) : (
+                          'Add Store'
+                        )}
+                      </Button>
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
@@ -2353,7 +2537,7 @@ export function UserManagement() {
                             <TableRow>
                               <TableHead>Store Name</TableHead>
                               <TableHead>Account Code</TableHead>
-                              <TableHead>Shipway Username</TableHead>
+                              <TableHead>Username</TableHead>
                               <TableHead>Shopify URL</TableHead>
                               <TableHead>Status</TableHead>
                               <TableHead>Last Synced</TableHead>
@@ -2365,7 +2549,7 @@ export function UserManagement() {
                               <TableRow key={store.id}>
                                 <TableCell className="font-medium">{store.store_name}</TableCell>
                                 <TableCell className="font-mono text-xs">{store.account_code}</TableCell>
-                                <TableCell>{store.shipway_username}</TableCell>
+                                <TableCell>{store.username}</TableCell>
                                 <TableCell className="max-w-[200px] truncate">
                                   {store.shopify_store_url || 'N/A'}
                                 </TableCell>
@@ -2770,8 +2954,8 @@ export function UserManagement() {
                   <Label htmlFor="edit-shipway-username">Shipway Username *</Label>
                   <Input
                     id="edit-shipway-username"
-                    value={editingStore.shipway_username || ''}
-                    onChange={(e) => setEditingStore({ ...editingStore, shipway_username: e.target.value })}
+                    value={editingStore.username || ''}
+                    onChange={(e) => setEditingStore({ ...editingStore, username: e.target.value })}
                     placeholder="Enter Shipway username"
                   />
                 </div>
@@ -2781,8 +2965,8 @@ export function UserManagement() {
                     <Input
                       id="edit-shipway-password"
                       type={showPassword ? "text" : "password"}
-                      value={editingStore.shipway_password || ''}
-                      onChange={(e) => setEditingStore({ ...editingStore, shipway_password: e.target.value })}
+                      value={editingStore.password || ''}
+                      onChange={(e) => setEditingStore({ ...editingStore, password: e.target.value })}
                       placeholder="Enter new password or leave blank"
                       className="pr-10"
                     />
@@ -2802,7 +2986,7 @@ export function UserManagement() {
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  onClick={() => handleTestShipway(editingStore.shipway_username, editingStore.shipway_password || '')}
+                  onClick={() => handleTestShipway(editingStore.username, editingStore.password || '')}
                   disabled={testingConnection.loading && testingConnection.type === 'shipway'}
                 >
                   {testingConnection.loading && testingConnection.type === 'shipway' ? (

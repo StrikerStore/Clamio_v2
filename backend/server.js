@@ -490,14 +490,33 @@ app.listen(PORT, async () => {
   console.log(process.env.SHOPIFY_ACCESS_TOKEN);
   console.log(process.env.SHOPIFY_PRODUCTS_API_URL);
 
-  // Fetch Shopify products on startup
-  fetchAndSaveShopifyProducts(
-    process.env.SHOPIFY_PRODUCTS_API_URL || 'https://seq5t1-mz.myshopify.com/admin/api/2025-07/graphql.json',
-    {
-      'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
-      'Content-Type': 'application/json',
+  // Fetch Shopify products on startup (only if store is configured)
+  // This will gracefully skip if no stores are configured yet
+  (async () => {
+    try {
+      const shopifyUrl = process.env.SHOPIFY_PRODUCTS_API_URL || 'https://seq5t1-mz.myshopify.com/admin/api/2025-07/graphql.json';
+      const shopifyToken = process.env.SHOPIFY_ACCESS_TOKEN;
+      
+      if (shopifyUrl && shopifyToken) {
+        const result = await fetchAndSaveShopifyProducts(
+          shopifyUrl,
+          {
+            'X-Shopify-Access-Token': shopifyToken,
+            'Content-Type': 'application/json',
+          }
+        );
+        
+        if (result && result.skipped) {
+          console.log('ℹ️ [Shopify] Product fetch skipped - no stores configured yet');
+        }
+      } else {
+        console.log('ℹ️ [Shopify] Shopify credentials not provided in environment, skipping product fetch');
+      }
+    } catch (error) {
+      // Don't crash the server if product fetch fails
+      console.error('⚠️ [Shopify] Product fetch failed (non-fatal):', error.message);
     }
-  );
+  })();
 
   // Start Multi-Store sync cron job (every hour)
   const multiStoreSyncService = require('./services/multiStoreSyncService');

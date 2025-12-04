@@ -19,6 +19,13 @@ router.get('/list-for-filter', authenticateAdmin, storeController.getStoreListFo
 router.use(authenticateSuperAdmin);
 
 /**
+ * @route   GET /api/stores/shipping-partners
+ * @desc    Get all available shipping partners
+ * @access  Superadmin
+ */
+router.get('/shipping-partners', storeController.getShippingPartners);
+
+/**
  * @route   GET /api/stores
  * @desc    Get all stores
  * @access  Superadmin
@@ -36,7 +43,7 @@ router.get('/:accountCode', storeController.getStoreByCode);
  * @route   POST /api/stores
  * @desc    Create new store
  * @access  Superadmin
- * @body    { store_name, shipway_username, shipway_password, shopify_store_url, shopify_token, status }
+ * @body    { store_name, shipping_partner, username, password, shopify_store_url, shopify_token, status }
  */
 router.post('/', storeController.createStore);
 
@@ -44,7 +51,7 @@ router.post('/', storeController.createStore);
  * @route   PUT /api/stores/:accountCode
  * @desc    Update store
  * @access  Superadmin
- * @body    { store_name?, shipway_username?, shipway_password?, shopify_store_url?, shopify_token?, status? }
+ * @body    { store_name?, username?, password?, shopify_store_url?, shopify_token?, status? }
  */
 router.put('/:accountCode', storeController.updateStore);
 
@@ -66,7 +73,7 @@ router.patch('/:accountCode/toggle-status', storeController.toggleStoreStatus);
  * @route   POST /api/stores/test-shipway
  * @desc    Test Shipway connection
  * @access  Superadmin
- * @body    { shipway_username, shipway_password }
+ * @body    { username, password }
  */
 router.post('/test-shipway', storeController.testShipwayConnection);
 

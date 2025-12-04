@@ -590,17 +590,31 @@ class CarrierServiceabilityService {
       console.log(`🔵 GET TOP 3 CARRIERS: Starting for order ${order.order_id || order.unique_id}...`);
       console.log(`  - Pincode: ${order.pincode}`);
       console.log(`  - Payment Type: ${order.payment_type}`);
+      console.log(`  - Account Code (Store): ${order.account_code || 'NOT SET'}`);
       
       // Validate input
       if (!order.pincode || !order.payment_type) {
         throw new Error('Order must have pincode and payment_type');
       }
       
-      // Get carriers from database
-      const carriers = await this.readCarriersFromDatabase();
+      // Validate account_code is present
+      if (!order.account_code) {
+        throw new Error('Order must have account_code (store) to determine carrier priorities');
+      }
       
-      if (carriers.length === 0) {
-        throw new Error('No carriers found in database');
+      // Get carriers from database - filter by store (account_code)
+      const allCarriers = await this.readCarriersFromDatabase();
+      
+      // Filter carriers by the order's store (account_code)
+      const storeCarriers = allCarriers.filter(carrier => 
+        String(carrier.account_code) === String(order.account_code)
+      );
+      
+      console.log(`  - Total carriers in database: ${allCarriers.length}`);
+      console.log(`  - Carriers for store ${order.account_code}: ${storeCarriers.length}`);
+      
+      if (storeCarriers.length === 0) {
+        throw new Error(`No carriers found for store ${order.account_code}`);
       }
       
       // Check serviceability for the pincode
@@ -614,8 +628,17 @@ class CarrierServiceabilityService {
       
       console.log(`  - Found ${serviceableCarriers.length} serviceable carriers`);
       
-      // Create a map of carrier data for quick lookup
-      const carrierMap = new Map(carriers.map(carrier => [carrier.carrier_id, carrier]));
+      // Create a map of carrier data for quick lookup (store-specific)
+      // Use composite key (carrier_id + account_code) to handle same carrier_id in different stores
+      const carrierMap = new Map();
+      storeCarriers.forEach(carrier => {
+        const key = `${carrier.carrier_id}_${carrier.account_code}`;
+        carrierMap.set(key, carrier);
+        // Also set by carrier_id only for backward compatibility, but prefer store-specific
+        if (!carrierMap.has(carrier.carrier_id)) {
+          carrierMap.set(carrier.carrier_id, carrier);
+        }
+      });
       
       // Filter serviceable carriers by payment type
       const matchingCarriers = serviceableCarriers.filter(carrier => 
@@ -629,39 +652,64 @@ class CarrierServiceabilityService {
         return JSON.stringify([]);
       }
       
-      // Find carriers that exist in our carrier data and are active
+      // Find carriers that exist in our carrier data for THIS STORE and are active
+      // Only serviceable carriers are considered here (already filtered by checkServiceability)
       const validCarriers = matchingCarriers
-        .filter(carrier => carrierMap.has(carrier.carrier_id))
         .map(carrier => {
-          const carrierInfo = carrierMap.get(carrier.carrier_id);
+          // Try to find carrier in store-specific carriers
+          const storeCarrier = storeCarriers.find(sc => 
+            String(sc.carrier_id) === String(carrier.carrier_id)
+          );
+          
+          if (!storeCarrier) {
+            return null; // Carrier not configured for this store
+          }
+          
           return {
             carrier_id: carrier.carrier_id,
             name: carrier.name,
             payment_type: carrier.payment_type,
-            priority: parseInt(carrierInfo.priority) || 999,
-            status: String(carrierInfo.status || '').trim().toLowerCase()
+            priority: parseInt(storeCarrier.priority) || 999,
+            status: String(storeCarrier.status || '').trim().toLowerCase(),
+            account_code: storeCarrier.account_code
           };
         })
-        .filter(carrier => carrier.status === 'active');
+        .filter(carrier => carrier !== null && carrier.status === 'active');
       
-      console.log(`  - Valid active carriers: ${validCarriers.length}`);
+      console.log(`  - Valid active carriers for store ${order.account_code}: ${validCarriers.length}`);
+      
+      // Log which store carriers are NOT serviceable (for debugging)
+      const serviceableCarrierIds = new Set(serviceableCarriers.map(c => String(c.carrier_id)));
+      const nonServiceableStoreCarriers = storeCarriers
+        .filter(sc => !serviceableCarrierIds.has(String(sc.carrier_id)))
+        .sort((a, b) => (parseInt(a.priority) || 999) - (parseInt(b.priority) || 999));
+      
+      if (nonServiceableStoreCarriers.length > 0) {
+        console.log(`  - Store carriers NOT serviceable for pincode ${order.pincode}: ${nonServiceableStoreCarriers.map(c => `${c.carrier_id} (Priority ${c.priority})`).join(', ')}`);
+      }
       
       if (validCarriers.length === 0) {
-        console.log(`⚠️ No valid active carriers found`);
+        console.log(`⚠️ No valid active carriers found for store ${order.account_code}`);
         return JSON.stringify([]);
       }
       
       // Sort by priority (ascending: 1, 2, 3...) and take top 3
+      // This automatically skips non-serviceable carriers and picks the next available ones
       const top3Carriers = validCarriers
         .sort((a, b) => a.priority - b.priority)
         .slice(0, 3)
         .map(carrier => carrier.carrier_id);
       
-      console.log(`✅ Top 3 carriers selected: ${JSON.stringify(top3Carriers)}`);
+      console.log(`✅ Top 3 carriers selected for store ${order.account_code}: ${JSON.stringify(top3Carriers)}`);
       top3Carriers.forEach((carrierId, index) => {
         const carrier = validCarriers.find(c => c.carrier_id === carrierId);
-        console.log(`  ${index + 1}. ${carrierId} - ${carrier.name} (Priority: ${carrier.priority})`);
+        console.log(`  ${index + 1}. ${carrierId} - ${carrier.name} (Priority: ${carrier.priority}, Store: ${carrier.account_code})`);
       });
+      
+      // Log if we got fewer than 3 carriers
+      if (top3Carriers.length < 3 && validCarriers.length >= 3) {
+        console.log(`  ⚠️ Only ${top3Carriers.length} carriers selected (expected 3). This may be due to serviceability or payment type filtering.`);
+      }
       
       return JSON.stringify(top3Carriers);
       

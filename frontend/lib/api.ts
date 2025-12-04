@@ -715,8 +715,11 @@ class ApiClient {
   }
 
   // Carrier management methods
-  async getCarriers(): Promise<ApiResponse> {
-    return this.makeRequest('/shipway/carriers/local')
+  async getCarriers(accountCode?: string): Promise<ApiResponse> {
+    const url = accountCode 
+      ? `/shipway/carriers/local?account_code=${encodeURIComponent(accountCode)}`
+      : '/shipway/carriers/local'
+    return this.makeRequest(url)
   }
 
   async syncCarriers(): Promise<ApiResponse> {
@@ -742,10 +745,10 @@ class ApiClient {
     })
   }
 
-  async moveCarrier(carrierId: string, direction: 'up' | 'down'): Promise<ApiResponse> {
+  async moveCarrier(carrierId: string, direction: 'up' | 'down', accountCode: string): Promise<ApiResponse> {
     return this.makeRequest(`/shipway/carriers/${encodeURIComponent(carrierId)}/move`, {
       method: 'POST',
-      body: JSON.stringify({ direction }),
+      body: JSON.stringify({ direction, account_code: accountCode }),
     })
   }
 
@@ -792,6 +795,7 @@ class ApiClient {
       
       const formData = new FormData();
       formData.append('csvFile', file, file.name); // Add filename explicitly
+      // Note: account_code should be in CSV file itself for multi-store upload
 
       console.log('🔍 Uploading file:', {
         name: file.name,
@@ -851,10 +855,15 @@ class ApiClient {
     return this.makeRequest(`/stores/${accountCode}`)
   }
 
+  async getShippingPartners(): Promise<ApiResponse> {
+    return this.makeRequest('/stores/shipping-partners')
+  }
+
   async createStore(storeData: {
     store_name: string
-    shipway_username: string
-    shipway_password: string
+    shipping_partner: string
+    username: string
+    password: string
     shopify_store_url: string
     shopify_token: string
     status: 'active' | 'inactive'
@@ -867,8 +876,8 @@ class ApiClient {
 
   async updateStore(accountCode: string, storeData: {
     store_name?: string
-    shipway_username?: string
-    shipway_password?: string
+    username?: string
+    password?: string
     shopify_store_url?: string
     shopify_token?: string
     status?: 'active' | 'inactive'
@@ -892,8 +901,8 @@ class ApiClient {
   }
 
   async testShipwayConnection(credentials: {
-    shipway_username: string
-    shipway_password: string
+    username: string
+    password: string
   }): Promise<ApiResponse> {
     return this.makeRequest('/stores/test-shipway', {
       method: 'POST',

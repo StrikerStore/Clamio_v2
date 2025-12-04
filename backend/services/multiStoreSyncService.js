@@ -5,7 +5,7 @@
 
 const database = require('../config/database');
 const ShipwayService = require('./shipwayService');
-const ShipwayCarrierService = require('./shipwayCarrierService');
+const { ShipwayCarrierService } = require('./shipwayCarrierService');
 
 class MultiStoreSyncService {
   

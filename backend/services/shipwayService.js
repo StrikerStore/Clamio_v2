@@ -6,14 +6,17 @@ const orderEnhancementService = require('./orderEnhancementService');
 const database = require('../config/database');
 
 /**
- * Generate stable unique_id from order and product data
+ * Generate stable unique_id from order and product data.
+ * Now includes account_code so rows from different stores never collide.
  * @param {string} orderId - Order ID
  * @param {string} productCode - Product code
  * @param {number} itemIndex - Item index in order (for duplicate products in same order)
+ * @param {string} accountCode - Store account code
  * @returns {string} Stable unique_id
  */
-function generateStableUniqueId(orderId, productCode, itemIndex = 0) {
-  const id = `${orderId}_${productCode}_${itemIndex}`;
+function generateStableUniqueId(orderId, productCode, itemIndex = 0, accountCode = '') {
+  const storePart = accountCode || 'GLOBAL';
+  const id = `${storePart}_${orderId}_${productCode}_${itemIndex}`;
   return crypto.createHash('md5').update(id).digest('hex').substring(0, 12).toUpperCase();
 }
 
@@ -456,10 +459,11 @@ class ShipwayService {
     const flatOrders = [];
     let uniqueIdCounter = maxUniqueId + 1;
 
-    // Function to generate stable unique_id
-    function generateStableUniqueId(orderId, productCode, itemIndex = 0) {
+    // Function to generate stable unique_id (store-aware)
+    function generateStableUniqueIdWithStore(orderId, productCode, itemIndex = 0, accountCode = '') {
       const crypto = require('crypto');
-      const id = `${orderId}_${productCode}_${itemIndex}`;
+      const storePart = accountCode || 'GLOBAL';
+      const id = `${storePart}_${orderId}_${productCode}_${itemIndex}`;
       return crypto.createHash('md5').update(id).digest('hex').substring(0, 12).toUpperCase();
     }
     
@@ -536,7 +540,7 @@ class ShipwayService {
            : parseFloat((orderTotalSplit - prepaidAmount).toFixed(2));
          
                                                          const orderRow = {
-          unique_id: existingClaim ? existingClaim.unique_id : generateStableUniqueId(order.order_id, product.product_code, i),
+         unique_id: existingClaim ? existingClaim.unique_id : generateStableUniqueIdWithStore(order.order_id, product.product_code, i, this.accountCode),
           order_id: order.order_id,
           order_date: order.order_date,
           product_name: product.product,
@@ -868,6 +872,14 @@ class ShipwayService {
     const flatOrders = [];
     let uniqueIdCounter = maxUniqueId + 1;
     
+    // Function to generate stable unique_id (store-aware)
+    const generateStableUniqueIdWithStore = (orderId, productCode, itemIndex = 0, accountCode = '') => {
+      const crypto = require('crypto');
+      const storePart = accountCode || 'GLOBAL';
+      const id = `${storePart}_${orderId}_${productCode}_${itemIndex}`;
+      return crypto.createHash('md5').update(id).digest('hex').substring(0, 12).toUpperCase();
+    };
+    
     for (const order of shipwayOrders) {
       if (!Array.isArray(order.products)) continue;
       
@@ -978,7 +990,7 @@ class ShipwayService {
         
         const orderRow = {
           id: `${order.order_id}_${product.product_code}_${Date.now()}`,
-          unique_id: existingClaim ? existingClaim.unique_id : generateStableUniqueId(order.order_id, product.product_code, i),
+          unique_id: existingClaim ? existingClaim.unique_id : generateStableUniqueIdWithStore(order.order_id, product.product_code, i, this.accountCode),
           order_id: order.order_id,
           order_date: order.order_date, // Shipway sends IST time; MySQL connection is configured with IST timezone
           product_name: product.product,
@@ -1206,6 +1218,7 @@ class ShipwayService {
             // Upsert customer info (create or update)
             const customerData = {
               order_id: order.order_id,
+              account_code: this.accountCode, // Add account_code from service instance
               store_code: order.store_code || '1',
               email: order.email || null,
               billing_firstname: order.b_firstname || null,
@@ -1376,6 +1389,9 @@ class ShipwayService {
    * @returns {Object} Cancel result from Shipway API
    */
   async cancelShipment(awbNumbers) {
+    // Initialize service if not already initialized
+    await this.initialize();
+    
     try {
       if (!awbNumbers || !Array.isArray(awbNumbers) || awbNumbers.length === 0) {
         throw new Error('AWB numbers array is required and cannot be empty');
@@ -1473,4 +1489,6 @@ class ShipwayService {
   }
 }
 
-module.exports = new ShipwayService(); 
+// Export the class so callers can create store-specific instances,
+// e.g. new ShipwayService(accountCode)
+module.exports = ShipwayService; 

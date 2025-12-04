@@ -83,15 +83,20 @@ export function SuperAdminPanel() {
   const [storeToDelete, setStoreToDelete] = useState<any>(null)
   const [newStore, setNewStore] = useState({
     store_name: "",
-    shipway_username: "",
-    shipway_password: "",
+    shipping_partner: "",
+    username: "",
+    password: "",
     shopify_store_url: "",
     shopify_token: "",
     status: "active" as "active" | "inactive"
   })
+  const [shippingPartners, setShippingPartners] = useState<string[]>([])
   const [showPassword, setShowPassword] = useState(false)
   const [showShopifyToken, setShowShopifyToken] = useState(false)
   const [testingConnection, setTestingConnection] = useState<{ type: 'shipway' | 'shopify' | null, loading: boolean }>({ type: null, loading: false })
+  const [shipwayTestResult, setShipwayTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [shopifyTestResult, setShopifyTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [isAddingStore, setIsAddingStore] = useState(false)
 
   const handleAddUser = () => {
     if (!newUser.userType) {
@@ -333,7 +338,7 @@ export function SuperAdminPanel() {
   }
 
   const handleAddStore = async () => {
-    if (!newStore.store_name || !newStore.shipway_username || !newStore.shipway_password || 
+    if (!newStore.store_name || !newStore.shipping_partner || !newStore.username || !newStore.password || 
         !newStore.shopify_store_url || !newStore.shopify_token) {
       toast({
         title: "Error",
@@ -343,21 +348,25 @@ export function SuperAdminPanel() {
       return
     }
 
+    setIsAddingStore(true)
     try {
       const response = await apiClient.createStore(newStore)
       if (response.success) {
         toast({
           title: "Store Added",
-          description: `${newStore.store_name} has been added successfully`,
+          description: `${newStore.store_name} has been added successfully. Syncing orders, carriers, and products...`,
         })
         setNewStore({
           store_name: "",
-          shipway_username: "",
-          shipway_password: "",
+          shipping_partner: "",
+          username: "",
+          password: "",
           shopify_store_url: "",
           shopify_token: "",
           status: "active"
         })
+        setShipwayTestResult(null)
+        setShopifyTestResult(null)
         setIsAddStoreOpen(false)
         fetchStores()
       } else {
@@ -373,19 +382,21 @@ export function SuperAdminPanel() {
         description: error?.message || "Failed to create store",
         variant: "destructive",
       })
+    } finally {
+      setIsAddingStore(false)
     }
   }
 
   const handleEditStore = (store: any) => {
     setEditingStore({ 
       ...store,
-      shipway_password: '' // Don't show existing password, user needs to enter new one if changing
+      password: '' // Don't show existing password, user needs to enter new one if changing
     })
     setIsEditStoreOpen(true)
   }
 
   const handleUpdateStore = async () => {
-    if (!editingStore.store_name || !editingStore.shipway_username || 
+    if (!editingStore.store_name || !editingStore.username || 
         !editingStore.shopify_store_url || !editingStore.shopify_token) {
       toast({
         title: "Error",
@@ -398,15 +409,15 @@ export function SuperAdminPanel() {
     try {
       const updateData: any = {
         store_name: editingStore.store_name,
-        shipway_username: editingStore.shipway_username,
+        username: editingStore.username,
         shopify_store_url: editingStore.shopify_store_url,
         shopify_token: editingStore.shopify_token,
         status: editingStore.status
       }
       
       // Only include password if it was changed (not empty)
-      if (editingStore.shipway_password && editingStore.shipway_password.trim() !== '') {
-        updateData.shipway_password = editingStore.shipway_password
+      if (editingStore.password && editingStore.password.trim() !== '') {
+        updateData.password = editingStore.password
       }
 
       const response = await apiClient.updateStore(editingStore.account_code, updateData)
@@ -470,6 +481,7 @@ export function SuperAdminPanel() {
 
   const handleTestShipway = async (username: string, password: string) => {
     if (!username || !password) {
+      setShipwayTestResult({ success: false, message: "Please enter Shipway username and password" })
       toast({
         title: "Error",
         description: "Please enter Shipway username and password",
@@ -479,24 +491,35 @@ export function SuperAdminPanel() {
     }
 
     setTestingConnection({ type: 'shipway', loading: true })
+    setShipwayTestResult(null) // Clear previous result
     try {
-      const response = await apiClient.testShipwayConnection({ shipway_username: username, shipway_password: password })
-      if (response.success) {
+      const response = await apiClient.testShipwayConnection({ username: username, password: password })
+      
+      // Handle response - check for success property (handle both boolean true and string "true")
+      const isSuccess = response?.success === true || response?.success === 'true' || response?.success === 1
+      
+      if (isSuccess) {
+        const successMessage = response.message || `${newStore.shipping_partner || 'Shipping partner'} connection successful! Credentials are valid.`
+        setShipwayTestResult({ success: true, message: successMessage })
         toast({
           title: "Connection Successful",
-          description: "Shipway credentials are valid",
+          description: successMessage,
         })
       } else {
+        const errorMessage = response?.message || "Invalid credentials"
+        setShipwayTestResult({ success: false, message: errorMessage })
         toast({
           title: "Connection Failed",
-          description: response.message || "Invalid Shipway credentials",
+          description: errorMessage,
           variant: "destructive",
         })
       }
     } catch (error: any) {
+      const errorMessage = error?.message || "Failed to test connection"
+      setShipwayTestResult({ success: false, message: errorMessage })
       toast({
         title: "Connection Failed",
-        description: error?.message || "Failed to test Shipway connection",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -506,6 +529,7 @@ export function SuperAdminPanel() {
 
   const handleTestShopify = async (url: string, token: string) => {
     if (!url || !token) {
+      setShopifyTestResult({ success: false, message: "Please enter Shopify store URL and token" })
       toast({
         title: "Error",
         description: "Please enter Shopify store URL and token",
@@ -515,14 +539,17 @@ export function SuperAdminPanel() {
     }
 
     setTestingConnection({ type: 'shopify', loading: true })
+    setShopifyTestResult(null) // Clear previous result
     try {
       const response = await apiClient.testShopifyConnection({ shopify_store_url: url, shopify_token: token })
       if (response.success) {
+        setShopifyTestResult({ success: true, message: response.message || "Shopify connection successful! Credentials are valid." })
         toast({
           title: "Connection Successful",
           description: "Shopify credentials are valid",
         })
       } else {
+        setShopifyTestResult({ success: false, message: response.message || "Invalid Shopify credentials" })
         toast({
           title: "Connection Failed",
           description: response.message || "Invalid Shopify credentials",
@@ -530,9 +557,20 @@ export function SuperAdminPanel() {
         })
       }
     } catch (error: any) {
+      // Extract error message from various possible error formats
+      let errorMessage = "Failed to test Shopify connection"
+      if (error?.message) {
+        errorMessage = error.message
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
+      setShopifyTestResult({ success: false, message: errorMessage })
       toast({
         title: "Connection Failed",
-        description: error?.message || "Failed to test Shopify connection",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -540,10 +578,22 @@ export function SuperAdminPanel() {
     }
   }
 
-  // Fetch stores on component mount
+  // Fetch stores and shipping partners on component mount
   useEffect(() => {
     fetchStores()
+    fetchShippingPartners()
   }, [])
+
+  const fetchShippingPartners = async () => {
+    try {
+      const response = await apiClient.getShippingPartners()
+      if (response.success && Array.isArray(response.data)) {
+        setShippingPartners(response.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch shipping partners:', error)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -911,7 +961,14 @@ export function SuperAdminPanel() {
               <TabsContent value="stores" className="space-y-3 sm:space-y-4 md:space-y-6">
                 <div className={`flex ${isMobile ? 'flex-col space-y-2 sm:space-y-3' : 'justify-between items-center'}`}>
                   <h3 className={`font-medium ${isMobile ? 'text-sm sm:text-base' : 'text-lg'}`}>Store Management</h3>
-                  <Dialog open={isAddStoreOpen} onOpenChange={setIsAddStoreOpen}>
+                  <Dialog open={isAddStoreOpen} onOpenChange={(open) => {
+                    setIsAddStoreOpen(open)
+                    if (!open) {
+                      // Clear test results when dialog closes
+                      setShipwayTestResult(null)
+                      setShopifyTestResult(null)
+                    }
+                  }}>
                     <DialogTrigger asChild>
                       <Button className={`${isMobile ? 'w-full text-sm' : ''}`} size={isMobile ? 'default' : 'default'}>
                         <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
@@ -922,7 +979,7 @@ export function SuperAdminPanel() {
                       <DialogHeader>
                         <DialogTitle className={`${isMobile ? 'text-sm sm:text-lg' : 'text-xl'}`}>Add New Store</DialogTitle>
                         <DialogDescription className={`${isMobile ? 'text-xs sm:text-sm' : ''}`}>
-                          Create a new store with Shipway and Shopify credentials
+                          Create a new store with shipping partner and Shopify credentials
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-3 sm:space-y-4">
@@ -936,26 +993,50 @@ export function SuperAdminPanel() {
                           />
                         </div>
 
-                        <div className="space-y-2">
-                          <Label className="text-sm font-semibold">Shipway Credentials</Label>
+                        <div>
+                          <Label htmlFor="shipping-partner">Shipping Partner *</Label>
+                          <Select
+                            value={newStore.shipping_partner}
+                            onValueChange={(value) => {
+                              setNewStore({ ...newStore, shipping_partner: value, username: "", password: "" })
+                              setShipwayTestResult(null)
+                              setShopifyTestResult(null)
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select shipping partner" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {shippingPartners.map((partner) => (
+                                <SelectItem key={partner} value={partner}>
+                                  {partner}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {newStore.shipping_partner && (
+                          <div className="space-y-2">
+                            <Label className="text-sm font-semibold">{newStore.shipping_partner} Credentials</Label>
                           <div>
-                            <Label htmlFor="shipway-username">Shipway Username *</Label>
+                            <Label htmlFor="shipping-username">Username *</Label>
                             <Input
-                              id="shipway-username"
-                              value={newStore.shipway_username}
-                              onChange={(e) => setNewStore({ ...newStore, shipway_username: e.target.value })}
-                              placeholder="Enter Shipway username"
+                              id="shipping-username"
+                              value={newStore.username}
+                              onChange={(e) => setNewStore({ ...newStore, username: e.target.value })}
+                              placeholder={`Enter ${newStore.shipping_partner} username`}
                             />
                           </div>
                           <div>
-                            <Label htmlFor="shipway-password">Shipway Password *</Label>
+                            <Label htmlFor="shipping-password">Password *</Label>
                             <div className="relative">
                               <Input
                                 id="shipway-password"
                                 type={showPassword ? "text" : "password"}
-                                value={newStore.shipway_password}
-                                onChange={(e) => setNewStore({ ...newStore, shipway_password: e.target.value })}
-                                placeholder="Enter Shipway password"
+                                value={newStore.password}
+                                onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
+                                placeholder={`Enter ${newStore.shipping_partner} password`}
                                 className="pr-10"
                               />
                               <Button
@@ -974,7 +1055,7 @@ export function SuperAdminPanel() {
                             variant="outline"
                             size="sm"
                             className="w-full"
-                            onClick={() => handleTestShipway(newStore.shipway_username, newStore.shipway_password)}
+                            onClick={() => handleTestShipway(newStore.username, newStore.password)}
                             disabled={testingConnection.loading && testingConnection.type === 'shipway'}
                           >
                             {testingConnection.loading && testingConnection.type === 'shipway' ? (
@@ -985,11 +1066,26 @@ export function SuperAdminPanel() {
                             ) : (
                               <>
                                 <CheckCircle className="w-3 h-3 mr-2" />
-                                Test Shipway Connection
+                                Test {newStore.shipping_partner} Connection
                               </>
                             )}
                           </Button>
+                          {shipwayTestResult && (
+                            <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                              shipwayTestResult.success 
+                                ? 'bg-green-50 text-green-800 border border-green-200' 
+                                : 'bg-red-50 text-red-800 border border-red-200'
+                            }`}>
+                              {shipwayTestResult.success ? (
+                                <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                              ) : (
+                                <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                              )}
+                              <span className="flex-1">{shipwayTestResult.message}</span>
+                            </div>
+                          )}
                         </div>
+                        )}
 
                         <div className="space-y-2">
                           <Label className="text-sm font-semibold">Shopify Credentials</Label>
@@ -1044,6 +1140,20 @@ export function SuperAdminPanel() {
                               </>
                             )}
                           </Button>
+                          {shopifyTestResult && (
+                            <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                              shopifyTestResult.success 
+                                ? 'bg-green-50 text-green-800 border border-green-200' 
+                                : 'bg-red-50 text-red-800 border border-red-200'
+                            }`}>
+                              {shopifyTestResult.success ? (
+                                <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                              ) : (
+                                <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                              )}
+                              <span className="flex-1">{shopifyTestResult.message}</span>
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -1066,7 +1176,20 @@ export function SuperAdminPanel() {
                         <Button variant="outline" onClick={() => setIsAddStoreOpen(false)} className={`${isMobile ? 'w-full text-sm' : ''}`}>
                           Cancel
                         </Button>
-                        <Button onClick={handleAddStore} className={`${isMobile ? 'w-full text-sm' : ''}`}>Add Store</Button>
+                        <Button 
+                          onClick={handleAddStore} 
+                          disabled={isAddingStore}
+                          className={`${isMobile ? 'w-full text-sm' : ''}`}
+                        >
+                          {isAddingStore ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                              Adding Store...
+                            </>
+                          ) : (
+                            'Add Store'
+                          )}
+                        </Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
@@ -1108,7 +1231,7 @@ export function SuperAdminPanel() {
                             {getStatusBadge(store.status)}
                           </div>
                           <div className="text-[10px] sm:text-xs text-gray-500 space-y-1">
-                            <p>Shipway: {store.shipway_username}</p>
+                            <p>Shipway: {store.username}</p>
                             <p>Shopify: {store.shopify_store_url || 'N/A'}</p>
                             {store.last_synced_at && <p>Last synced: {new Date(store.last_synced_at).toLocaleDateString()}</p>}
                           </div>
@@ -1124,7 +1247,7 @@ export function SuperAdminPanel() {
                           <TableRow>
                             <TableHead>Store Name</TableHead>
                             <TableHead>Account Code</TableHead>
-                            <TableHead>Shipway Username</TableHead>
+                            <TableHead>Username</TableHead>
                             <TableHead>Shopify URL</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead>Last Synced</TableHead>
@@ -1136,7 +1259,7 @@ export function SuperAdminPanel() {
                             <TableRow key={store.id}>
                               <TableCell className="font-medium">{store.store_name}</TableCell>
                               <TableCell className="font-mono text-xs">{store.account_code}</TableCell>
-                              <TableCell>{store.shipway_username}</TableCell>
+                              <TableCell>{store.username}</TableCell>
                               <TableCell className={`${isTablet ? 'max-w-[150px] truncate' : ''}`}>
                                 {store.shopify_store_url || 'N/A'}
                               </TableCell>
@@ -1321,7 +1444,14 @@ export function SuperAdminPanel() {
       </Dialog>
 
       {/* Edit Store Dialog */}
-      <Dialog open={isEditStoreOpen} onOpenChange={setIsEditStoreOpen}>
+      <Dialog open={isEditStoreOpen} onOpenChange={(open) => {
+        setIsEditStoreOpen(open)
+        if (!open) {
+          // Clear test results when dialog closes
+          setShipwayTestResult(null)
+          setShopifyTestResult(null)
+        }
+      }}>
         <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh] overflow-y-auto p-3 sm:p-6' : 'max-w-2xl'}`}>
           <DialogHeader>
             <DialogTitle className={`${isMobile ? 'text-sm sm:text-lg' : 'text-xl'}`}>Edit Store</DialogTitle>
@@ -1347,8 +1477,8 @@ export function SuperAdminPanel() {
                   <Label htmlFor="edit-shipway-username">Shipway Username *</Label>
                   <Input
                     id="edit-shipway-username"
-                    value={editingStore.shipway_username}
-                    onChange={(e) => setEditingStore({ ...editingStore, shipway_username: e.target.value })}
+                    value={editingStore.username}
+                    onChange={(e) => setEditingStore({ ...editingStore, username: e.target.value })}
                     placeholder="Enter Shipway username"
                   />
                 </div>
@@ -1358,8 +1488,8 @@ export function SuperAdminPanel() {
                     <Input
                       id="edit-shipway-password"
                       type={showPassword ? "text" : "password"}
-                      value={editingStore.shipway_password || ''}
-                      onChange={(e) => setEditingStore({ ...editingStore, shipway_password: e.target.value })}
+                      value={editingStore.password || ''}
+                      onChange={(e) => setEditingStore({ ...editingStore, password: e.target.value })}
                       placeholder="Enter new password or leave blank"
                       className="pr-10"
                     />
@@ -1379,7 +1509,7 @@ export function SuperAdminPanel() {
                   variant="outline"
                   size="sm"
                   className="w-full"
-                  onClick={() => handleTestShipway(editingStore.shipway_username, editingStore.shipway_password || '')}
+                  onClick={() => handleTestShipway(editingStore.username, editingStore.password || '')}
                   disabled={testingConnection.loading && testingConnection.type === 'shipway'}
                 >
                   {testingConnection.loading && testingConnection.type === 'shipway' ? (
@@ -1394,6 +1524,20 @@ export function SuperAdminPanel() {
                     </>
                   )}
                 </Button>
+                {shipwayTestResult && (
+                  <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                    shipwayTestResult.success 
+                      ? 'bg-green-50 text-green-800 border border-green-200' 
+                      : 'bg-red-50 text-red-800 border border-red-200'
+                  }`}>
+                    {shipwayTestResult.success ? (
+                      <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                    ) : (
+                      <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                    )}
+                    <span className="flex-1">{shipwayTestResult.message}</span>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -1449,6 +1593,20 @@ export function SuperAdminPanel() {
                     </>
                   )}
                 </Button>
+                {shopifyTestResult && (
+                  <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                    shopifyTestResult.success 
+                      ? 'bg-green-50 text-green-800 border border-green-200' 
+                      : 'bg-red-50 text-red-800 border border-red-200'
+                  }`}>
+                    {shopifyTestResult.success ? (
+                      <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                    ) : (
+                      <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                    )}
+                    <span className="flex-1">{shopifyTestResult.message}</span>
+                  </div>
+                )}
               </div>
 
               <div>

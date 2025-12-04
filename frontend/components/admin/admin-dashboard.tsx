@@ -525,6 +525,11 @@ export function AdminDashboard() {
   }
 
   const getFilteredCarriers = () => {
+    // If no store is selected, return empty array (don't show any carriers)
+    if (!selectedStoreFilter) {
+      return [];
+    }
+
     let filtered = carriers.filter((carrier) => {
       const matchesSearch =
         carrier.carrier_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -533,8 +538,8 @@ export function AdminDashboard() {
       const filterStatus = (statusFilter || '').toString().trim().toLowerCase()
       const matchesStatus = filterStatus === "all" || carrierStatus === filterStatus
       
-      // Store filter - always filter by selected store (no "all" option)
-      const matchesStore = !selectedStoreFilter || carrier.account_code === selectedStoreFilter
+      // Store filter - MUST match selected store (required, no "all" option)
+      const matchesStore = carrier.account_code === selectedStoreFilter
       
       return matchesSearch && matchesStatus && matchesStore
     })
@@ -992,9 +997,18 @@ export function AdminDashboard() {
       return; // Prevent multiple simultaneous moves
     }
     
+    if (!selectedStoreFilter) {
+      toast({
+        title: 'Error',
+        description: 'Please select a store first',
+        variant: 'destructive'
+      });
+      return;
+    }
+    
     setMovingCarrier(carrierId);
     try {
-      const res = await apiClient.moveCarrier(carrierId, direction);
+      const res = await apiClient.moveCarrier(carrierId, direction, selectedStoreFilter);
       if (!res.success) {
         throw new Error(res.message);
       }
@@ -1010,40 +1024,27 @@ export function AdminDashboard() {
     }
   };
 
-  // Track initial mount to avoid unnecessary refreshes
-  const isInitialMount = useRef(true);
-
-  // Auto-load orders when component mounts
+  // Auto-load orders when component mounts (only once on initial load)
   useEffect(() => {
     fetchOrders();
     fetchVendors();
-    fetchCarriers();
-    fetchStores(); // Fetch stores for carrier filtering
-    isInitialMount.current = false;
+    fetchStores(); // Fetch stores first for carrier filtering
   }, []);
 
-  // Refresh orders when window becomes visible (catches changes from vendor panel)
+  // Fetch carriers after stores are loaded and a store is selected
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden && activeTab === 'orders' && !ordersLoading) {
-        // Refresh orders when user switches back to the tab
-        fetchOrders();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [activeTab, ordersLoading]);
-
-  // Refresh orders when orders tab becomes active (but not on initial mount)
-  useEffect(() => {
-    if (!isInitialMount.current && activeTab === 'orders') {
-      // Only refresh if we're switching to orders tab (not on initial mount)
-      fetchOrders();
+    if (stores.length > 0 && selectedStoreFilter) {
+      fetchCarriers();
     }
-  }, [activeTab]);
+  }, [stores, selectedStoreFilter]);
+
+  // Note: Removed automatic order refresh on:
+  // - Window visibility change (was causing frequent refreshes)
+  // - Tab switching (was causing refreshes on every navigation)
+  // Orders now only refresh:
+  // 1. On initial component mount
+  // 2. When user clicks the refresh button
+  // 3. When cron job triggers a refresh (via refresh button or manual trigger)
 
   // Ensure a store is selected when stores are loaded
   useEffect(() => {
@@ -1078,9 +1079,15 @@ export function AdminDashboard() {
   };
 
   const fetchCarriers = async () => {
+    // Don't fetch if no store is selected
+    if (!selectedStoreFilter) {
+      setCarriers([]);
+      return;
+    }
+
     setCarriersLoading(true);
     try {
-      const response = await apiClient.getCarriers();
+      const response = await apiClient.getCarriers(selectedStoreFilter);
       if (response.success) {
         console.log('Carriers data received:', response.data);
         setCarriers(response.data.carriers);
@@ -1408,11 +1415,13 @@ export function AdminDashboard() {
       const formatInfo = await apiClient.getCarrierFormat();
       if (formatInfo.success) {
         const confirmed = window.confirm(
-          `CSV Upload Requirements:\n\n` +
-          `• Expected columns: ${formatInfo.data.expectedColumns.join(', ')}\n` +
-          `• Total carriers required: ${formatInfo.data.totalCarriers}\n` +
-          `• All existing carrier IDs must be included\n` +
-          `• Priority values must be unique\n\n` +
+          `CSV Upload Requirements (Multi-Store):\n\n` +
+          `• Expected columns: ${formatInfo.data.expectedColumns.join(', ')}, account_code\n` +
+          `• CSV must include "account_code" column for each carrier\n` +
+          `• CSV can contain carriers from multiple stores\n` +
+          `• All existing carrier IDs for each store must be included\n` +
+          `• Priority values must be unique within each store\n` +
+          `• Same carrier_id can appear multiple times if they belong to different stores\n\n` +
           `Do you want to proceed with the upload?`
         );
         
@@ -1711,13 +1720,13 @@ export function AdminDashboard() {
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
                 <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    Orders ({ordersStats.totalOrders})
+                    Orders ({getFilteredOrdersForTab("orders").length})
                   </TabsTrigger>
                   <TabsTrigger value="vendors" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     Vendors ({vendors.length})
                   </TabsTrigger>
                   <TabsTrigger value="carrier" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    Carrier ({carriers.length})
+                    Carrier ({getFilteredCarriers().length})
                   </TabsTrigger>
                   {!isMobile && (
                     <TabsTrigger value="inventory" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>

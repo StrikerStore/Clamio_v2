@@ -42,8 +42,9 @@ async function runMultiStoreMigration() {
         id INT AUTO_INCREMENT PRIMARY KEY,
         account_code VARCHAR(50) UNIQUE NOT NULL,
         store_name VARCHAR(255) NOT NULL,
-        shipway_username VARCHAR(255) NOT NULL,
-        shipway_password_encrypted TEXT NOT NULL,
+        shipping_partner VARCHAR(255) NOT NULL,
+        username VARCHAR(255) NOT NULL,
+        password_encrypted TEXT NOT NULL,
         auth_token TEXT NOT NULL,
         shopify_store_url VARCHAR(255) NOT NULL,
         shopify_token TEXT NOT NULL,
@@ -54,7 +55,8 @@ async function runMultiStoreMigration() {
         last_synced_at TIMESTAMP NULL,
         last_shopify_sync_at TIMESTAMP NULL,
         INDEX idx_status (status),
-        INDEX idx_account_code (account_code)
+        INDEX idx_account_code (account_code),
+        INDEX idx_shipping_partner (shipping_partner)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     
@@ -92,8 +94,8 @@ async function runMultiStoreMigration() {
           INSERT INTO store_info (
             account_code,
             store_name,
-            shipway_username,
-            shipway_password_encrypted,
+            username,
+            password_encrypted,
             auth_token,
             shopify_store_url,
             shopify_token,
