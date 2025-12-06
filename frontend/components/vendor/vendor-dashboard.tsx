@@ -1803,6 +1803,54 @@ export function VendorDashboard() {
     }
   }
 
+  // Helper function to detect iOS devices
+  const isIOSDevice = (): boolean => {
+    const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+    // Check for iPhone, iPad, or iPod
+    const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
+    // Also check for iPad on iOS 13+ (which reports as Mac)
+    const isIPadOS13 = /Macintosh/i.test(userAgent) && 
+                       navigator.maxTouchPoints && 
+                       navigator.maxTouchPoints > 1;
+    return isIOS || isIPadOS13;
+  };
+
+  // Helper function to download file with iOS compatibility
+  const downloadFile = async (url: string, filename: string): Promise<void> => {
+    const isIOS = isIOSDevice();
+    
+    if (isIOS) {
+      // iOS: Use iframe approach (doesn't block JavaScript execution)
+      console.log('🍎 iOS detected: Using iframe download method');
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.position = 'absolute';
+      iframe.style.left = '-9999px';
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      
+      // Clean up after delay
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+        window.URL.revokeObjectURL(url);
+      }, 2000);
+    } else {
+      // Non-iOS: Use link.click() approach
+      console.log('📱 Non-iOS device: Using link.click() download method');
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    }
+  };
+
   const handleDownloadLabel = async (orderId: string, format: string) => {
     // Set loading state for this specific order
     setLabelDownloadLoading(prev => ({ ...prev, [orderId]: true }));
@@ -1849,10 +1897,8 @@ export function VendorDashboard() {
             }
             const blob = new Blob([bytes], { type: 'application/pdf' });
             
-            // Create download link
+            // Create download URL
             const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
             
             // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
             const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
@@ -1860,11 +1906,8 @@ export function VendorDashboard() {
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`;
             
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(url);
+            // Download using iOS-compatible method
+            await downloadFile(url, filename);
             
             console.log('✅ FRONTEND: Formatted PDF downloaded successfully');
             
@@ -1875,7 +1918,7 @@ export function VendorDashboard() {
               description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully`,
             });
             
-            // Refresh orders to update the UI
+            // Refresh orders to update the UI (works immediately on iOS with iframe approach)
             await refreshOrders();
             
           } catch (pdfError) {
@@ -1894,10 +1937,8 @@ export function VendorDashboard() {
           try {
             const blob = await apiClient.downloadLabelFile(shipping_url);
             
-            // Create download link
+            // Create download URL
             const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
             
             // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
             const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
@@ -1905,11 +1946,8 @@ export function VendorDashboard() {
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
             
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(url);
+            // Download using iOS-compatible method
+            await downloadFile(url, filename);
             
             console.log('✅ FRONTEND: Label file downloaded successfully');
             
@@ -1920,7 +1958,7 @@ export function VendorDashboard() {
               description: `${format} label for order ${orderDisplayId} downloaded successfully`,
             });
             
-            // Refresh orders to update the UI
+            // Refresh orders to update the UI (works immediately on iOS with iframe approach)
             await refreshOrders();
             
           } catch (downloadError) {
@@ -2008,10 +2046,8 @@ export function VendorDashboard() {
       console.log('  - blob size:', blob.size);
       console.log('  - blob type:', blob.type);
       
-      // Create download link for the combined PDF
+      // Create download URL for the combined PDF
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
       
       // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
       const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
@@ -2019,11 +2055,8 @@ export function VendorDashboard() {
       const vendorCity = vendorAddress?.city || 'unknown';
       const filename = `${vendorId}_${vendorCity}_${currentDate}_${labelFormat}.pdf`;
       
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      // Download using iOS-compatible method
+      await downloadFile(url, filename);
       
       console.log('✅ FRONTEND: Bulk labels PDF downloaded successfully');
       
@@ -2048,7 +2081,7 @@ export function VendorDashboard() {
         });
       }
 
-      // Refresh orders to update the UI
+      // Refresh orders to update the UI (works immediately on iOS with iframe approach)
       await refreshOrders();
 
       // Clear selected orders

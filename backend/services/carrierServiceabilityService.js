@@ -7,26 +7,68 @@ const database = require('../config/database');
 class CarrierServiceabilityService {
   constructor() {
     this.serviceabilityApiUrl = 'https://app.shipway.com/api/pincodeserviceable';
-    this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
+    // Store credentials cache: account_code -> auth_token
+    this.storeCredentialsCache = new Map();
+  }
+
+  /**
+   * Get store credentials for a given account_code
+   * @param {string} accountCode - The account_code to get credentials for
+   * @returns {string} The auth_token for the store
+   */
+  async getStoreCredentials(accountCode) {
+    if (!accountCode) {
+      throw new Error('account_code is required for checking serviceability');
+    }
+
+    // Check cache first
+    if (this.storeCredentialsCache.has(accountCode)) {
+      return this.storeCredentialsCache.get(accountCode);
+    }
+
+    // Fetch from database
+    await database.waitForMySQLInitialization();
+    const store = await database.getStoreByAccountCode(accountCode);
+    
+    if (!store) {
+      throw new Error(`Store not found for account_code: ${accountCode}`);
+    }
+    
+    if (store.status !== 'active') {
+      throw new Error(`Store is not active: ${accountCode}`);
+    }
+    
+    if (!store.auth_token) {
+      throw new Error(`Store auth_token not found for account_code: ${accountCode}`);
+    }
+
+    // Cache the credentials
+    this.storeCredentialsCache.set(accountCode, store.auth_token);
+    
+    return store.auth_token;
   }
 
   /**
    * Check serviceability for a specific pincode
    * @param {string} pincode - The pincode to check
+   * @param {string} accountCode - The account_code for the store (REQUIRED)
    * @returns {Promise<Array>} Array of serviceable carriers
    */
-  async checkServiceability(pincode) {
+  async checkServiceability(pincode, accountCode) {
     try {
-      console.log(`🔵 CARRIER SERVICEABILITY: Checking serviceability for pincode ${pincode}...`);
-      
-      if (!this.basicAuthHeader) {
-        throw new Error('Shipway API configuration error. SHIPWAY_BASIC_AUTH_HEADER not found in environment variables.');
+      if (!accountCode) {
+        throw new Error('account_code is required for checking serviceability');
       }
+
+      console.log(`🔵 CARRIER SERVICEABILITY: Checking serviceability for pincode ${pincode} (store: ${accountCode})...`);
+      
+      // Get store-specific credentials
+      const basicAuthHeader = await this.getStoreCredentials(accountCode);
       
       const response = await axios.get(`${this.serviceabilityApiUrl}?pincode=${pincode}`, {
         timeout: 30000, // 30 seconds timeout
         headers: {
-          'Authorization': this.basicAuthHeader,
+          'Authorization': basicAuthHeader,
           'Content-Type': 'application/json',
           'User-Agent': 'Clamio-Carrier-Service/1.0'
         }
@@ -52,7 +94,7 @@ class CarrierServiceabilityService {
         console.error('  - Response data:', error.response.data);
         
         if (error.response.status === 401) {
-          throw new Error('Authentication failed. Please check your SHIPWAY_BASIC_AUTH_HEADER configuration.');
+          throw new Error('Authentication failed. Please check your store credentials configuration.');
         } else if (error.response.status === 403) {
           throw new Error('Access forbidden. Please check your API permissions.');
         } else if (error.response.status === 404) {
@@ -277,36 +319,57 @@ class CarrierServiceabilityService {
         };
       }
       
-      // Track unique pincodes from claimed orders only
-      const uniquePincodes = new Set();
-      const pincodeServiceabilityMap = new Map();
+      // Track unique pincodes per store (account_code) from claimed orders
+      // Structure: Map<account_code, Map<pincode, serviceableCarriers[]>>
+      const storePincodeServiceabilityMap = new Map();
       
-      // Collect unique pincodes from claimed orders only
+      // Group orders by account_code and collect unique pincodes per store
+      const ordersByStore = new Map();
       claimedOrders.forEach(order => {
-        if (order.pincode) {
-          uniquePincodes.add(order.pincode);
+        if (!order.account_code) {
+          console.log(`⚠️ Order ${order.order_id}: Missing account_code, skipping serviceability check`);
+          return;
         }
+        
+        if (!ordersByStore.has(order.account_code)) {
+          ordersByStore.set(order.account_code, []);
+        }
+        ordersByStore.get(order.account_code).push(order);
       });
       
-      console.log(`📊 Unique pincodes from claimed orders: ${uniquePincodes.size}`);
-      console.log(`📊 Pincodes: ${Array.from(uniquePincodes).join(', ')}`);
+      console.log(`📊 Processing orders from ${ordersByStore.size} store(s)`);
       
-      // Check serviceability for each unique pincode from claimed orders
-      for (const pincode of uniquePincodes) {
-        try {
-          console.log(`\n🔍 Checking serviceability for pincode: ${pincode}`);
-          const serviceableCarriers = await this.checkServiceability(pincode);
-          pincodeServiceabilityMap.set(pincode, serviceableCarriers);
-          
-          console.log(`  - Serviceable carriers: ${serviceableCarriers.length}`);
-          serviceableCarriers.forEach(carrier => {
-            console.log(`    * ${carrier.carrier_id} - ${carrier.name} (${carrier.payment_type})`);
-          });
-        } catch (error) {
-          console.error(`  - Error checking serviceability for pincode ${pincode}:`, error.message);
-          // Continue with other pincodes
-          pincodeServiceabilityMap.set(pincode, []);
+      // Check serviceability for each unique pincode per store
+      for (const [accountCode, storeOrders] of ordersByStore.entries()) {
+        const uniquePincodes = new Set();
+        storeOrders.forEach(order => {
+          if (order.pincode) {
+            uniquePincodes.add(order.pincode);
+          }
+        });
+        
+        console.log(`\n🔍 Store ${accountCode}: Checking serviceability for ${uniquePincodes.size} unique pincode(s)`);
+        
+        const pincodeServiceabilityMap = new Map();
+        
+        for (const pincode of uniquePincodes) {
+          try {
+            console.log(`  🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
+            const serviceableCarriers = await this.checkServiceability(pincode, accountCode);
+            pincodeServiceabilityMap.set(pincode, serviceableCarriers);
+            
+            console.log(`  - Serviceable carriers: ${serviceableCarriers.length}`);
+            serviceableCarriers.forEach(carrier => {
+              console.log(`    * ${carrier.carrier_id} - ${carrier.name} (${carrier.payment_type})`);
+            });
+          } catch (error) {
+            console.error(`  - Error checking serviceability for pincode ${pincode} (store: ${accountCode}):`, error.message);
+            // Continue with other pincodes
+            pincodeServiceabilityMap.set(pincode, []);
+          }
         }
+        
+        storePincodeServiceabilityMap.set(accountCode, pincodeServiceabilityMap);
       }
       
       // Process each order and assign priority carrier
@@ -332,6 +395,7 @@ class CarrierServiceabilityService {
           // Process only claimed orders
           const pincode = order.pincode;
           const paymentType = order.payment_type;
+          const accountCode = order.account_code;
           
           if (!pincode || !paymentType) {
             console.log(`⚠️ Order ${order.order_id}: Missing pincode or payment_type`);
@@ -342,7 +406,18 @@ class CarrierServiceabilityService {
             };
           }
           
-          const serviceableCarriers = pincodeServiceabilityMap.get(pincode) || [];
+          if (!accountCode) {
+            console.log(`⚠️ Order ${order.order_id}: Missing account_code, cannot check serviceability`);
+            skippedOrders++;
+            return {
+              ...order,
+              priority_carrier: ''
+            };
+          }
+          
+          // Get serviceability data for this store's pincode
+          const storeServiceabilityMap = storePincodeServiceabilityMap.get(accountCode);
+          const serviceableCarriers = storeServiceabilityMap ? (storeServiceabilityMap.get(pincode) || []) : [];
           
           if (serviceableCarriers.length === 0) {
             console.log(`⚠️ Order ${order.order_id}: No serviceable carriers for pincode ${pincode}`);
@@ -457,13 +532,18 @@ class CarrierServiceabilityService {
       // Check serviceability for this specific pincode
       const pincode = order.pincode;
       const paymentType = order.payment_type;
+      const accountCode = order.account_code;
       
       if (!pincode || !paymentType) {
         throw new Error(`Order ${orderId}: Missing pincode or payment_type`);
       }
       
-      console.log(`🔍 Checking serviceability for pincode: ${pincode}`);
-      const serviceableCarriers = await this.checkServiceability(pincode);
+      if (!accountCode) {
+        throw new Error(`Order ${orderId}: Missing account_code, cannot check serviceability`);
+      }
+      
+      console.log(`🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
+      const serviceableCarriers = await this.checkServiceability(pincode, accountCode);
       
       if (serviceableCarriers.length === 0) {
         throw new Error(`Order ${orderId}: No serviceable carriers for pincode ${pincode}`);
@@ -536,13 +616,18 @@ class CarrierServiceabilityService {
       // Check serviceability for this specific pincode
       const pincode = order.pincode;
       const paymentType = order.payment_type;
+      const accountCode = order.account_code;
       
       if (!pincode || !paymentType) {
         throw new Error(`Order ${order.order_id}: Missing pincode or payment_type`);
       }
       
-      console.log(`🔍 Checking serviceability for pincode: ${pincode}`);
-      const serviceableCarriers = await this.checkServiceability(pincode);
+      if (!accountCode) {
+        throw new Error(`Order ${order.order_id}: Missing account_code, cannot check serviceability`);
+      }
+      
+      console.log(`🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
+      const serviceableCarriers = await this.checkServiceability(pincode, accountCode);
       
       if (serviceableCarriers.length === 0) {
         throw new Error(`Order ${order.order_id}: No serviceable carriers for pincode ${pincode}`);
@@ -618,8 +703,8 @@ class CarrierServiceabilityService {
       }
       
       // Check serviceability for the pincode
-      console.log(`🔍 Checking serviceability for pincode: ${order.pincode}`);
-      const serviceableCarriers = await this.checkServiceability(order.pincode);
+      console.log(`🔍 Checking serviceability for pincode: ${order.pincode} (store: ${order.account_code})`);
+      const serviceableCarriers = await this.checkServiceability(order.pincode, order.account_code);
       
       if (serviceableCarriers.length === 0) {
         console.log(`⚠️ No serviceable carriers found for pincode ${order.pincode}`);

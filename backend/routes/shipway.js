@@ -105,12 +105,25 @@ router.get('/stats',
  */
 router.get('/verify-warehouse/:warehouseId', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
   const { warehouseId } = req.params;
+  const accountCode = req.query.account_code || req.body.account_code;
+  
+  if (!accountCode) {
+    return res.status(400).json({
+      success: false,
+      message: 'account_code is required for warehouse verification'
+    });
+  }
+  
   try {
-    const warehouseData = await require('../services/shipwayService').getWarehouseById(warehouseId);
+    const ShipwayService = require('../services/shipwayService');
+    const shipwayServiceInstance = new ShipwayService(accountCode);
+    await shipwayServiceInstance.initialize();
+    
+    const warehouseData = await shipwayServiceInstance.getWarehouseById(warehouseId);
     if (!warehouseData.success) {
       return res.status(404).json({ success: false, message: 'Warehouse not found' });
     }
-    const details = require('../services/shipwayService').formatWarehouseData(warehouseData.data);
+    const details = shipwayServiceInstance.formatWarehouseData(warehouseData.data);
     res.json({
       success: true,
       data: {
