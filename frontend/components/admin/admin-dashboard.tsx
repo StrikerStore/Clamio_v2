@@ -348,7 +348,7 @@ export function AdminDashboard() {
   const [stores, setStores] = useState<any[]>([])
   const [selectedStoreFilter, setSelectedStoreFilter] = useState<string>("")
 
-  const { isMobile } = useDeviceType()
+  const { isMobile, isTablet } = useDeviceType()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const getStatusBadge = (status: string) => {
@@ -418,7 +418,7 @@ export function AdminDashboard() {
     }
 
     return (
-      <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs truncate max-w-full`}>
+      <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full px-1.5 py-0.5`}>
         {displayNames[status as keyof typeof displayNames] || status.replace("_", " ").toUpperCase()}
       </Badge>
     )
@@ -512,6 +512,14 @@ export function AdminDashboard() {
       
       return matchesSearch && matchesStatus && matchesDate && matchesVendor && matchesStore
     })
+  }
+
+  const getFilteredOrdersQuantity = (tab: string) => {
+    const filteredOrders = getFilteredOrdersForTab(tab);
+    return filteredOrders.reduce((sum: number, order: any) => {
+      const qty = parseInt(order.quantity) || 1;
+      return sum + qty;
+    }, 0);
   }
 
   const getFilteredVendors = () => {
@@ -923,16 +931,43 @@ export function AdminDashboard() {
   };
 
   // Fetch orders for admin panel
-  const fetchOrders = async () => {
+  const fetchOrders = async (syncFromShipway = false) => {
     setOrdersLoading(true);
     try {
+      // If syncFromShipway is true, sync orders from Shipway first
+      if (syncFromShipway) {
+        try {
+          const syncResponse = await apiClient.refreshAdminOrders();
+          if (syncResponse.success) {
+            toast({
+              title: "Orders Synced",
+              description: syncResponse.message || "Orders have been synced from Shipway successfully",
+            });
+          } else {
+            toast({
+              title: "Sync Warning",
+              description: syncResponse.message || "Orders sync completed with warnings",
+              variant: "default",
+            });
+          }
+        } catch (syncError) {
+          console.error('Error syncing orders:', syncError);
+          toast({
+            title: "Sync Error",
+            description: syncError instanceof Error ? syncError.message : "Failed to sync orders from Shipway",
+            variant: "destructive",
+          });
+          // Continue to fetch orders even if sync fails
+        }
+      }
+
       const response = await apiClient.getAdminOrders();
       
       if (response.success) {
         const ordersData = response.data.orders;
         setOrders(ordersData);
         
-        // Calculate stats by summing quantities instead of counting orders
+        // Calculate stats by summing quantities
         const totalQuantity = ordersData.reduce((sum: number, order: any) => {
           const qty = parseInt(order.quantity) || 1;
           return sum + qty;
@@ -1597,9 +1632,13 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-4 sm:py-6">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-3 sm:py-4 md:py-8">
         {/* Stats Cards - compact, colorful, 2x2 on mobile */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-6 mb-4 md:mb-8">
+        <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${
+          isMobile ? 'grid-cols-2' : 
+          isTablet ? 'grid-cols-2' : 
+          'grid-cols-4'
+        }`}>
           <Card 
             className={`bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg ${isMobile ? 'cursor-pointer hover:shadow-xl transition-all duration-200 active:scale-95' : ''}`}
             onClick={() => {
@@ -1609,14 +1648,14 @@ export function AdminDashboard() {
               }
             }}
           >
-            <CardContent className="p-2.5 sm:p-4 md:p-6">
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-blue-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Total Orders</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>{ordersStats.totalOrders}</p>
                 </div>
-                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Package className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Package className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1632,7 +1671,7 @@ export function AdminDashboard() {
               }
             }}
           >
-            <CardContent className="p-2.5 sm:p-4 md:p-6">
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-green-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Claimed</p>
@@ -1640,8 +1679,8 @@ export function AdminDashboard() {
                     {ordersStats.claimedOrders}
                   </p>
                 </div>
-                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Package className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Package className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1656,7 +1695,7 @@ export function AdminDashboard() {
               }
             }}
           >
-            <CardContent className="p-2.5 sm:p-4 md:p-6">
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-orange-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Unclaimed</p>
@@ -1664,8 +1703,8 @@ export function AdminDashboard() {
                     {ordersStats.unclaimedOrders}
                   </p>
                 </div>
-                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Clock className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Clock className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1681,7 +1720,7 @@ export function AdminDashboard() {
               }
             }}
           >
-            <CardContent className="p-2.5 sm:p-4 md:p-6">
+            <CardContent className={`${isMobile ? 'p-2.5 sm:p-4' : 'p-6'}`}>
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-purple-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Vendors</p>
@@ -1689,8 +1728,8 @@ export function AdminDashboard() {
                     {vendors.filter((v) => (v.status || '').toString().trim().toLowerCase() === 'active').length}
                   </p>
                 </div>
-                <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Users className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6" />
+                <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
+                  <Users className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
                 </div>
               </div>
             </CardContent>
@@ -1700,27 +1739,49 @@ export function AdminDashboard() {
 
         {/* Main Content */}
         <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Admin Management</CardTitle>
+          <CardHeader className="p-3 sm:p-4 md:p-6">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <CardTitle className={`${isMobile ? 'text-lg sm:text-xl' : 'text-2xl'} ${isMobile ? 'leading-tight' : ''}`}>
+                  {isMobile ? (
+                    <>
+                      Admin<br />
+                      Management
+                    </>
+                  ) : (
+                    'Admin Management'
+                  )}
+                </CardTitle>
+                {!isMobile && <CardDescription className="text-sm sm:text-base truncate">Manage orders, vendors, and carriers</CardDescription>}
+              </div>
               <Button
-                onClick={fetchOrders}
+                onClick={() => fetchOrders(true)}
                 disabled={ordersLoading}
-                size="sm"
-                className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg hover:shadow-xl hover:from-blue-600 hover:to-blue-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                variant="outline"
+                className={`${isMobile ? 'h-8 sm:h-10 text-sm sm:text-base px-2 sm:px-4' : 'h-10'} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700 flex-shrink-0`}
+                size="default"
               >
-                <RefreshCw className={`w-4 h-4 mr-2 ${ordersLoading ? 'animate-spin' : ''}`} />
-                Refresh
+                {ordersLoading ? (
+                  <>
+                    <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
+                    {isMobile ? 'Loading' : 'Refreshing...'}
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className={`${isMobile ? 'w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2' : 'w-4 h-4 mr-2'}`} />
+                    Refresh
+                  </>
+                )}
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-2 sm:p-4 md:p-6">
             <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
               {/* Fixed Controls Section */}
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
                 <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    Orders ({getFilteredOrdersForTab("orders").length})
+                    Orders ({getFilteredOrdersQuantity("orders")})
                   </TabsTrigger>
                   <TabsTrigger value="vendors" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     Vendors ({vendors.length})
@@ -2155,6 +2216,14 @@ export function AdminDashboard() {
                           </Select>
                         )}
 
+                        {/* Add New Vendor Button - Only for Vendors tab */}
+                        {activeTab === "vendors" && !isMobile && (
+                          <Button onClick={() => setShowVendorModal(true)}>
+                            <UserPlus className="w-4 h-4 mr-2" />
+                            Add New Vendor
+                          </Button>
+                        )}
+
                         {/* Vendor Filter - Only for Orders tab (Desktop) */}
                         {activeTab === "orders" && !isMobile && (
                           <Popover>
@@ -2342,22 +2411,6 @@ export function AdminDashboard() {
                 )}
 
                 {/* Tab-specific Actions */}
-
-                {activeTab === "vendors" && !isMobile && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Vendor Actions</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-wrap gap-2">
-                        <Button onClick={() => setShowVendorModal(true)}>
-                          <UserPlus className="w-4 h-4 mr-2" />
-                          Add New Vendor
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
 
                 {/* Add Vendor Dialog - Accessible from both desktop and mobile */}
                 <Dialog open={showVendorModal} onOpenChange={setShowVendorModal}>
@@ -2644,14 +2697,14 @@ export function AdminDashboard() {
                       </TableBody>
                       </Table>
                     ) : (
-                      <div className="space-y-3 p-2 pb-24">
+                      <div className="space-y-2.5 sm:space-y-3 pb-24">
                         {ordersLoading ? (
                           <Card className="p-4 text-center">Loading orders...</Card>
                         ) : (
                           getFilteredOrdersForTab("orders").map((order: any) => (
                             <Card 
                               key={order.unique_id} 
-                              className="p-2 sm:p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors border-l-4"
+                              className="p-2.5 sm:p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors border-l-4"
                               style={{ 
                                 borderLeftColor: 
                                   order.status === 'unclaimed' ? '#f59e0b' : 
@@ -2685,8 +2738,9 @@ export function AdminDashboard() {
                                 }
                               }}
                             >
-                              {/* Top Row: Checkbox and Status */}
-                              <div className="flex items-start justify-between mb-1.5 sm:mb-2">
+                              <div className="space-y-2 sm:space-y-3">
+                              {/* Top Row: Checkbox, Vendor, and Status */}
+                              <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                                   <input
                                     type="checkbox"
@@ -2698,18 +2752,23 @@ export function AdminDashboard() {
                                         setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
                                       }
                                     }}
-                                    className="w-4 h-4"
+                                    className="mt-1 w-3.5 h-3.5 sm:w-4 sm:h-4"
                                   />
                                 </div>
-                                {getStatusBadge(order.status)}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`text-xs sm:text-sm font-medium truncate ${String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-600' : 'text-blue-600'}`}>
+                                    {order.vendor_name || 'Unclaimed'}
+                                  </span>
+                                  {getStatusBadge(order.status)}
+                                </div>
                               </div>
 
                               {/* Order ID and Image Row */}
-                              <div className="flex items-start gap-2 sm:gap-3 mb-2">
+                              <div className="flex items-start gap-2 sm:gap-3">
                                 <img
                                   src={order.image || "/placeholder.svg"}
                                   alt={order.product_name}
-                                  className="w-12 sm:w-16 h-12 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0 border border-gray-200"
+                                  className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0"
                                   onClick={(e) => { 
                                     e.stopPropagation();
                                     setSelectedImageUrl(order.image || null); 
@@ -2719,100 +2778,50 @@ export function AdminDashboard() {
                                   onError={(e) => { const t = e.target as HTMLImageElement; t.src = "/placeholder.svg"; }}
                                 />
                                 <div className="flex-1 min-w-0">
-                                  <p className="font-bold text-sm sm:text-base text-gray-900 mb-1 truncate">{order.order_id}</p>
-                                  <p className="text-xs sm:text-sm font-medium text-gray-800 line-clamp-2 leading-relaxed">
+                                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                                    <h4 className="font-medium text-sm sm:text-base text-gray-900 truncate">{order.order_id}</h4>
+                                    {order.store_name && (
+                                      <Badge variant="outline" className="text-xs px-1.5 py-0.5 h-auto bg-blue-50 text-blue-700 border-blue-200">
+                                        {order.store_name}
+                                      </Badge>
+                                    )}
+                                    {order.value && (
+                                      <Badge variant="outline" className="text-xs px-1.5 py-0.5 h-auto bg-green-50 text-green-700 border-green-200">
+                                        ₹{order.value}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-xs sm:text-sm text-gray-600 break-words leading-relaxed">
                                     {order.product_name}
+                                  </p>
+                                  <p className="text-xs sm:text-sm text-gray-500 break-words leading-relaxed">
+                                    Code: {order.product_code || 'N/A'}
                                   </p>
                                 </div>
                               </div>
 
-                              {/* Details Grid */}
-                              <div className="grid grid-cols-2 gap-x-2 sm:gap-x-4 gap-y-1 sm:gap-y-1.5 text-xs sm:text-sm border-t pt-2">
-                                <div className="break-all">
-                                  <span className="text-gray-500">SKU:</span>
-                                  <span className="ml-1 font-medium text-gray-900 break-all">{order.product_code || 'N/A'}</span>
-                                </div>
+                              {/* Details Row - Date, Qty, Customer side by side */}
+                              <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-xs sm:text-sm">
                                 <div>
-                                  <span className="text-gray-500">Qty:</span>
-                                  <span className="ml-1 font-medium text-gray-900">{order.quantity || '1'}</span>
-                                </div>
-                                <div className="col-span-2 truncate">
-                                  <span className="text-gray-500">Customer:</span>
-                                  <span className="ml-1 font-medium text-gray-900 truncate">{order.customer_name || 'N/A'}</span>
-                                </div>
-                                {order.store_name && (
-                                  <div className="col-span-2 truncate">
-                                    <span className="text-gray-500">Store:</span>
-                                    <span className="ml-1 font-medium text-gray-900 truncate">{order.store_name} ({order.account_code || ''})</span>
-                                  </div>
-                                )}
-                                <div className="col-span-2 truncate">
-                                  <span className="text-gray-500">Vendor:</span>
-                                  <span className={`ml-1 font-medium truncate ${String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-600' : 'text-blue-600'}`}>
-                                    {order.vendor_name || 'Unclaimed'}
-                                  </span>
-                                </div>
-                                <div className="col-span-2 truncate">
-                                  <span className="text-gray-500">Created:</span>
-                                  <span className="ml-1 font-medium text-gray-900 truncate">
+                                  <span className="text-gray-500">Date:</span>
+                                  <p className="font-medium truncate">
                                     {order.created_at ? 
                                       (() => {
                                         const date = new Date(order.created_at);
-                                        const year = date.getFullYear();
-                                        const month = String(date.getMonth() + 1).padStart(2, '0');
-                                        const day = String(date.getDate()).padStart(2, '0');
-                                        const hours = String(date.getHours()).padStart(2, '0');
-                                        const minutes = String(date.getMinutes()).padStart(2, '0');
-                                        return `${year}-${month}-${day} ${hours}:${minutes}`;
+                                        return date.toLocaleDateString();
                                       })()
                                     : 'N/A'}
-                                  </span>
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className="text-gray-500">Qty:</span>
+                                  <p className="font-medium truncate">{order.quantity || '-'}</p>
+                                </div>
+                                <div>
+                                  <span className="text-gray-500">Customer:</span>
+                                  <p className="font-medium truncate">{order.customer_name || 'N/A'}</p>
                                 </div>
                               </div>
-                              
-                              {/* Assign/Unassign Button Row - Full Width at Bottom */}
-                              <div className="mt-3 pt-2 border-t">
-                                {order.status === 'unclaimed' ? (
-                                  <Button 
-                                    size="sm" 
-                                    variant="default"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openAssignModal(order);
-                                    }}
-                                    disabled={assignLoading[order.unique_id]}
-                                    className="w-full text-xs h-8"
-                                  >
-                                    {assignLoading[order.unique_id] ? (
-                                      <>
-                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                                        Assigning...
-                                      </>
-                                    ) : (
-                                      'Assign Order'
-                                    )}
-                                  </Button>
-                                ) : (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleUnassignOrder(order);
-                                    }}
-                                    disabled={unassignLoading[order.unique_id]}
-                                    className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
-                                  >
-                                    {unassignLoading[order.unique_id] ? (
-                                      <>
-                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
-                                        Unassigning...
-                                      </>
-                                    ) : (
-                                      'Unassign Order'
-                                    )}
-                                  </Button>
-                                )}
                               </div>
                             </Card>
                           ))

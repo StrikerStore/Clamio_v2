@@ -350,6 +350,12 @@ class ApiClient {
     return this.makeRequest('/orders/admin/all');
   }
 
+  async refreshAdminOrders(): Promise<ApiResponse> {
+    return this.makeRequest('/orders/admin/refresh', {
+      method: 'POST',
+    });
+  }
+
   async getAdminVendors(): Promise<ApiResponse> {
     // Prefer enriched vendors report for admin auditing table
     return this.makeRequest('/users/vendors-report');
@@ -898,6 +904,44 @@ class ApiClient {
     return this.makeRequest(`/stores/${accountCode}/toggle-status`, {
       method: 'PATCH'
     })
+  }
+
+  // Warehouse Mapping API methods (Superadmin only)
+  async getAllWhMappings(includeInactive: boolean = true): Promise<ApiResponse> {
+    return this.makeRequest(`/warehouse-mapping?includeInactive=${includeInactive}`);
+  }
+
+  async getWhMappingVendors(): Promise<ApiResponse> {
+    return this.makeRequest('/warehouse-mapping/vendors');
+  }
+
+  async getWhMappingStores(): Promise<ApiResponse> {
+    return this.makeRequest('/warehouse-mapping/stores');
+  }
+
+  async validateVendorWhId(vendor_wh_id: string, account_code: string): Promise<ApiResponse> {
+    return this.makeRequest('/warehouse-mapping/validate', {
+      method: 'POST',
+      body: JSON.stringify({ vendor_wh_id, account_code })
+    });
+  }
+
+  async createWhMapping(mappingData: {
+    claimio_wh_id: string;
+    vendor_wh_id: string;
+    account_code: string;
+    return_warehouse_id?: string;
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/warehouse-mapping', {
+      method: 'POST',
+      body: JSON.stringify(mappingData)
+    });
+  }
+
+  async deleteWhMapping(id: number): Promise<ApiResponse> {
+    return this.makeRequest(`/warehouse-mapping/${id}`, {
+      method: 'DELETE'
+    });
   }
 
   async testShipwayConnection(credentials: {

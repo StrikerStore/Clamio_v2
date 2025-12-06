@@ -16,6 +16,7 @@ const notificationRoutes = require('./routes/notifications');
 const inventoryRoutes = require('./routes/inventory');
 const publicRoutes = require('./routes/public');
 const storeRoutes = require('./routes/stores');
+const warehouseMappingRoutes = require('./routes/warehouseMapping');
 
 // Import database to initialize it
 const database = require('./config/database');
@@ -302,6 +303,7 @@ app.use('/api/settlements', settlementRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/inventory', inventoryRoutes);
 app.use('/api/stores', storeRoutes);
+app.use('/api/warehouse-mapping', warehouseMappingRoutes);
 
 
 /**

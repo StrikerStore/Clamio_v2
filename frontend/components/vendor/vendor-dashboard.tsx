@@ -2351,6 +2351,13 @@ export function VendorDashboard() {
     }, 0);
   };
 
+  // Helper function to get count of selected orders that are visible in current filtered view
+  const getVisibleSelectedOrdersCount = () => {
+    if (activeTab !== "my-orders") return 0;
+    const visibleOrders = getFilteredOrdersForTab("my-orders");
+    return visibleOrders.filter(order => selectedMyOrders.includes(order.order_id)).length;
+  };
+
   const handleRefreshOrders = async () => {
     setOrdersRefreshing(true);
     try {
@@ -2963,7 +2970,7 @@ export function VendorDashboard() {
                       </div>
                       <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
-                        disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
+                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
                         className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                       >
                         {bulkDownloadLoading ? (
@@ -2974,14 +2981,14 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <Download className="w-4 h-4 mr-2" />
-                            Download ({selectedMyOrders.length})
+                            Download ({getVisibleSelectedOrdersCount()})
                           </>
                         )}
                       </Button>
                       <Button
                         onClick={() => handleBulkMarkReady()}
                         disabled={
-                          selectedMyOrders.length === 0 || 
+                          getVisibleSelectedOrdersCount() === 0 || 
                           bulkMarkReadyLoading ||
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -3004,7 +3011,7 @@ export function VendorDashboard() {
                         ) : (
                           <>
                             <CheckCircle className="w-4 h-4 mr-2" />
-                            Mark Ready ({selectedMyOrders.length})
+                            Mark Ready ({getVisibleSelectedOrdersCount()})
                           </>
                         )}
                       </Button>
@@ -3946,7 +3953,7 @@ export function VendorDashboard() {
                       {/* Download Label Button */}
                       <Button 
                         onClick={() => handleBulkDownloadLabels("my-orders")}
-                        disabled={selectedMyOrders.length === 0 || bulkDownloadLoading}
+                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
                         className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                       >
                         {bulkDownloadLoading ? (
@@ -3960,7 +3967,7 @@ export function VendorDashboard() {
                             <span className="whitespace-nowrap flex items-center">
                               <span className="hidden min-[360px]:inline">Download</span>
                               <span className="inline min-[360px]:hidden">DL</span>
-                              <span className="ml-1">({selectedMyOrders.length})</span>
+                              <span className="ml-1">({getVisibleSelectedOrdersCount()})</span>
                             </span>
                           </div>
                         )}
@@ -3970,7 +3977,7 @@ export function VendorDashboard() {
                       <Button 
                         onClick={() => handleBulkMarkReady()}
                         disabled={
-                          selectedMyOrders.length === 0 || 
+                          getVisibleSelectedOrdersCount() === 0 || 
                           bulkMarkReadyLoading ||
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -3988,7 +3995,7 @@ export function VendorDashboard() {
                             <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
                             <span className="whitespace-nowrap flex items-center">
                               <span>Ready</span>
-                              <span className="ml-1">({selectedMyOrders.length})</span>
+                              <span className="ml-1">({getVisibleSelectedOrdersCount()})</span>
                             </span>
                           </div>
                         )}

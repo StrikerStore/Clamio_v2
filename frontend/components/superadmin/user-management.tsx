@@ -83,6 +83,9 @@ interface CreateUserForm {
   role: 'admin' | 'vendor'
   warehouseId: string
   contactNumber: string
+  address: string
+  city: string
+  pincode: string
 }
 
 interface EditUserForm {
@@ -93,6 +96,8 @@ interface EditUserForm {
   status: string
   warehouseId: string
   contactNumber: string
+  address: string
+  pincode: string
 }
 
 export function UserManagement() {
@@ -108,6 +113,14 @@ export function UserManagement() {
   const [searchTerm, setSearchTerm] = useState("")
   const [roleFilter, setRoleFilter] = useState<string>("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [storeSearchTerm, setStoreSearchTerm] = useState("")
+  const [storeStatusFilter, setStoreStatusFilter] = useState<string>("all")
+  const [storeShippingPartnerFilter, setStoreShippingPartnerFilter] = useState<string>("all")
+  const [mobileStoreFilterOpen, setMobileStoreFilterOpen] = useState(false)
+  const [mobileWhMappingFilterOpen, setMobileWhMappingFilterOpen] = useState(false)
+  const [whMappingSearchTerm, setWhMappingSearchTerm] = useState("")
+  const [whMappingStoreFilter, setWhMappingStoreFilter] = useState<string>("all")
+  const [whMappingVendorFilter, setWhMappingVendorFilter] = useState<string>("all")
   const [warehouseValidating, setWarehouseValidating] = useState(false)
   const [warehouseValid, setWarehouseValid] = useState<boolean | null>(null)
   const [logoutLoading, setLogoutLoading] = useState(false)
@@ -126,10 +139,12 @@ export function UserManagement() {
   const [warehouseVerifyLoading, setWarehouseVerifyLoading] = useState(false)
   const [warehouseVerifyError, setWarehouseVerifyError] = useState("")
   const [warehouseVerified, setWarehouseVerified] = useState(false)
+  const [addUserDialogOpen, setAddUserDialogOpen] = useState(false)
 
   // Mobile UI state
-  const [mobileTab, setMobileTab] = useState<'users' | 'create' | 'stores'>("users")
+  const [mobileTab, setMobileTab] = useState<'users' | 'stores' | 'warehouse-mapping'>("users")
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>("users")
 
   // Store management state
   const [stores, setStores] = useState<any[]>([])
@@ -156,6 +171,24 @@ export function UserManagement() {
   const [shipwayTestResult, setShipwayTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [shopifyTestResult, setShopifyTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [isAddingStore, setIsAddingStore] = useState(false)
+  
+  // Warehouse Mapping state
+  const [whMappings, setWhMappings] = useState<any[]>([])
+  const [whMappingsLoading, setWhMappingsLoading] = useState(false)
+  const [vendorsForMapping, setVendorsForMapping] = useState<any[]>([])
+  const [storesForMapping, setStoresForMapping] = useState<any[]>([])
+  const [isAddMappingOpen, setIsAddMappingOpen] = useState(false)
+  const [isDeleteMappingConfirmOpen, setIsDeleteMappingConfirmOpen] = useState(false)
+  const [mappingToDelete, setMappingToDelete] = useState<any>(null)
+  const [newMapping, setNewMapping] = useState({
+    claimio_wh_id: "",
+    account_code: "",
+    vendor_wh_id: "",
+    return_warehouse_id: ""
+  })
+  const [selectedVendor, setSelectedVendor] = useState<any>(null)
+  const [selectedStore, setSelectedStore] = useState<any>(null)
+  const [validatingWarehouse, setValidatingWarehouse] = useState(false)
 
   const [formData, setFormData] = useState<CreateUserForm>({
     name: "",
@@ -165,7 +198,10 @@ export function UserManagement() {
     confirmPassword: "",
     role: "admin",
     warehouseId: "",
-    contactNumber: ""
+    contactNumber: "",
+    address: "",
+    city: "",
+    pincode: ""
   })
 
   const [editFormData, setEditFormData] = useState<EditUserForm>({
@@ -175,7 +211,9 @@ export function UserManagement() {
     role: "admin",
     status: "active",
     warehouseId: "",
-    contactNumber: ""
+    contactNumber: "",
+    address: "",
+    pincode: ""
   })
 
   // Check if current user is superadmin
@@ -202,6 +240,9 @@ export function UserManagement() {
   useEffect(() => {
     loadUsers()
     fetchShippingPartners()
+    fetchWhMappings()
+    fetchVendorsForMapping()
+    fetchStoresForMapping()
   }, [])
 
   const fetchShippingPartners = async () => {
@@ -292,40 +333,6 @@ export function UserManagement() {
     }
   }
 
-  const handleVerifyWarehouse = async () => {
-    setWarehouseVerifyLoading(true)
-    setWarehouseVerifyError("")
-    setWarehouseInfo(null)
-    setWarehouseVerified(false)
-    
-    // Determine which form is active and get the appropriate warehouse ID
-    const warehouseId = editDialogOpen ? editFormData.warehouseId : formData.warehouseId
-    
-    try {
-      console.log('🔍 Frontend: Manual warehouse verification for:', warehouseId)
-      const response = await apiClient.verifyWarehouse(warehouseId)
-      
-      console.log('📦 Frontend: Manual verification response:', response)
-      
-      if (response.success) {
-        setWarehouseInfo(response.data)
-        setWarehouseVerified(true)
-        setWarehouseValid(true)
-        setWarehouseVerifyError("")
-      } else {
-        setWarehouseVerifyError(response.message || 'Warehouse verification failed')
-        setWarehouseVerified(false)
-        setWarehouseValid(false)
-      }
-    } catch (err) {
-      console.error('❌ Frontend: Manual warehouse verification error:', err)
-      setWarehouseVerifyError(err instanceof Error ? err.message : "Failed to verify warehouse")
-      setWarehouseVerified(false)
-      setWarehouseValid(false)
-    } finally {
-      setWarehouseVerifyLoading(false)
-    }
-  }
 
   const handleInputChange = (field: keyof CreateUserForm, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -397,11 +404,6 @@ export function UserManagement() {
       return
     }
 
-    if (formData.role === 'vendor' && !warehouseVerified && warehouseValid !== true) {
-      setError("Please verify the warehouse ID before creating the user.")
-      setCreating(false)
-      return
-    }
 
     try {
       const userData = {
@@ -412,7 +414,10 @@ export function UserManagement() {
         role: formData.role,
         status: 'active',
         ...(formData.role === 'vendor' && { warehouseId: formData.warehouseId.trim() }),
-        ...(formData.contactNumber && { contactNumber: formData.contactNumber })
+        ...(formData.contactNumber && { contactNumber: formData.contactNumber }),
+        ...(formData.address && { address: formData.address.trim() }),
+        ...(formData.city && { city: formData.city.trim() }),
+        ...(formData.pincode && { pincode: formData.pincode.trim() })
       }
 
       console.log('🔍 Frontend: Creating user with data:', {
@@ -433,11 +438,15 @@ export function UserManagement() {
           confirmPassword: "",
           role: "admin",
           warehouseId: "",
-          contactNumber: ""
+          contactNumber: "",
+          address: "",
+          city: "",
+          pincode: ""
         })
         setWarehouseValid(null)
         setWarehouseInfo(null)
         setWarehouseVerified(false)
+        setAddUserDialogOpen(false)
         // Reload users
         loadUsers()
       } else {
@@ -459,7 +468,9 @@ export function UserManagement() {
       role: user.role as 'admin' | 'vendor',
       status: user.status,
       warehouseId: user.warehouseId || "",
-      contactNumber: user.contactNumber || ""
+      contactNumber: user.contactNumber || "",
+      address: (user as any).address || "",
+      pincode: (user as any).pincode || ""
     })
     setEditDialogOpen(true)
   }
@@ -479,18 +490,6 @@ export function UserManagement() {
       return
     }
 
-    if (editFormData.role === 'vendor' && warehouseValid === false) {
-      setError("Invalid warehouse ID. Please verify the warehouse ID is correct.")
-      setEditing(false)
-      return
-    }
-
-    if (editFormData.role === 'vendor' && !warehouseVerified && warehouseValid !== true) {
-      setError("Please verify the warehouse ID before updating the user.")
-      setEditing(false)
-      return
-    }
-
     try {
       const updateData = {
         name: editFormData.name,
@@ -498,7 +497,9 @@ export function UserManagement() {
         phone: editFormData.phone,
         status: editFormData.status,
         ...(editFormData.role === 'vendor' && { warehouseId: editFormData.warehouseId }),
-        ...(editFormData.contactNumber && { contactNumber: editFormData.contactNumber })
+        ...(editFormData.contactNumber && { contactNumber: editFormData.contactNumber }),
+        ...(editFormData.address && { address: editFormData.address.trim() }),
+        ...(editFormData.pincode && { pincode: editFormData.pincode.trim() })
       }
 
       const response = await apiClient.updateUser(selectedUser.id, updateData)
@@ -808,6 +809,125 @@ export function UserManagement() {
     }
   }
 
+  // Warehouse Mapping functions
+  const fetchWhMappings = async () => {
+    setWhMappingsLoading(true)
+    try {
+      const response = await apiClient.getAllWhMappings(true)
+      if (response.success) {
+        setWhMappings(response.data || [])
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to load warehouse mappings")
+    } finally {
+      setWhMappingsLoading(false)
+    }
+  }
+
+  const fetchVendorsForMapping = async () => {
+    try {
+      const response = await apiClient.getWhMappingVendors()
+      if (response.success) {
+        setVendorsForMapping(response.data || [])
+      }
+    } catch (error: any) {
+      console.error('Failed to load vendors:', error)
+    }
+  }
+
+  const fetchStoresForMapping = async () => {
+    try {
+      const response = await apiClient.getWhMappingStores()
+      if (response.success) {
+        setStoresForMapping(response.data || [])
+      }
+    } catch (error: any) {
+      console.error('Failed to load stores:', error)
+    }
+  }
+
+  const handleValidateWarehouse = async () => {
+    if (!newMapping.vendor_wh_id || !newMapping.account_code) {
+      setError("Please enter Vendor WH ID and select Account Code first")
+      return
+    }
+
+    setValidatingWarehouse(true)
+    setWarehouseInfo(null)
+    setWarehouseVerified(false)
+    try {
+      const response = await apiClient.validateVendorWhId(newMapping.vendor_wh_id, newMapping.account_code)
+      if (response.success) {
+        setWarehouseInfo(response.data?.warehouse)
+        setWarehouseVerified(true)
+        setSuccess("Warehouse verified successfully")
+      } else {
+        setWarehouseInfo(null)
+        setWarehouseVerified(false)
+        setError(response.message || "Warehouse not found in Shipway system")
+      }
+    } catch (error: any) {
+      setWarehouseInfo(null)
+      setWarehouseVerified(false)
+      setError(error?.message || "Failed to validate warehouse")
+    } finally {
+      setValidatingWarehouse(false)
+    }
+  }
+
+  const handleCreateMapping = async () => {
+    if (!newMapping.claimio_wh_id || !newMapping.account_code || !newMapping.vendor_wh_id) {
+      setError("Please fill in all required fields")
+      return
+    }
+
+    if (!warehouseVerified) {
+      setError("Please verify the warehouse ID before saving")
+      return
+    }
+
+    try {
+      const response = await apiClient.createWhMapping({
+        claimio_wh_id: newMapping.claimio_wh_id,
+        vendor_wh_id: newMapping.vendor_wh_id,
+        account_code: newMapping.account_code,
+        return_warehouse_id: newMapping.return_warehouse_id
+      })
+      if (response.success) {
+        setSuccess("Warehouse mapping created successfully")
+        setIsAddMappingOpen(false)
+        setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", return_warehouse_id: "" })
+        setSelectedVendor(null)
+        setSelectedStore(null)
+        setWarehouseInfo(null)
+        setWarehouseVerified(false)
+        fetchWhMappings()
+      } else {
+        setError(response.message || "Failed to create warehouse mapping")
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to create warehouse mapping")
+    }
+  }
+
+  const handleDeleteMapping = async () => {
+    if (!mappingToDelete) return
+
+    try {
+      const response = await apiClient.deleteWhMapping(mappingToDelete.id)
+      if (response.success) {
+        setSuccess("Warehouse mapping deleted successfully")
+        setIsDeleteMappingConfirmOpen(false)
+        setMappingToDelete(null)
+        fetchWhMappings()
+      } else {
+        setError(response.message || "Failed to delete warehouse mapping")
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to delete warehouse mapping")
+    }
+  }
+
   // Fetch stores on component mount
   useEffect(() => {
     fetchStores()
@@ -820,6 +940,30 @@ export function UserManagement() {
     const matchesStatus = statusFilter === "all" || user.status === statusFilter
     
     return matchesSearch && matchesRole && matchesStatus
+  })
+
+  const filteredStores = stores.filter(store => {
+    const matchesSearch = 
+      (store.store_name || '').toLowerCase().includes(storeSearchTerm.toLowerCase()) ||
+      (store.account_code || '').toLowerCase().includes(storeSearchTerm.toLowerCase()) ||
+      (store.username || '').toLowerCase().includes(storeSearchTerm.toLowerCase())
+    const matchesStatus = storeStatusFilter === "all" || store.status === storeStatusFilter
+    const matchesShippingPartner = storeShippingPartnerFilter === "all" || store.shipping_partner === storeShippingPartnerFilter
+    
+    return matchesSearch && matchesStatus && matchesShippingPartner
+  })
+
+  const filteredWhMappings = whMappings.filter(mapping => {
+    const matchesSearch = 
+      (mapping.claimio_wh_id || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase()) ||
+      (mapping.vendor_name || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase()) ||
+      (mapping.account_code || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase()) ||
+      (mapping.store_name || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase()) ||
+      (mapping.vendor_wh_id || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase())
+    const matchesStore = whMappingStoreFilter === "all" || mapping.account_code === whMappingStoreFilter || mapping.store_name === whMappingStoreFilter
+    const matchesVendor = whMappingVendorFilter === "all" || mapping.vendor_name === whMappingVendorFilter || mapping.claimio_wh_id === whMappingVendorFilter
+    
+    return matchesSearch && matchesStore && matchesVendor
   })
 
   const getRoleBadgeVariant = (role: string) => {
@@ -952,13 +1096,31 @@ export function UserManagement() {
 
               <Sheet open={mobileFilterOpen} onOpenChange={setMobileFilterOpen}>
                 <SheetTrigger asChild>
-                  <Button variant="outline" size="icon" className="shrink-0">
+                  <Button variant="outline" size="icon" className="shrink-0 relative">
                     <Filter className="h-4 w-4" />
+                    {(roleFilter !== "all" || statusFilter !== "all") && (
+                      <span className="absolute top-1 right-1 h-2 w-2 bg-blue-600 rounded-full"></span>
+                    )}
                   </Button>
                 </SheetTrigger>
                 <SheetContent side="bottom" className="space-y-4">
                   <SheetHeader>
-                    <SheetTitle>Filters</SheetTitle>
+                    <div className="flex items-center relative">
+                      {(roleFilter !== "all" || statusFilter !== "all") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-auto py-1 px-2 absolute left-0"
+                          onClick={() => {
+                            setRoleFilter("all")
+                            setStatusFilter("all")
+                          }}
+                        >
+                          Reset
+                        </Button>
+                      )}
+                      <SheetTitle className="flex-1 text-center">Filters</SheetTitle>
+                    </div>
                   </SheetHeader>
                   <div className="space-y-3">
                     <div>
@@ -991,6 +1153,13 @@ export function UserManagement() {
                   </div>
                 </SheetContent>
               </Sheet>
+              <Dialog open={addUserDialogOpen} onOpenChange={setAddUserDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
+                    <UserPlus className="h-4 w-4" />
+                  </Button>
+                </DialogTrigger>
+              </Dialog>
             </div>
           )}
 
@@ -1037,58 +1206,81 @@ export function UserManagement() {
                         {/* Actions */}
                         {user.role !== 'superadmin' && (
                           <div className="flex items-center gap-2">
-                            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-                              <DialogTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleEditUser(user)}
-                                  className="h-8 px-2"
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                              </DialogTrigger>
-                            </Dialog>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleChangeUserPassword(user)}
-                              className="h-8 px-2"
-                            >
-                              <Key className="h-4 w-4" />
-                            </Button>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 px-2"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Delete User</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Are you sure you want to delete "{user.name}"? This action cannot be undone.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleDeleteUser(user)} className="bg-red-600 hover:bg-red-700">
-                                    {deleting ? (
-                                      <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Deleting...
-                                      </>
-                                    ) : (
-                                      "Delete User"
-                                    )}
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
+                            <TooltipProvider>
+                              <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <DialogTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleEditUser(user)}
+                                        className="h-8 px-2"
+                                      >
+                                        <Edit className="h-4 w-4" />
+                                      </Button>
+                                    </DialogTrigger>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Edit User</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </Dialog>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleChangeUserPassword(user)}
+                                    className="h-8 px-2"
+                                  >
+                                    <Key className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>Change Password</p>
+                                </TooltipContent>
+                              </Tooltip>
+                              <AlertDialog>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <AlertDialogTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 px-2"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </AlertDialogTrigger>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Delete User</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete User</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Are you sure you want to delete "{user.name}"? This action cannot be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleDeleteUser(user)} className="bg-red-600 hover:bg-red-700">
+                                      {deleting ? (
+                                        <>
+                                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                          Deleting...
+                                        </>
+                                      ) : (
+                                        "Delete User"
+                                      )}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </TooltipProvider>
                           </div>
                         )}
                       </div>
@@ -1333,22 +1525,96 @@ export function UserManagement() {
                 </Dialog>
               </div>
 
+              {/* Search + Filter Row */}
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    placeholder="Search stores..."
+                    value={storeSearchTerm}
+                    onChange={(e) => setStoreSearchTerm(e.target.value)}
+                    className="pl-10 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+                <Sheet open={mobileStoreFilterOpen} onOpenChange={setMobileStoreFilterOpen}>
+                  <SheetTrigger asChild>
+                    <Button variant="outline" size="icon" className="shrink-0 relative">
+                      <Filter className="h-4 w-4" />
+                      {(storeStatusFilter !== "all" || storeShippingPartnerFilter !== "all") && (
+                        <span className="absolute top-1 right-1 h-2 w-2 bg-blue-600 rounded-full"></span>
+                      )}
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent side="bottom" className="space-y-4">
+                    <SheetHeader>
+                      <div className="flex items-center relative">
+                        {(storeStatusFilter !== "all" || storeShippingPartnerFilter !== "all") && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-auto py-1 px-2 absolute left-0"
+                            onClick={() => {
+                              setStoreStatusFilter("all")
+                              setStoreShippingPartnerFilter("all")
+                            }}
+                          >
+                            Reset
+                          </Button>
+                        )}
+                        <SheetTitle className="flex-1 text-center">Filters</SheetTitle>
+                      </div>
+                    </SheetHeader>
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-sm">Status</Label>
+                        <Select value={storeStatusFilter} onValueChange={setStoreStatusFilter}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Filter by Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Status</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="inactive">Inactive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-sm">Shipping Partner</Label>
+                        <Select value={storeShippingPartnerFilter} onValueChange={setStoreShippingPartnerFilter}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Filter by Partner" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Partners</SelectItem>
+                            {shippingPartners.map((partner) => (
+                              <SelectItem key={partner} value={partner}>
+                                {partner}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </SheetContent>
+                </Sheet>
+              </div>
+
               {/* Stores List */}
               {storesLoading ? (
                 <div className="text-center py-8">
                   <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
                   <p className="text-sm text-gray-500 mt-2">Loading stores...</p>
                 </div>
-              ) : stores.length === 0 ? (
+              ) : filteredStores.length === 0 ? (
                 <Card>
                   <CardContent className="p-6 text-center">
                     <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-sm text-gray-500">No stores found. Add your first store to get started.</p>
+                    <p className="text-sm text-gray-500">No stores found. {storeSearchTerm || storeStatusFilter !== 'all' || storeShippingPartnerFilter !== 'all' ? 'Try adjusting your search or filters.' : 'Add your first store to get started.'}</p>
                   </CardContent>
                 </Card>
               ) : (
                 <div className="space-y-3">
-                  {stores.map((store) => (
+                  {filteredStores.map((store) => (
                     <Card key={store.id} className="p-4">
                       <div className="space-y-3">
                         <div className="flex justify-between items-start gap-2">
@@ -1386,127 +1652,289 @@ export function UserManagement() {
             </div>
           )}
 
-          {/* Create Form */}
-          {mobileTab === 'create' && (
-            <Card className="border-gray-100 bg-white">
-              <CardHeader>
-                <CardTitle className="text-gray-900">Add New User</CardTitle>
-                <CardDescription>Create a new admin or vendor account</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-5">
-                  <div className="space-y-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Full Name *</Label>
-                      <Input id="name" value={formData.name} onChange={(e) => handleInputChange('name', e.target.value)} required disabled={creating} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email Address *</Label>
-                      <Input id="email" type="email" value={formData.email} onChange={(e) => handleInputChange('email', e.target.value)} required disabled={creating} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Phone Number *</Label>
-                      <Input id="phone" value={formData.phone} onChange={(e) => handleInputChange('phone', e.target.value)} required disabled={creating} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>User Role *</Label>
-                      <Select value={formData.role} onValueChange={(value: 'admin' | 'vendor') => handleInputChange('role', value)} disabled={creating}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select role" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="vendor">Vendor</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {formData.role === 'vendor' && (
-                      <div className="space-y-2">
-                        <Label htmlFor="warehouseId">Warehouse ID *</Label>
-                        <div className="flex items-center gap-2">
+          {/* Warehouse Mapping */}
+          {mobileTab === 'warehouse-mapping' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Warehouse Mapping</h3>
+                  <p className="text-sm text-gray-600 mt-1">Map claimio warehouse IDs to vendor warehouse IDs per store</p>
+                </div>
+                <Dialog open={isAddMappingOpen} onOpenChange={(open) => {
+                  setIsAddMappingOpen(open)
+                  if (!open) {
+                    setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", return_warehouse_id: "" })
+                    setSelectedVendor(null)
+                    setSelectedStore(null)
+                    setWarehouseInfo(null)
+                    setWarehouseVerified(false)
+                  }
+                }}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Add Warehouse Mapping</DialogTitle>
+                      <DialogDescription>
+                        Map claimio warehouse ID to vendor warehouse ID for a specific store
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="claimio-wh-id">Claimio WH ID *</Label>
+                        <Select
+                          value={newMapping.claimio_wh_id}
+                          onValueChange={(value) => {
+                            setNewMapping({ ...newMapping, claimio_wh_id: value })
+                            const vendor = vendorsForMapping.find(v => v.warehouse_id === value)
+                            setSelectedVendor(vendor || null)
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select vendor warehouse ID" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {vendorsForMapping.map((vendor) => (
+                              <SelectItem key={vendor.warehouse_id} value={vendor.warehouse_id}>
+                                {vendor.warehouse_id}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {selectedVendor && (
+                          <p className="text-sm text-gray-600 mt-1">Vendor: {selectedVendor.name}</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <Label htmlFor="account-code">Account Code *</Label>
+                        <Select
+                          value={newMapping.account_code}
+                          onValueChange={(value) => {
+                            setNewMapping({ ...newMapping, account_code: value })
+                            const store = storesForMapping.find(s => s.account_code === value)
+                            setSelectedStore(store || null)
+                            setWarehouseVerified(false)
+                            setWarehouseInfo(null)
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select account code" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {storesForMapping.map((store) => (
+                              <SelectItem key={store.account_code} value={store.account_code}>
+                                {store.account_code}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {selectedStore && (
+                          <p className="text-sm text-gray-600 mt-1">Store: {selectedStore.store_name}</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <Label htmlFor="vendor-wh-id">Vendor WH ID *</Label>
+                        <div className="flex gap-2">
                           <Input
-                            id="warehouseId"
-                            value={formData.warehouseId}
-                            onChange={(e) => handleInputChange('warehouseId', e.target.value)}
-                            required
-                            disabled={creating}
+                            id="vendor-wh-id"
+                            value={newMapping.vendor_wh_id}
+                            onChange={(e) => {
+                              setNewMapping({ ...newMapping, vendor_wh_id: e.target.value })
+                              setWarehouseVerified(false)
+                              setWarehouseInfo(null)
+                            }}
+                            placeholder="Enter shipping partner warehouse ID"
+                            className="flex-1"
                           />
                           <Button
                             type="button"
-                            size="sm"
+                            onClick={handleValidateWarehouse}
+                            disabled={validatingWarehouse || !newMapping.vendor_wh_id || !newMapping.account_code}
                             variant="outline"
-                            onClick={handleVerifyWarehouse}
-                            disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating || editDialogOpen}
                           >
-                            {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                            {validatingWarehouse ? "Verifying..." : "Verify"}
                           </Button>
                         </div>
-                        {warehouseVerified && warehouseInfo && (
-                          <p className="text-xs text-green-700">
-                            Verified: {warehouseInfo.address}, {warehouseInfo.city}, {warehouseInfo.state}, {warehouseInfo.country} (Pincode: {warehouseInfo.pincode})
-                          </p>
-                        )}
-                        {warehouseVerifyError && !warehouseVerifyLoading && (
-                          <p className="text-xs text-red-600">{warehouseVerifyError}</p>
+                        {warehouseInfo && warehouseVerified && (
+                          <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-md">
+                            <p className="text-sm font-medium text-green-800 mb-1">Warehouse Verified</p>
+                            <p className="text-xs text-green-700">Address: {warehouseInfo.address}</p>
+                            <p className="text-xs text-green-700">City: {warehouseInfo.city}, Pincode: {warehouseInfo.pincode}</p>
+                          </div>
                         )}
                       </div>
-                    )}
-                    <div className="space-y-2">
-                      <Label htmlFor="contactNumber">Contact Number</Label>
-                      <Input id="contactNumber" value={formData.contactNumber} onChange={(e) => handleInputChange('contactNumber', e.target.value)} disabled={creating} />
-                    </div>
-                    {/* Password Requirements Alert */}
-                    <Alert className="border-blue-200 bg-blue-50">
-                      <Shield className="h-4 w-4 text-blue-600" />
-                      <AlertDescription className="text-blue-800 text-xs">
-                        <strong>Password Requirements:</strong>
-                        <ul className="list-disc list-inside mt-1 space-y-0.5">
-                          <li>Min 6 characters</li>
-                          <li>One uppercase (A-Z)</li>
-                          <li>One lowercase (a-z)</li>
-                          <li>One number (0-9)</li>
-                        </ul>
-                      </AlertDescription>
-                    </Alert>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="password">Password *</Label>
-                      <Input id="password" type="password" value={formData.password} onChange={(e) => handleInputChange('password', e.target.value)} required disabled={creating} />
+                      <div>
+                        <Label htmlFor="return-warehouse-id">Return Warehouse ID</Label>
+                        <Input
+                          id="return-warehouse-id"
+                          value={newMapping.return_warehouse_id}
+                          onChange={(e) => {
+                            setNewMapping({ ...newMapping, return_warehouse_id: e.target.value })
+                          }}
+                          placeholder="Enter return warehouse ID (optional, e.g., 67311)"
+                          className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Optional: The return warehouse ID configured in Shipway for this store. If not provided, the pickup warehouse ID (Vendor WH ID) will be used for returns.
+                        </p>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="confirmPassword">Confirm Password *</Label>
-                      <Input id="confirmPassword" type="password" value={formData.confirmPassword} onChange={(e) => handleInputChange('confirmPassword', e.target.value)} required disabled={creating} />
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddMappingOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button 
+                        onClick={handleCreateMapping} 
+                        disabled={!warehouseVerified}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        Save Mapping
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              {/* Search + Filter Row */}
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    placeholder="Search mappings..."
+                    value={whMappingSearchTerm}
+                    onChange={(e) => setWhMappingSearchTerm(e.target.value)}
+                    className="pl-10 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+                <Sheet open={mobileWhMappingFilterOpen} onOpenChange={setMobileWhMappingFilterOpen}>
+                  <SheetTrigger asChild>
+                    <Button variant="outline" size="icon" className="shrink-0 relative">
+                      <Filter className="h-4 w-4" />
+                      {(whMappingStoreFilter !== "all" || whMappingVendorFilter !== "all") && (
+                        <span className="absolute top-1 right-1 h-2 w-2 bg-blue-600 rounded-full"></span>
+                      )}
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent side="bottom" className="space-y-4">
+                    <SheetHeader>
+                      <div className="flex items-center relative">
+                        {(whMappingStoreFilter !== "all" || whMappingVendorFilter !== "all") && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-auto py-1 px-2 absolute left-0"
+                            onClick={() => {
+                              setWhMappingStoreFilter("all")
+                              setWhMappingVendorFilter("all")
+                            }}
+                          >
+                            Reset
+                          </Button>
+                        )}
+                        <SheetTitle className="flex-1 text-center">Filters</SheetTitle>
+                      </div>
+                    </SheetHeader>
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-sm">Store</Label>
+                        <Select value={whMappingStoreFilter} onValueChange={setWhMappingStoreFilter}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Filter by Store" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Stores</SelectItem>
+                            {storesForMapping.map((store) => (
+                              <SelectItem key={store.account_code} value={store.account_code}>
+                                {store.store_name || store.account_code}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-sm">Vendor</Label>
+                        <Select value={whMappingVendorFilter} onValueChange={setWhMappingVendorFilter}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Filter by Vendor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Vendors</SelectItem>
+                            {vendorsForMapping.map((vendor) => (
+                              <SelectItem key={vendor.warehouse_id} value={vendor.warehouse_id}>
+                                {vendor.name || vendor.warehouse_id}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                  </div>
+                  </SheetContent>
+                </Sheet>
+              </div>
 
-                  {error && (
-                    <Alert variant="destructive" className="border-red-200 bg-red-50">
-                      <AlertDescription className="text-red-800">{error}</AlertDescription>
-                    </Alert>
-                  )}
-                  {success && (
-                    <Alert className="border-green-200 bg-green-50">
-                      <AlertDescription className="text-green-800">{success}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  <Button type="submit" className="w-full" disabled={creating || (formData.role === 'vendor' && !warehouseVerified && warehouseValid !== true)}>
-                    {creating ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Creating User...
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Create User Account
-                      </>
-                    )}
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
+              {/* Warehouse Mappings List */}
+              {whMappingsLoading ? (
+                <div className="text-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
+                  <p className="text-sm text-gray-500 mt-2">Loading mappings...</p>
+                </div>
+              ) : filteredWhMappings.length === 0 ? (
+                <Card>
+                  <CardContent className="p-6 text-center">
+                    <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-sm text-gray-500">No warehouse mappings found. {whMappingSearchTerm || whMappingStoreFilter !== 'all' || whMappingVendorFilter !== 'all' ? 'Try adjusting your search or filters.' : 'Add your first mapping to get started.'}</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-3">
+                  {filteredWhMappings.map((mapping) => (
+                    <Card key={mapping.id} className="p-4">
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-base font-medium text-gray-900">Claimio WH: {mapping.claimio_wh_id}</h4>
+                            <p className="text-xs text-gray-600 mt-1">Vendor: {mapping.vendor_name || 'N/A'}</p>
+                            <p className="text-xs text-gray-600">Store: {mapping.store_name || mapping.account_code}</p>
+                            <p className="text-xs text-gray-600">Vendor WH: {mapping.vendor_wh_id}</p>
+                            <p className="text-xs text-gray-600">Return WH: {mapping.return_warehouse_id || 'N/A'}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <Badge 
+                              variant={mapping.is_active ? 'default' : 'destructive'}
+                              className={mapping.is_active ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
+                            >
+                              {mapping.is_active ? 'ACTIVE' : 'INACTIVE'}
+                            </Badge>
+                            {mapping.is_active && (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => {
+                                  setMappingToDelete(mapping)
+                                  setIsDeleteMappingConfirmOpen(true)
+                                }}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
+
         </div>
 
         {/* Bottom Nav */}
@@ -1515,11 +1943,11 @@ export function UserManagement() {
             <Button variant={mobileTab === 'users' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('users')}>
               <Users className="h-4 w-4 mr-1" /> Users
             </Button>
-            <Button variant={mobileTab === 'create' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('create')}>
-              <UserPlus className="h-4 w-4 mr-1" /> Add
-            </Button>
             <Button variant={mobileTab === 'stores' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('stores')}>
               <Store className="h-4 w-4 mr-1" /> Stores
+            </Button>
+            <Button variant={mobileTab === 'warehouse-mapping' ? 'default' : 'ghost'} className="rounded-none py-4" onClick={() => setMobileTab('warehouse-mapping')}>
+              <MapPin className="h-4 w-4 mr-1" /> Mapping
             </Button>
           </div>
         </div>
@@ -1580,55 +2008,15 @@ export function UserManagement() {
               {editFormData.role === 'vendor' && (
                 <div className="space-y-2">
                   <Label htmlFor="edit-warehouseId" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <Input
-                        id="edit-warehouseId"
-                        value={editFormData.warehouseId}
-                        onChange={(e) => handleEditInputChange('warehouseId', e.target.value)}
-                        required
-                        disabled={editing}
-                        className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
-                          warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
-                          warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
-                        }`}
-                        placeholder="Enter warehouse ID"
-                      />
-                      {warehouseValidating && (
-                        <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-blue-600" />
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={handleVerifyWarehouse}
-                      disabled={warehouseVerifyLoading || !editFormData.warehouseId.trim() || editing || !editDialogOpen}
-                    >
-                      {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
-                    </Button>
-                  </div>
-                  {warehouseValid === true && (
-                    <div className="space-y-1">
-                      <p className="text-sm text-green-600 flex items-center gap-1">
-                        <UserCheck className="h-3 w-3" />
-                        Valid warehouse ID
-                      </p>
-                      {warehouseInfo && (
-                        <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
-                          <p><strong>Address:</strong> {warehouseInfo.address}</p>
-                          <p><strong>City:</strong> {warehouseInfo.city}</p>
-                          <p><strong>Pincode:</strong> {warehouseInfo.pincode}</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {warehouseValid === false && (
-                    <p className="text-sm text-red-600 flex items-center gap-1">
-                      <Shield className="h-3 w-3" />
-                      Invalid warehouse ID
-                    </p>
-                  )}
+                  <Input
+                    id="edit-warehouseId"
+                    value={editFormData.warehouseId}
+                    onChange={(e) => handleEditInputChange('warehouseId', e.target.value)}
+                    required
+                    disabled={editing}
+                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                    placeholder="Enter warehouse ID"
+                  />
                 </div>
               )}
 
@@ -1642,6 +2030,32 @@ export function UserManagement() {
                   disabled={editing}
                   className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
                   placeholder="Enter contact number (optional)"
+                />
+              </div>
+
+              {/* Address field */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-address" className="text-sm font-medium text-gray-700">Address</Label>
+                <Input
+                  id="edit-address"
+                  value={editFormData.address}
+                  onChange={(e) => handleEditInputChange('address', e.target.value)}
+                  disabled={editing}
+                  className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                  placeholder="Enter address (optional)"
+                />
+              </div>
+
+              {/* Pincode field */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-pincode" className="text-sm font-medium text-gray-700">Pincode</Label>
+                <Input
+                  id="edit-pincode"
+                  value={editFormData.pincode}
+                  onChange={(e) => handleEditInputChange('pincode', e.target.value)}
+                  disabled={editing}
+                  className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                  placeholder="Enter pincode (optional)"
                 />
               </div>
 
@@ -1727,6 +2141,7 @@ export function UserManagement() {
     )
   }
 
+  // Main Desktop UI
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
@@ -1837,25 +2252,31 @@ export function UserManagement() {
           {/* Main Tabs */}
           <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
             <CardHeader className="pb-4">
-              <CardTitle className="text-2xl font-bold text-gray-900">User Management</CardTitle>
+              <CardTitle className="text-2xl font-bold text-gray-900">
+                {activeTab === "users" && "User Management"}
+                {activeTab === "stores" && "Store Management"}
+                {activeTab === "warehouse-mapping" && "Warehouse Mapping"}
+              </CardTitle>
               <CardDescription className="text-gray-600">
-                Manage admin and vendor accounts with full control and oversight
+                {activeTab === "users" && "Manage admin and vendor accounts with full control and oversight"}
+                {activeTab === "stores" && "Manage Shipway and Shopify store accounts"}
+                {activeTab === "warehouse-mapping" && "Map claimio warehouse IDs to vendor warehouse IDs per store"}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue="users" className="space-y-6">
+              <Tabs defaultValue="users" value={activeTab} onValueChange={setActiveTab} className="space-y-6">
                 <TabsList className="grid w-full grid-cols-3 bg-gray-100 p-1 rounded-lg">
                   <TabsTrigger value="users" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
                     <Users className="h-4 w-4" />
                     All Users
                   </TabsTrigger>
-                  <TabsTrigger value="create" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-                    <UserPlus className="h-4 w-4" />
-                    Add User
-                  </TabsTrigger>
                   <TabsTrigger value="stores" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
                     <Store className="h-4 w-4" />
                     Store Management
+                  </TabsTrigger>
+                  <TabsTrigger value="warehouse-mapping" className="flex items-center gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                    <MapPin className="h-4 w-4" />
+                    Warehouse Mapping
                   </TabsTrigger>
                 </TabsList>
 
@@ -1894,6 +2315,250 @@ export function UserManagement() {
                         <SelectItem value="inactive">Inactive</SelectItem>
                       </SelectContent>
                     </Select>
+                    <Dialog open={addUserDialogOpen} onOpenChange={setAddUserDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                          <UserPlus className="h-4 w-4 mr-2" />
+                          Add User
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle className="flex items-center gap-2 text-gray-900">
+                            <UserPlus className="h-5 w-5 text-blue-600" />
+                            Add New User
+                          </DialogTitle>
+                          <DialogDescription className="text-gray-600">
+                            Create a new admin or vendor account with full system access
+                          </DialogDescription>
+                        </DialogHeader>
+                        <form onSubmit={handleSubmit} className="space-y-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                              <Label htmlFor="name" className="text-sm font-medium text-gray-700">Full Name *</Label>
+                              <Input
+                                id="name"
+                                value={formData.name}
+                                onChange={(e) => handleInputChange('name', e.target.value)}
+                                required
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Enter full name"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email Address *</Label>
+                              <Input
+                                id="email"
+                                type="email"
+                                value={formData.email}
+                                onChange={(e) => handleInputChange('email', e.target.value)}
+                                required
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Enter email address"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="phone" className="text-sm font-medium text-gray-700">Phone Number *</Label>
+                              <Input
+                                id="phone"
+                                value={formData.phone}
+                                onChange={(e) => handleInputChange('phone', e.target.value)}
+                                required
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Enter phone number"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="role" className="text-sm font-medium text-gray-700">User Role *</Label>
+                              <Select
+                                value={formData.role}
+                                onValueChange={(value: 'admin' | 'vendor') => handleInputChange('role', value)}
+                                disabled={creating}
+                              >
+                                <SelectTrigger className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                                  <SelectValue placeholder="Select role" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="admin" className="flex items-center gap-2">
+                                    <Shield className="h-4 w-4" />
+                                    Admin
+                                  </SelectItem>
+                                  <SelectItem value="vendor" className="flex items-center gap-2">
+                                    <Building2 className="h-4 w-4" />
+                                    Vendor
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {formData.role === 'vendor' && (
+                              <div className="space-y-2">
+                                <Label htmlFor="warehouseId" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
+                                <div className="flex items-center gap-2 relative">
+                                  <Input
+                                    id="warehouseId"
+                                    value={formData.warehouseId}
+                                    onChange={(e) => handleInputChange('warehouseId', e.target.value)}
+                                    required
+                                    disabled={creating}
+                                    className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
+                                      warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
+                                      warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
+                                    }`}
+                                    placeholder="Enter warehouse ID"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="space-y-2">
+                              <Label htmlFor="contactNumber" className="text-sm font-medium text-gray-700">Contact Number</Label>
+                              <Input
+                                id="contactNumber"
+                                value={formData.contactNumber}
+                                onChange={(e) => handleInputChange('contactNumber', e.target.value)}
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Enter contact number (optional)"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="address" className="text-sm font-medium text-gray-700">Address</Label>
+                              <Input
+                                id="address"
+                                value={formData.address}
+                                onChange={(e) => handleInputChange('address', e.target.value)}
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Enter address (optional)"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="city" className="text-sm font-medium text-gray-700">City</Label>
+                              <Input
+                                id="city"
+                                value={formData.city}
+                                onChange={(e) => handleInputChange('city', e.target.value)}
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Enter city (optional)"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="pincode" className="text-sm font-medium text-gray-700">Pincode</Label>
+                              <Input
+                                id="pincode"
+                                value={formData.pincode}
+                                onChange={(e) => handleInputChange('pincode', e.target.value)}
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Enter pincode (optional)"
+                              />
+                            </div>
+                          </div>
+
+                          <Separator />
+
+                          {/* Password Requirements Alert */}
+                          <Alert className="border-blue-200 bg-blue-50">
+                            <Shield className="h-4 w-4 text-blue-600" />
+                            <AlertDescription className="text-blue-800 text-sm">
+                              <strong>Password Requirements:</strong>
+                              <ul className="list-disc list-inside mt-1 space-y-0.5">
+                                <li>Minimum 6 characters long</li>
+                                <li>At least one uppercase letter (A-Z)</li>
+                                <li>At least one lowercase letter (a-z)</li>
+                                <li>At least one number (0-9)</li>
+                              </ul>
+                            </AlertDescription>
+                          </Alert>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                              <Label htmlFor="password" className="text-sm font-medium text-gray-700">Password *</Label>
+                              <Input
+                                id="password"
+                                type="password"
+                                value={formData.password}
+                                onChange={(e) => handleInputChange('password', e.target.value)}
+                                required
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Enter password"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="confirmPassword" className="text-sm font-medium text-gray-700">Confirm Password *</Label>
+                              <Input
+                                id="confirmPassword"
+                                type="password"
+                                value={formData.confirmPassword}
+                                onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
+                                required
+                                disabled={creating}
+                                className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                placeholder="Confirm password"
+                              />
+                            </div>
+                          </div>
+
+                          {error && (
+                            <Alert variant="destructive">
+                              <AlertDescription>{error}</AlertDescription>
+                            </Alert>
+                          )}
+
+                          {success && (
+                            <Alert className="border-green-200 bg-green-50">
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                              <AlertDescription className="text-green-800">{success}</AlertDescription>
+                            </Alert>
+                          )}
+
+                          <DialogFooter>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setAddUserDialogOpen(false)
+                                setError("")
+                                setSuccess("")
+                              }}
+                              disabled={creating}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              type="submit"
+                              disabled={creating}
+                              className="bg-blue-600 hover:bg-blue-700"
+                            >
+                              {creating ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Creating...
+                                </>
+                              ) : (
+                                <>
+                                  <UserPlus className="mr-2 h-4 w-4" />
+                                  Create User
+                                </>
+                              )}
+                            </Button>
+                          </DialogFooter>
+                        </form>
+                      </DialogContent>
+                    </Dialog>
                   </div>
 
                   {/* Users List */}
@@ -1962,63 +2627,86 @@ export function UserManagement() {
                                   {/* Action Buttons - Only show for non-superadmin users */}
                                   {user.role !== 'superadmin' && (
                                     <div className="flex items-center space-x-2">
-                                      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-                                        <DialogTrigger asChild>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => handleEditUser(user)}
-                                            className="h-8 w-8 p-0 hover:bg-blue-50 hover:text-blue-600"
-                                          >
-                                            <Edit className="h-4 w-4" />
-                                          </Button>
-                                        </DialogTrigger>
-                                      </Dialog>
-                                      
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleChangeUserPassword(user)}
-                                        className="h-8 w-8 p-0 hover:bg-purple-50 hover:text-purple-600"
-                                      >
-                                        <Key className="h-4 w-4" />
-                                      </Button>
-                                      
-                                      <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-8 w-8 p-0 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-                                          >
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                          <AlertDialogHeader>
-                                            <AlertDialogTitle>Delete User</AlertDialogTitle>
-                                            <AlertDialogDescription>
-                                              Are you sure you want to delete "{user.name}"? This action cannot be undone.
-                                            </AlertDialogDescription>
-                                          </AlertDialogHeader>
-                                          <AlertDialogFooter>
-                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction
-                                              onClick={() => handleDeleteUser(user)}
-                                              className="bg-red-600 hover:bg-red-700"
+                                      <TooltipProvider>
+                                        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <DialogTrigger asChild>
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  onClick={() => handleEditUser(user)}
+                                                  className="h-8 w-8 p-0 hover:bg-blue-50 hover:text-blue-600"
+                                                >
+                                                  <Edit className="h-4 w-4" />
+                                                </Button>
+                                              </DialogTrigger>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                              <p>Edit User</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </Dialog>
+                                        
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={() => handleChangeUserPassword(user)}
+                                              className="h-8 w-8 p-0 hover:bg-purple-50 hover:text-purple-600"
                                             >
-                                              {deleting ? (
-                                                <>
-                                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                  Deleting...
-                                                </>
-                                              ) : (
-                                                "Delete User"
-                                              )}
-                                            </AlertDialogAction>
-                                          </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                      </AlertDialog>
+                                              <Key className="h-4 w-4" />
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p>Change Password</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                        
+                                        <AlertDialog>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <AlertDialogTrigger asChild>
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  className="h-8 w-8 p-0 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                                                >
+                                                  <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                              </AlertDialogTrigger>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                              <p>Delete User</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                          <AlertDialogContent>
+                                            <AlertDialogHeader>
+                                              <AlertDialogTitle>Delete User</AlertDialogTitle>
+                                              <AlertDialogDescription>
+                                                Are you sure you want to delete "{user.name}"? This action cannot be undone.
+                                              </AlertDialogDescription>
+                                            </AlertDialogHeader>
+                                            <AlertDialogFooter>
+                                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                              <AlertDialogAction
+                                                onClick={() => handleDeleteUser(user)}
+                                                className="bg-red-600 hover:bg-red-700"
+                                              >
+                                                {deleting ? (
+                                                  <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Deleting...
+                                                  </>
+                                                ) : (
+                                                  "Delete User"
+                                                )}
+                                              </AlertDialogAction>
+                                            </AlertDialogFooter>
+                                          </AlertDialogContent>
+                                        </AlertDialog>
+                                      </TooltipProvider>
                                     </div>
                                   )}
                                 </div>
@@ -2031,270 +2719,46 @@ export function UserManagement() {
                   )}
                 </TabsContent>
 
-                <TabsContent value="create" className="space-y-6">
-                  <Card className="border-gray-100 bg-gradient-to-br from-white to-blue-50/30">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2 text-gray-900">
-                        <UserPlus className="h-5 w-5 text-blue-600" />
-                        Add New User
-                      </CardTitle>
-                      <CardDescription className="text-gray-600">
-                        Create a new admin or vendor account with full system access
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <form onSubmit={handleSubmit} className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="space-y-2">
-                            <Label htmlFor="name" className="text-sm font-medium text-gray-700">Full Name *</Label>
-                            <Input
-                              id="name"
-                              value={formData.name}
-                              onChange={(e) => handleInputChange('name', e.target.value)}
-                              required
-                              disabled={creating}
-                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                              placeholder="Enter full name"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor="email" className="text-sm font-medium text-gray-700">Email Address *</Label>
-                            <Input
-                              id="email"
-                              type="email"
-                              value={formData.email}
-                              onChange={(e) => handleInputChange('email', e.target.value)}
-                              required
-                              disabled={creating}
-                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                              placeholder="Enter email address"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor="phone" className="text-sm font-medium text-gray-700">Phone Number *</Label>
-                            <Input
-                              id="phone"
-                              value={formData.phone}
-                              onChange={(e) => handleInputChange('phone', e.target.value)}
-                              required
-                              disabled={creating}
-                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                              placeholder="Enter phone number"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor="role" className="text-sm font-medium text-gray-700">User Role *</Label>
-                            <Select
-                              value={formData.role}
-                              onValueChange={(value: 'admin' | 'vendor') => handleInputChange('role', value)}
-                              disabled={creating}
-                            >
-                              <SelectTrigger className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500">
-                                <SelectValue placeholder="Select role" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="admin" className="flex items-center gap-2">
-                                  <Shield className="h-4 w-4" />
-                                  Admin
-                                </SelectItem>
-                                <SelectItem value="vendor" className="flex items-center gap-2">
-                                  <Building2 className="h-4 w-4" />
-                                  Vendor
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {formData.role === 'vendor' && (
-                            <div className="space-y-2">
-                              <Label htmlFor="warehouseId" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
-                              <div className="flex items-center gap-2 relative">
-                                <Input
-                                  id="warehouseId"
-                                  value={formData.warehouseId}
-                                  onChange={(e) => handleInputChange('warehouseId', e.target.value)}
-                                  required
-                                  disabled={creating}
-                                  className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
-                                    warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
-                                    warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
-                                  }`}
-                                  placeholder="Enter warehouse ID"
-                                />
-                                <TooltipProvider>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="ml-2"
-                                        onClick={handleVerifyWarehouse}
-                                        disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating || editDialogOpen}
-                                      >
-                                        {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify Warehouse"}
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-xs">
-                                      {warehouseVerifyLoading ? (
-                                        <span>Verifying...</span>
-                                      ) : warehouseVerifyError ? (
-                                        <span className="text-red-600">{warehouseVerifyError}</span>
-                                      ) : warehouseInfo ? (
-                                        <div>
-                                          <div className="font-semibold text-sm">Address:</div>
-                                          <div className="text-xs text-gray-700">{warehouseInfo.address}</div>
-                                          <div className="text-xs text-gray-700">{warehouseInfo.city}, {warehouseInfo.state}, {warehouseInfo.country}</div>
-                                          <div className="text-xs text-gray-700">Pincode: {warehouseInfo.pincode}</div>
-                                        </div>
-                                      ) : (
-                                        <span>Click to verify warehouse and view details</span>
-                                      )}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              </div>
-                              {warehouseValid === true && !warehouseVerified && (
-                                <div className="space-y-1 mt-1">
-                                  <p className="text-sm text-green-600 flex items-center gap-1">
-                                    <UserCheck className="h-3 w-3" />
-                                    Valid warehouse ID
-                                  </p>
-                                  {warehouseInfo && (
-                                    <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
-                                      <p><strong>Address:</strong> {warehouseInfo.address}</p>
-                                      <p><strong>City:</strong> {warehouseInfo.city}</p>
-                                      <p><strong>Pincode:</strong> {warehouseInfo.pincode}</p>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                              {warehouseVerified && warehouseInfo && (
-                                <p className="text-xs text-green-600 flex items-center gap-1 mt-1">
-                                  <UserCheck className="h-3 w-3" />
-                                  Verified: {warehouseInfo.address}, {warehouseInfo.city}, {warehouseInfo.state}, {warehouseInfo.country} (Pincode: {warehouseInfo.pincode})
-                                </p>
-                              )}
-                              {warehouseValid === false && (
-                                <p className="text-sm text-red-600 flex items-center gap-1 mt-1">
-                                  <Shield className="h-3 w-3" />
-                                  Invalid warehouse ID
-                                </p>
-                              )}
-                              {warehouseVerifyError && !warehouseVerifyLoading && (
-                                <p className="text-xs text-red-600 flex items-center gap-1 mt-1">
-                                  <Shield className="h-3 w-3" />
-                                  {warehouseVerifyError}
-                                </p>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="space-y-2">
-                            <Label htmlFor="contactNumber" className="text-sm font-medium text-gray-700">Contact Number</Label>
-                            <Input
-                              id="contactNumber"
-                              value={formData.contactNumber}
-                              onChange={(e) => handleInputChange('contactNumber', e.target.value)}
-                              disabled={creating}
-                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                              placeholder="Enter contact number (optional)"
-                            />
-                          </div>
-                        </div>
-
-                        <Separator />
-
-                        {/* Password Requirements Alert */}
-                        <Alert className="border-blue-200 bg-blue-50">
-                          <Shield className="h-4 w-4 text-blue-600" />
-                          <AlertDescription className="text-blue-800 text-sm">
-                            <strong>Password Requirements:</strong>
-                            <ul className="list-disc list-inside mt-1 space-y-0.5">
-                              <li>Minimum 6 characters long</li>
-                              <li>At least one uppercase letter (A-Z)</li>
-                              <li>At least one lowercase letter (a-z)</li>
-                              <li>At least one number (0-9)</li>
-                            </ul>
-                          </AlertDescription>
-                        </Alert>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="space-y-2">
-                            <Label htmlFor="password" className="text-sm font-medium text-gray-700">Password *</Label>
-                            <Input
-                              id="password"
-                              type="password"
-                              value={formData.password}
-                              onChange={(e) => handleInputChange('password', e.target.value)}
-                              required
-                              disabled={creating}
-                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                              placeholder="Enter password"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor="confirmPassword" className="text-sm font-medium text-gray-700">Confirm Password *</Label>
-                            <Input
-                              id="confirmPassword"
-                              type="password"
-                              value={formData.confirmPassword}
-                              onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-                              required
-                              disabled={creating}
-                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                              placeholder="Confirm password"
-                            />
-                          </div>
-                        </div>
-
-                        {error && (
-                          <Alert variant="destructive" className="border-red-200 bg-red-50">
-                            <AlertDescription className="text-red-800">{error}</AlertDescription>
-                          </Alert>
-                        )}
-
-                        {success && (
-                          <Alert className="border-green-200 bg-green-50">
-                            <AlertDescription className="text-green-800">{success}</AlertDescription>
-                          </Alert>
-                        )}
-
-                        <Button 
-                          type="submit" 
-                          className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg" 
-                          disabled={creating || (formData.role === 'vendor' && !warehouseVerified && warehouseValid !== true)}
-                        >
-                          {creating ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Creating User...
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="mr-2 h-4 w-4" />
-                              Create User Account
-                            </>
-                          )}
-                        </Button>
-                      </form>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
                 <TabsContent value="stores" className="space-y-6">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">Store Management</h3>
-                      <p className="text-sm text-gray-600 mt-1">Manage Shipway and Shopify store accounts</p>
+                  {/* Search and Filters */}
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex-1">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                        <Input
+                          placeholder="Search stores by name, code, or username..."
+                          value={storeSearchTerm}
+                          onChange={(e) => setStoreSearchTerm(e.target.value)}
+                          className="pl-10 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                        />
+                      </div>
                     </div>
+                    <Select value={storeStatusFilter} onValueChange={setStoreStatusFilter}>
+                      <SelectTrigger className="w-40 bg-white border-gray-200">
+                        <SelectValue placeholder="Filter by Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        <SelectItem value="active">Active</SelectItem>
+                        <SelectItem value="inactive">Inactive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={storeShippingPartnerFilter} onValueChange={setStoreShippingPartnerFilter}>
+                      <SelectTrigger className="w-48 bg-white border-gray-200">
+                        <SelectValue placeholder="Filter by Partner" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Partners</SelectItem>
+                        {shippingPartners.map((partner) => (
+                          <SelectItem key={partner} value={partner}>
+                            {partner}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <Dialog open={isAddStoreOpen} onOpenChange={setIsAddStoreOpen}>
                       <DialogTrigger asChild>
-                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                        <Button className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
                           <Plus className="h-4 w-4 mr-2" />
                           Add Store
                         </Button>
@@ -2357,56 +2821,56 @@ export function UserManagement() {
                                     id="shipping-password"
                                     type={showPassword ? "text" : "password"}
                                     value={newStore.password}
-                                  onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
-                                  placeholder={`Enter ${newStore.shipping_partner} password`}
-                                  className="pr-10"
-                                />
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                  onClick={() => setShowPassword(!showPassword)}
-                                >
-                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </Button>
+                                    onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
+                                    placeholder={`Enter ${newStore.shipping_partner} password`}
+                                    className="pr-10"
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                  >
+                                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => handleTestShipway(newStore.username, newStore.password)}
-                              disabled={testingConnection.loading && testingConnection.type === 'shipway'}
-                            >
-                              {testingConnection.loading && testingConnection.type === 'shipway' ? (
-                                <>
-                                  <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                                  Testing...
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle className="w-3 h-3 mr-2" />
-                                  Test {newStore.shipping_partner} Connection
-                                </>
-                              )}
-                            </Button>
-                            {shipwayTestResult && (
-                              <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                                shipwayTestResult.success 
-                                  ? 'bg-green-50 text-green-800 border border-green-200' 
-                                  : 'bg-red-50 text-red-800 border border-red-200'
-                              }`}>
-                                {shipwayTestResult.success ? (
-                                  <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="w-full"
+                                onClick={() => handleTestShipway(newStore.username, newStore.password)}
+                                disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                              >
+                                {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                                    Testing...
+                                  </>
                                 ) : (
-                                  <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                                  <>
+                                    <CheckCircle className="w-3 h-3 mr-2" />
+                                    Test {newStore.shipping_partner} Connection
+                                  </>
                                 )}
-                                <span className="flex-1">{shipwayTestResult.message}</span>
-                              </div>
-                            )}
-                          </div>
+                              </Button>
+                              {shipwayTestResult && (
+                                <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
+                                  shipwayTestResult.success 
+                                    ? 'bg-green-50 text-green-800 border border-green-200' 
+                                    : 'bg-red-50 text-red-800 border border-red-200'
+                                }`}>
+                                  {shipwayTestResult.success ? (
+                                    <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                                  ) : (
+                                    <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                                  )}
+                                  <span className="flex-1">{shipwayTestResult.message}</span>
+                                </div>
+                              )}
+                            </div>
                           )}
 
                           <div className="space-y-2">
@@ -2499,18 +2963,18 @@ export function UserManagement() {
                             Cancel
                           </Button>
                           <Button 
-                        onClick={handleAddStore}
-                        disabled={isAddingStore}
-                      >
-                        {isAddingStore ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            Adding Store...
-                          </>
-                        ) : (
-                          'Add Store'
-                        )}
-                      </Button>
+                            onClick={handleAddStore}
+                            disabled={isAddingStore}
+                          >
+                            {isAddingStore ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Adding Store...
+                              </>
+                            ) : (
+                              'Add Store'
+                            )}
+                          </Button>
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
@@ -2522,11 +2986,11 @@ export function UserManagement() {
                       <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
                       <p className="text-sm text-gray-500 mt-2">Loading stores...</p>
                     </div>
-                  ) : stores.length === 0 ? (
+                  ) : filteredStores.length === 0 ? (
                     <Card>
                       <CardContent className="p-6 text-center">
                         <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                        <p className="text-sm text-gray-500">No stores found. Add your first store to get started.</p>
+                        <p className="text-sm text-gray-500">No stores found. {storeSearchTerm || storeStatusFilter !== 'all' || storeShippingPartnerFilter !== 'all' ? 'Try adjusting your search or filters.' : 'Add your first store to get started.'}</p>
                       </CardContent>
                     </Card>
                   ) : (
@@ -2545,7 +3009,7 @@ export function UserManagement() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {stores.map((store) => (
+                            {filteredStores.map((store) => (
                               <TableRow key={store.id}>
                                 <TableCell className="font-medium">{store.store_name}</TableCell>
                                 <TableCell className="font-mono text-xs">{store.account_code}</TableCell>
@@ -2573,6 +3037,247 @@ export function UserManagement() {
                                       <Trash2 className="w-4 h-4" />
                                     </Button>
                                   </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="warehouse-mapping" className="space-y-6">
+                  {/* Search and Filters */}
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex-1">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                        <Input
+                          placeholder="Search mappings by ID, vendor, store, or code..."
+                          value={whMappingSearchTerm}
+                          onChange={(e) => setWhMappingSearchTerm(e.target.value)}
+                          className="pl-10 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                    <Select value={whMappingStoreFilter} onValueChange={setWhMappingStoreFilter}>
+                      <SelectTrigger className="w-48 bg-white border-gray-200">
+                        <SelectValue placeholder="Filter by Store" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Stores</SelectItem>
+                        {storesForMapping.map((store) => (
+                          <SelectItem key={store.account_code} value={store.account_code}>
+                            {store.store_name || store.account_code}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={whMappingVendorFilter} onValueChange={setWhMappingVendorFilter}>
+                      <SelectTrigger className="w-48 bg-white border-gray-200">
+                        <SelectValue placeholder="Filter by Vendor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Vendors</SelectItem>
+                        {vendorsForMapping.map((vendor) => (
+                          <SelectItem key={vendor.warehouse_id} value={vendor.warehouse_id}>
+                            {vendor.name || vendor.warehouse_id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Dialog open={isAddMappingOpen} onOpenChange={(open) => {
+                      setIsAddMappingOpen(open)
+                      if (!open) {
+                        setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "" })
+                        setSelectedVendor(null)
+                        setSelectedStore(null)
+                        setWarehouseInfo(null)
+                        setWarehouseVerified(false)
+                      }
+                    }}>
+                      <DialogTrigger asChild>
+                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Mapping
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle>Add Warehouse Mapping</DialogTitle>
+                          <DialogDescription>
+                            Map claimio warehouse ID to vendor warehouse ID for a specific store
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <Label htmlFor="claimio-wh-id">Claimio WH ID *</Label>
+                            <Select
+                              value={newMapping.claimio_wh_id}
+                              onValueChange={(value) => {
+                                setNewMapping({ ...newMapping, claimio_wh_id: value })
+                                const vendor = vendorsForMapping.find(v => v.warehouse_id === value)
+                                setSelectedVendor(vendor || null)
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select vendor warehouse ID" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {vendorsForMapping.map((vendor) => (
+                                  <SelectItem key={vendor.warehouse_id} value={vendor.warehouse_id}>
+                                    {vendor.warehouse_id}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {selectedVendor && (
+                              <p className="text-sm text-gray-600 mt-1">Vendor: {selectedVendor.name}</p>
+                            )}
+                          </div>
+
+                          <div>
+                            <Label htmlFor="account-code">Account Code *</Label>
+                            <Select
+                              value={newMapping.account_code}
+                              onValueChange={(value) => {
+                                setNewMapping({ ...newMapping, account_code: value })
+                                const store = storesForMapping.find(s => s.account_code === value)
+                                setSelectedStore(store || null)
+                                setWarehouseVerified(false)
+                                setWarehouseInfo(null)
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select account code" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {storesForMapping.map((store) => (
+                                  <SelectItem key={store.account_code} value={store.account_code}>
+                                    {store.account_code}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {selectedStore && (
+                              <p className="text-sm text-gray-600 mt-1">Store: {selectedStore.store_name}</p>
+                            )}
+                          </div>
+
+                          <div>
+                            <Label htmlFor="vendor-wh-id">Vendor WH ID *</Label>
+                            <div className="flex gap-2">
+                              <Input
+                                id="vendor-wh-id"
+                                value={newMapping.vendor_wh_id}
+                                onChange={(e) => {
+                                  setNewMapping({ ...newMapping, vendor_wh_id: e.target.value })
+                                  setWarehouseVerified(false)
+                                  setWarehouseInfo(null)
+                                }}
+                                placeholder="Enter shipping partner warehouse ID"
+                                className="flex-1"
+                              />
+                              <Button
+                                type="button"
+                                onClick={handleValidateWarehouse}
+                                disabled={validatingWarehouse || !newMapping.vendor_wh_id || !newMapping.account_code}
+                                variant="outline"
+                              >
+                                {validatingWarehouse ? "Verifying..." : "Verify"}
+                              </Button>
+                            </div>
+                            {warehouseInfo && warehouseVerified && (
+                              <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-md">
+                                <p className="text-sm font-medium text-green-800 mb-1">Warehouse Verified</p>
+                                <p className="text-xs text-green-700">Address: {warehouseInfo.address}</p>
+                                <p className="text-xs text-green-700">City: {warehouseInfo.city}, Pincode: {warehouseInfo.pincode}</p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <Label htmlFor="return-warehouse-id">Return Warehouse ID</Label>
+                            <Input
+                              id="return-warehouse-id"
+                              value={newMapping.return_warehouse_id}
+                              onChange={(e) => {
+                                setNewMapping({ ...newMapping, return_warehouse_id: e.target.value })
+                              }}
+                              placeholder="Enter return warehouse ID (optional, e.g., 67311)"
+                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                              Optional: The return warehouse ID configured in Shipway for this store. If not provided, the pickup warehouse ID (Vendor WH ID) will be used for returns.
+                            </p>
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setIsAddMappingOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button 
+                            onClick={handleCreateMapping} 
+                            disabled={!warehouseVerified}
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            Save Mapping
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+
+                  {whMappingsLoading ? (
+                    <div className="text-center py-8">Loading mappings...</div>
+                  ) : filteredWhMappings.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">No warehouse mappings found. {whMappingSearchTerm || whMappingStoreFilter !== 'all' || whMappingVendorFilter !== 'all' ? 'Try adjusting your search or filters.' : 'Add your first mapping to get started.'}</div>
+                  ) : (
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Claimio WH ID</TableHead>
+                              <TableHead>Vendor Name</TableHead>
+                              <TableHead>Account Code</TableHead>
+                              <TableHead>Store Name</TableHead>
+                              <TableHead>Vendor WH ID</TableHead>
+                              <TableHead>Return WH ID</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredWhMappings.map((mapping) => (
+                              <TableRow key={mapping.id} className={mapping.is_active === false ? 'opacity-50' : ''}>
+                                <TableCell>{mapping.claimio_wh_id}</TableCell>
+                                <TableCell>{mapping.vendor_name || 'N/A'}</TableCell>
+                                <TableCell>{mapping.account_code}</TableCell>
+                                <TableCell>{mapping.store_name || 'N/A'}</TableCell>
+                                <TableCell>{mapping.vendor_wh_id}</TableCell>
+                                <TableCell>{mapping.return_warehouse_id || 'N/A'}</TableCell>
+                                <TableCell>
+                                  {mapping.is_active ? (
+                                    <Badge className="bg-green-100 text-green-800">Active</Badge>
+                                  ) : (
+                                    <Badge className="bg-gray-100 text-gray-800">Inactive</Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  {mapping.is_active && (
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => {
+                                        setMappingToDelete(mapping)
+                                        setIsDeleteMappingConfirmOpen(true)
+                                      }}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  )}
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -3119,6 +3824,24 @@ export function UserManagement() {
             <AlertDialogCancel onClick={() => setIsDeleteStoreConfirmOpen(false)}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmDeleteStore} className="bg-red-600 hover:bg-red-700">
               Delete Store
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Warehouse Mapping Confirmation Dialog */}
+      <AlertDialog open={isDeleteMappingConfirmOpen} onOpenChange={setIsDeleteMappingConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this warehouse mapping? This action will deactivate the mapping and cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setIsDeleteMappingConfirmOpen(false)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteMapping} className="bg-red-600 hover:bg-red-700">
+              Delete Mapping
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

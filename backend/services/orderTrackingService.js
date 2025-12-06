@@ -204,6 +204,19 @@ class OrderTrackingService {
         return { success: true, message: 'No tracking data available' };
       }
 
+      // Validate that shipment_status_history is a non-empty array
+      if (!Array.isArray(trackingData.shipment_status_history) || trackingData.shipment_status_history.length === 0) {
+        console.log(`⚠️ [Tracking] Empty or invalid shipment_status_history for order ${orderId}`);
+        return { success: true, message: 'No tracking events available' };
+      }
+
+      // Validate that the last event has required properties
+      const latestStatus = trackingData.shipment_status_history[trackingData.shipment_status_history.length - 1];
+      if (!latestStatus || !latestStatus.name) {
+        console.log(`⚠️ [Tracking] Invalid latest status for order ${orderId}:`, latestStatus);
+        return { success: true, message: 'Invalid tracking status data' };
+      }
+
       // Determine actual order type based on latest status
       const actualOrderType = this.determineOrderType(trackingData);
       
@@ -214,7 +227,6 @@ class OrderTrackingService {
       console.log(`✅ [Tracking] Stored ${trackingData.shipment_status_history.length} tracking events for order ${orderId}`);
       
       // Update labels table with current shipment status and handover logic
-      const latestStatus = trackingData.shipment_status_history[trackingData.shipment_status_history.length - 1];
       const isHandover = latestStatus.name === 'In Transit';
       
       // Get the timestamp for handover event (if available)
@@ -222,14 +234,14 @@ class OrderTrackingService {
       let handoverTimestamp = null;
       if (isHandover) {
         // Find the first occurrence of "In Transit" status
-        const firstInTransitEvent = trackingData.shipment_status_history.find(event => event.name === 'In Transit');
+        const firstInTransitEvent = trackingData.shipment_status_history.find(event => event && event.name === 'In Transit');
         if (firstInTransitEvent && firstInTransitEvent.time) {
           handoverTimestamp = firstInTransitEvent.time;
           console.log(`🚚 [Tracking] Found first "In Transit" event for order ${orderId} at timestamp: ${handoverTimestamp}`);
         }
       }
       
-      await database.updateLabelsShipmentStatus(orderId, latestStatus.name, isHandover, handoverTimestamp);
+      await database.updateLabelsShipmentStatus(orderId, accountCode, latestStatus.name, isHandover, handoverTimestamp);
       
       return {
         success: true,
@@ -347,6 +359,12 @@ class OrderTrackingService {
 
     // Get the latest status (last item in the array)
     const latestStatus = trackingData.shipment_status_history[trackingData.shipment_status_history.length - 1];
+    
+    // Validate latestStatus has name property
+    if (!latestStatus || !latestStatus.name) {
+      console.log(`⚠️ [Tracking] Invalid latest status in determineOrderType:`, latestStatus);
+      return 'active'; // Default to active if invalid
+    }
     
     if (latestStatus.name === 'Delivered') {
       return 'inactive';

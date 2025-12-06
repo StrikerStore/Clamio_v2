@@ -62,6 +62,7 @@ class Database {
       await this.createOrdersTable();
       await this.createClaimsTable();
       await this.createNotificationsTable();
+      await this.createWhMappingTable();
       this.mysqlInitialized = true;
     } catch (error) {
       console.error('❌ MySQL connection failed:', error.message);
@@ -3227,7 +3228,7 @@ class Database {
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
         LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         LEFT JOIN store_info s ON o.account_code = s.account_code
-        WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1 OR (c.status = 'unclaimed' AND c.status IS NOT NULL))`;
+        WHERE (o.is_in_new_order = 1 OR c.label_downloaded = 1)`;
       
       const params = [];
       
@@ -3412,7 +3413,6 @@ class Database {
         LEFT JOIN labels l ON o.order_id = l.order_id
         WHERE c.claimed_by = ? 
         AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
-        AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
         AND (l.is_manifest IS NULL OR l.is_manifest = 0)
         ORDER BY o.order_date DESC, o.order_id
       `, [warehouseId]);
@@ -4269,10 +4269,10 @@ class Database {
       }
       const accountCode = orderData[0].account_code;
 
-      // Clear existing tracking data for this order to avoid duplicates
+      // Clear existing tracking data for this order to avoid duplicates (with account_code for store isolation)
       await this.mysqlConnection.execute(
-        'DELETE FROM order_tracking WHERE order_id = ?',
-        [orderId]
+        'DELETE FROM order_tracking WHERE order_id = ? AND account_code = ?',
+        [orderId, accountCode]
       );
 
       // Insert new tracking events
@@ -4302,10 +4302,15 @@ class Database {
   /**
    * Get tracking data for a specific order
    * @param {string} orderId - The order ID
+   * @param {string} accountCode - The account_code for the store (REQUIRED)
    */
-  async getOrderTracking(orderId) {
+  async getOrderTracking(orderId, accountCode) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
+    }
+
+    if (!accountCode) {
+      throw new Error('account_code is required for getting tracking data');
     }
 
     try {
@@ -4317,16 +4322,17 @@ class Database {
           shipment_status,
           timestamp,
           ndr_reason,
+          account_code,
           created_at,
           updated_at
         FROM order_tracking 
-        WHERE order_id = ?
+        WHERE order_id = ? AND account_code = ?
         ORDER BY timestamp ASC
-      `, [orderId]);
+      `, [orderId, accountCode]);
       
       return rows;
     } catch (error) {
-      console.error(`Error getting tracking data for order ${orderId}:`, error);
+      console.error(`Error getting tracking data for order ${orderId} (${accountCode}):`, error);
       throw error;
     }
   }
@@ -4427,24 +4433,29 @@ class Database {
   /**
    * Update labels table with current shipment status and handover logic
    * @param {string} orderId - The order ID
+   * @param {string} accountCode - The account_code for the store (REQUIRED)
    * @param {string} currentStatus - Current shipment status
    * @param {boolean} isHandover - Whether this order is handed over
    * @param {string|null} handoverTimestamp - Timestamp when order became "In Transit" (from tracking API)
    */
-  async updateLabelsShipmentStatus(orderId, currentStatus, isHandover = false, handoverTimestamp = null) {
+  async updateLabelsShipmentStatus(orderId, accountCode, currentStatus, isHandover = false, handoverTimestamp = null) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
     }
 
+    if (!accountCode) {
+      throw new Error('account_code is required for updating labels shipment status');
+    }
+
     try {
-      // Check if label exists for this order
+      // Check if label exists for this order and account_code (store isolation)
       const [existingLabels] = await this.mysqlConnection.execute(
-        'SELECT id, is_handover, handover_at FROM labels WHERE order_id = ?',
-        [orderId]
+        'SELECT id, is_handover, handover_at FROM labels WHERE order_id = ? AND account_code = ?',
+        [orderId, accountCode]
       );
 
       if (existingLabels.length === 0) {
-        console.log(`⚠️ No label found for order ${orderId}, skipping labels update`);
+        console.log(`⚠️ No label found for order ${orderId} (${accountCode}), skipping labels update`);
         return;
       }
 
@@ -4470,28 +4481,28 @@ class Database {
           if (handoverTimestamp) {
             updateQuery += `, handover_at = ?`;
             queryParams.push(handoverTimestamp);
-            console.log(`🚚 Setting is_handover = 1 and handover_at = ${handoverTimestamp} for order ${orderId}`);
+            console.log(`🚚 Setting is_handover = 1 and handover_at = ${handoverTimestamp} for order ${orderId} (${accountCode})`);
           } else {
             // If no timestamp provided, use current time
             updateQuery += `, handover_at = NOW()`;
-            console.log(`🚚 Setting is_handover = 1 and handover_at = NOW() for order ${orderId}`);
+            console.log(`🚚 Setting is_handover = 1 and handover_at = NOW() for order ${orderId} (${accountCode})`);
           }
         } else {
-          console.log(`🚚 Order ${orderId} already has handover_at = ${existingHandoverAt}, preserving original timestamp`);
+          console.log(`🚚 Order ${orderId} (${accountCode}) already has handover_at = ${existingHandoverAt}, preserving original timestamp`);
         }
         
-        console.log(`🚚 Order ${orderId} status changed to In Transit (handed over)`);
+        console.log(`🚚 Order ${orderId} (${accountCode}) status changed to In Transit (handed over)`);
       }
 
-      updateQuery += ` WHERE order_id = ?`;
-      queryParams.push(orderId);
+      updateQuery += ` WHERE order_id = ? AND account_code = ?`;
+      queryParams.push(orderId, accountCode);
 
       await this.mysqlConnection.execute(updateQuery, queryParams);
       
-      console.log(`✅ Updated labels table for order ${orderId}: status=${currentStatus}, handover=${isHandover ? '1' : 'unchanged'}`);
+      console.log(`✅ Updated labels table for order ${orderId} (${accountCode}): status=${currentStatus}, handover=${isHandover ? '1' : 'unchanged'}`);
       
     } catch (error) {
-      console.error(`❌ Error updating labels table for order ${orderId}:`, error);
+      console.error(`❌ Error updating labels table for order ${orderId} (${accountCode}):`, error);
       throw error;
     }
   }
@@ -4509,7 +4520,7 @@ class Database {
     try {
       console.log('🔍 [Handover/Tracking Validation] Starting validation check...');
       
-      // Get all orders with handover_at timestamp and is_manifest = 1
+      // Get all orders with handover_at timestamp and is_manifest = 1 (grouped by account_code for store isolation)
       const [orders] = await this.mysqlConnection.execute(`
         SELECT 
           l.order_id,
@@ -4689,6 +4700,60 @@ class Database {
       console.log('✅ store_info table created/verified');
     } catch (error) {
       console.error('❌ Error creating store_info table:', error.message);
+    }
+  }
+
+  /**
+   * Create wh_mapping table if it doesn't exist
+   * Maps claimio_wh_id (internal warehouse ID) to vendor_wh_id (shipping partner warehouse ID) per account_code
+   */
+  async createWhMappingTable() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      const createTableQuery = `
+        CREATE TABLE IF NOT EXISTS wh_mapping (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          claimio_wh_id VARCHAR(50) NOT NULL,
+          vendor_wh_id VARCHAR(50) NOT NULL,
+          account_code VARCHAR(50) NOT NULL,
+          return_warehouse_id VARCHAR(50),
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_claimio_wh_id (claimio_wh_id),
+          INDEX idx_account_code (account_code),
+          INDEX idx_is_active (is_active),
+          INDEX idx_claimio_account (claimio_wh_id, account_code),
+          FOREIGN KEY (account_code) REFERENCES store_info(account_code) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+      
+      await this.mysqlConnection.execute(createTableQuery);
+      console.log('✅ wh_mapping table created/verified');
+      
+      // Add return_warehouse_id column if it doesn't exist (migration)
+      try {
+        const [columns] = await this.mysqlConnection.execute(`
+          SELECT COLUMN_NAME 
+          FROM INFORMATION_SCHEMA.COLUMNS 
+          WHERE TABLE_SCHEMA = DATABASE() 
+          AND TABLE_NAME = 'wh_mapping' 
+          AND COLUMN_NAME = 'return_warehouse_id'
+        `);
+        
+        if (columns.length === 0) {
+          await this.mysqlConnection.execute(`
+            ALTER TABLE wh_mapping 
+            ADD COLUMN return_warehouse_id VARCHAR(50) AFTER account_code
+          `);
+          console.log('✅ Added return_warehouse_id column to wh_mapping table');
+        }
+      } catch (migrationError) {
+        console.error('⚠️ Error adding return_warehouse_id column (may already exist):', migrationError.message);
+      }
+    } catch (error) {
+      console.error('❌ Error creating wh_mapping table:', error.message);
     }
   }
 
@@ -5034,6 +5099,207 @@ class Database {
     } catch (error) {
       console.error('Error deleting store:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get vendor warehouse ID from mapping by claimio warehouse ID and account code
+   * @param {string} claimioWhId - The claimio warehouse ID (from users.warehouseId)
+   * @param {string} accountCode - The account code (store identifier)
+   * @returns {Promise<string|null>} vendor_wh_id or null if not found
+   */
+  async getVendorWhIdByClaimioWhIdAndAccountCode(claimioWhId, accountCode) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT vendor_wh_id FROM wh_mapping WHERE claimio_wh_id = ? AND account_code = ? AND is_active = TRUE LIMIT 1',
+        [claimioWhId, accountCode]
+      );
+      return rows.length > 0 ? rows[0].vendor_wh_id : null;
+    } catch (error) {
+      console.error('Error getting vendor warehouse ID from mapping:', error);
+      throw new Error('Failed to get vendor warehouse ID from database');
+    }
+  }
+
+  /**
+   * Get warehouse mapping details (vendor_wh_id and return_warehouse_id) by claimio warehouse ID and account code
+   * @param {string} claimioWhId - The claimio warehouse ID (from users.warehouseId)
+   * @param {string} accountCode - The account code (store identifier)
+   * @returns {Promise<Object|null>} Object with vendor_wh_id and return_warehouse_id, or null if not found
+   */
+  async getWhMappingByClaimioWhIdAndAccountCode(claimioWhId, accountCode) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT vendor_wh_id, return_warehouse_id FROM wh_mapping WHERE claimio_wh_id = ? AND account_code = ? AND is_active = TRUE LIMIT 1',
+        [claimioWhId, accountCode]
+      );
+      return rows.length > 0 ? { vendor_wh_id: rows[0].vendor_wh_id, return_warehouse_id: rows[0].return_warehouse_id } : null;
+    } catch (error) {
+      console.error('Error getting warehouse mapping:', error);
+      throw new Error('Failed to get warehouse mapping from database');
+    }
+  }
+
+  /**
+   * Get all warehouse mappings (for admin display)
+   * @param {boolean} includeInactive - Whether to include inactive mappings
+   * @returns {Promise<Array>} Array of mapping objects
+   */
+  async getAllWhMappings(includeInactive = true) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      let query = `
+        SELECT 
+          wm.id,
+          wm.claimio_wh_id,
+          wm.vendor_wh_id,
+          wm.account_code,
+          wm.return_warehouse_id,
+          wm.is_active,
+          wm.created_at,
+          wm.modified_at,
+          u.name as vendor_name,
+          s.store_name
+        FROM wh_mapping wm
+        LEFT JOIN users u ON wm.claimio_wh_id = u.warehouseId
+        LEFT JOIN store_info s ON wm.account_code = s.account_code
+      `;
+      
+      if (!includeInactive) {
+        query += ' WHERE wm.is_active = TRUE';
+      }
+      
+      query += ' ORDER BY wm.created_at DESC';
+      
+      const [rows] = await this.mysqlConnection.execute(query);
+      return rows;
+    } catch (error) {
+      console.error('Error getting warehouse mappings:', error);
+      throw new Error('Failed to get warehouse mappings from database');
+    }
+  }
+
+  /**
+   * Get warehouse mapping by ID
+   * @param {number} id - Mapping ID
+   * @returns {Promise<Object|null>} Mapping object or null if not found
+   */
+  async getWhMappingById(id) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        `SELECT 
+          wm.id,
+          wm.claimio_wh_id,
+          wm.vendor_wh_id,
+          wm.account_code,
+          wm.return_warehouse_id,
+          wm.is_active,
+          wm.created_at,
+          wm.modified_at,
+          u.name as vendor_name,
+          s.store_name
+        FROM wh_mapping wm
+        LEFT JOIN users u ON wm.claimio_wh_id = u.warehouseId
+        LEFT JOIN store_info s ON wm.account_code = s.account_code
+        WHERE wm.id = ?`,
+        [id]
+      );
+      return rows.length > 0 ? rows[0] : null;
+    } catch (error) {
+      console.error('Error getting warehouse mapping by ID:', error);
+      throw new Error('Failed to get warehouse mapping from database');
+    }
+  }
+
+  /**
+   * Check if active mapping exists for claimio_wh_id and account_code
+   * @param {string} claimioWhId - The claimio warehouse ID
+   * @param {string} accountCode - The account code
+   * @returns {Promise<boolean>} True if active mapping exists
+   */
+  async activeWhMappingExists(claimioWhId, accountCode) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [rows] = await this.mysqlConnection.execute(
+        'SELECT id FROM wh_mapping WHERE claimio_wh_id = ? AND account_code = ? AND is_active = TRUE LIMIT 1',
+        [claimioWhId, accountCode]
+      );
+      return rows.length > 0;
+    } catch (error) {
+      console.error('Error checking warehouse mapping existence:', error);
+      throw new Error('Failed to check warehouse mapping in database');
+    }
+  }
+
+  /**
+   * Create warehouse mapping
+   * @param {Object} mappingData - Mapping data
+   * @param {string} mappingData.claimio_wh_id - Claimio warehouse ID
+   * @param {string} mappingData.vendor_wh_id - Vendor warehouse ID (shipping partner)
+   * @param {string} mappingData.account_code - Account code
+   * @returns {Promise<Object>} Created mapping object
+   */
+  async createWhMapping(mappingData) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      // Check if active mapping already exists
+      const exists = await this.activeWhMappingExists(mappingData.claimio_wh_id, mappingData.account_code);
+      if (exists) {
+        throw new Error('Active mapping already exists for this claimio_wh_id and account_code combination');
+      }
+
+      const [result] = await this.mysqlConnection.execute(
+        'INSERT INTO wh_mapping (claimio_wh_id, vendor_wh_id, account_code, return_warehouse_id, is_active) VALUES (?, ?, ?, ?, TRUE)',
+        [mappingData.claimio_wh_id, mappingData.vendor_wh_id, mappingData.account_code, mappingData.return_warehouse_id || null]
+      );
+
+      return await this.getWhMappingById(result.insertId);
+    } catch (error) {
+      console.error('Error creating warehouse mapping:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Soft delete warehouse mapping (set is_active = FALSE)
+   * @param {number} id - Mapping ID
+   * @returns {Promise<boolean>} True if updated successfully
+   */
+  async deleteWhMapping(id) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const [result] = await this.mysqlConnection.execute(
+        'UPDATE wh_mapping SET is_active = FALSE, modified_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [id]
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error('Error deleting warehouse mapping:', error);
+      throw new Error('Failed to delete warehouse mapping from database');
     }
   }
 

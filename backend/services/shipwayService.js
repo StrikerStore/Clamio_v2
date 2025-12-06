@@ -832,16 +832,19 @@ class ShipwayService {
     }
 
     // Get existing orders from MySQL to preserve claim data
+    // IMPORTANT: Filter by account_code to prevent cross-store data interaction
     let existingOrders = [];
-    let existingClaimData = new Map(); // Map to store claim data by order_id|product_code
+    let existingClaimData = new Map(); // Map to store claim data by account_code|order_id|product_code
     let maxUniqueId = 0;
     
     try {
-      existingOrders = await database.getAllOrders();
+      const allOrders = await database.getAllOrders();
+      // Filter orders to only include current store's orders
+      existingOrders = allOrders.filter(row => row.account_code === this.accountCode);
       
-      // Build map of existing claim data
+      // Build map of existing claim data with account_code in key
       existingOrders.forEach(row => {
-        const key = `${row.order_id}|${row.product_code}`;
+        const key = `${row.account_code}|${row.order_id}|${row.product_code}`;
         existingClaimData.set(key, {
           unique_id: row.unique_id,
           status: row.status || 'unclaimed',
@@ -1032,15 +1035,16 @@ class ShipwayService {
     }
 
     // Compare and update MySQL only if changed
-    const existingKeySet = new Set(existingOrders.map(r => `${r.order_id}|${r.product_code}`));
-    const newKeySet = new Set(flatOrders.map(r => `${r.order_id}|${r.product_code}`));
+    // IMPORTANT: Include account_code in key to prevent cross-store data interaction
+    const existingKeySet = new Set(existingOrders.map(r => `${r.account_code}|${r.order_id}|${r.product_code}`));
+    const newKeySet = new Set(flatOrders.map(r => `${r.account_code}|${r.order_id}|${r.product_code}`));
     let changed = false;
     let newOrdersCount = 0;
     let updatedOrdersCount = 0;
     
     // Check for new rows
     for (const row of flatOrders) {
-      if (!existingKeySet.has(`${row.order_id}|${row.product_code}`)) {
+      if (!existingKeySet.has(`${row.account_code}|${row.order_id}|${row.product_code}`)) {
         changed = true;
         newOrdersCount++;
       }
@@ -1053,7 +1057,8 @@ class ShipwayService {
     
     // ALWAYS update is_in_new_order flags (regardless of other changes)
     try {
-      // Step 1: Mark all existing orders as NOT in new order (is_in_new_order = 0)
+      // Step 1: Mark all existing orders for THIS STORE as NOT in new order (is_in_new_order = 0)
+      // IMPORTANT: Only update orders from current store (already filtered by account_code)
       for (const existingOrder of existingOrders) {
         await database.updateOrder(existingOrder.unique_id, {
           is_in_new_order: false
@@ -1062,13 +1067,14 @@ class ShipwayService {
       
       // Step 2: Insert or update orders from current Shipway API (is_in_new_order = 1)
       for (const orderRow of flatOrders) {
-        const key = `${orderRow.order_id}|${orderRow.product_code}`;
+        const key = `${orderRow.account_code}|${orderRow.order_id}|${orderRow.product_code}`;
         // Set is_in_new_order = 1 for all orders from current Shipway API
         orderRow.is_in_new_order = true;
         
         if (existingKeySet.has(key)) {
           // Check if existing order needs update by comparing key fields
-          const existingOrder = existingOrders.find(o => `${o.order_id}|${o.product_code}` === key);
+          // IMPORTANT: Include account_code in matching to prevent cross-store data interaction
+          const existingOrder = existingOrders.find(o => `${o.account_code}|${o.order_id}|${o.product_code}` === key);
           if (existingOrder) {
             // Only update if there are actual changes to order data
             const hasDataChanges = (
