@@ -203,6 +203,9 @@ export function VendorDashboard() {
   const [ordersError, setOrdersError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [ordersRefreshing, setOrdersRefreshing] = useState(false);
+  
+  // Use ref to store latest lastUpdated value to avoid stale closure in polling
+  const lastUpdatedRef = useRef<string | null>(null);
 
   // Ref for scrollable content area
   const scrollableContentRef = useRef<HTMLDivElement>(null);
@@ -422,28 +425,36 @@ export function VendorDashboard() {
     }
   };
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
+  // Commented out - fetchOrders() is already called in the useEffect at line 629
+  // useEffect(() => {
+  //   fetchOrders();
+  // }, []);
 
   const fetchOrders = async () => {
     setOrdersLoading(true);
     setOrdersError("");
     try {
-      const response = await apiClient.getOrders();
-      if (response.success && response.data && Array.isArray(response.data.orders)) {
-        setOrders(response.data.orders);
-      } else if (response.success && response.data && response.data.orders) {
-        setOrders([response.data.orders]);
+      // Run both API calls in parallel for better performance
+      const [ordersResponse, lastUpdatedResponse] = await Promise.all([
+        apiClient.getOrders(),
+        apiClient.getOrdersLastUpdated()
+      ]);
+      
+      // Process orders response
+      if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
+        setOrders(ordersResponse.data.orders);
+      } else if (ordersResponse.success && ordersResponse.data && ordersResponse.data.orders) {
+        setOrders([ordersResponse.data.orders]);
       } else {
         setOrders([]);
         setOrdersError("No orders found");
       }
       
-      // Get initial last updated timestamp
-      const lastUpdatedResponse = await apiClient.getOrdersLastUpdated();
+      // Process last updated response
       if (lastUpdatedResponse.success && lastUpdatedResponse.data) {
-        setLastUpdated(lastUpdatedResponse.data.lastUpdated);
+        const timestamp = lastUpdatedResponse.data.lastUpdated;
+        setLastUpdated(timestamp);
+        lastUpdatedRef.current = timestamp; // Keep ref in sync
       }
     } catch (err: any) {
       setOrdersError(err.message || "Failed to fetch orders");
@@ -657,37 +668,119 @@ export function VendorDashboard() {
     }
   }, [activeTab, tabFilters["my-orders"].searchTerm, tabFilters["my-orders"].dateFrom, tabFilters["my-orders"].dateTo, selectedLabelFilter]);
 
-  // Real-time polling for order updates
+  // Real-time polling for order updates (only when tab is visible)
   useEffect(() => {
     if (!user?.role || user.role !== "vendor") return;
 
+    let interval: NodeJS.Timeout | null = null;
+
     const pollForUpdates = async () => {
+      // Skip polling if tab is hidden
+      if (document.hidden) {
+        return;
+      }
+
       try {
         const response = await apiClient.getOrdersLastUpdated();
-        if (response.success && response.data && response.data.lastUpdated !== lastUpdated && lastUpdated !== null) {
-          console.log('🔄 Orders updated by another vendor, refreshing...');
+        if (response.success && response.data) {
+          const newLastUpdated = response.data.lastUpdated;
+          const currentLastUpdated = lastUpdatedRef.current; // Use ref to get latest value
           
-          // Refresh orders
-          const ordersResponse = await apiClient.getOrders();
-          if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
-            setOrders(ordersResponse.data.orders);
-            console.log('✅ FRONTEND: Orders refreshed due to external update');
+          // Debug logging
+          if (currentLastUpdated !== null && newLastUpdated !== currentLastUpdated) {
+            console.log('🔄 Orders updated by another vendor, refreshing...');
+            console.log('  - Old timestamp:', currentLastUpdated);
+            console.log('  - New timestamp:', newLastUpdated);
+            
+            // Refresh orders
+            const ordersResponse = await apiClient.getOrders();
+            if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
+              setOrders(ordersResponse.data.orders);
+              console.log('✅ FRONTEND: Orders refreshed due to external update');
+            }
+            
+            // Update both state and ref
+            setLastUpdated(newLastUpdated);
+            lastUpdatedRef.current = newLastUpdated;
+          } else if (currentLastUpdated === null) {
+            // First time - just set the timestamp
+            setLastUpdated(newLastUpdated);
+            lastUpdatedRef.current = newLastUpdated;
+          } else {
+            // Timestamp hasn't changed - no need to refresh
+            // console.log('ℹ️ No changes detected, skipping refresh');
           }
-          
-          setLastUpdated(response.data.lastUpdated);
-        } else if (response.success && response.data && lastUpdated === null) {
-          setLastUpdated(response.data.lastUpdated);
         }
       } catch (error) {
         console.error('Error polling for updates:', error);
       }
     };
 
-    // Poll every 5 seconds
-    const interval = setInterval(pollForUpdates, 5000);
+    const startPolling = () => {
+      // Clear existing interval if any
+      if (interval) {
+        clearInterval(interval);
+      }
+      
+      // Only start polling if tab is visible
+      if (!document.hidden) {
+        // Poll immediately on visibility
+        pollForUpdates();
+        
+        // Then poll every 15 seconds
+        interval = setInterval(pollForUpdates, 10000);
+      }
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    // Handle visibility changes
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Tab is hidden - stop polling
+        stopPolling();
+        console.log('⏸️ Polling paused (tab hidden)');
+      } else {
+        // Tab is visible - start polling
+        startPolling();
+        console.log('▶️ Polling resumed (tab visible)');
+      }
+    };
+
+    // Start polling initially if tab is visible
+    startPolling();
+
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Also handle page focus/blur for mobile web apps
+    const handleFocus = () => {
+      if (!document.hidden) {
+        startPolling();
+        console.log('▶️ Polling resumed (window focused)');
+      }
+    };
+
+    const handleBlur = () => {
+      stopPolling();
+      console.log('⏸️ Polling paused (window blurred)');
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
     
-    return () => clearInterval(interval);
-  }, [user, lastUpdated]);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [user]); // Removed lastUpdated from dependencies to prevent re-creating interval on every timestamp change
 
   const handleClaimOrder = async (unique_id: string) => {
     console.log('🔵 FRONTEND: Starting claim process');
