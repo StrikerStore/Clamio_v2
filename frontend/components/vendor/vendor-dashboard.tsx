@@ -3467,7 +3467,7 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                    <div className="rounded-md border overflow-y-auto max-h-[600px]">
+                    <div className="rounded-md border overflow-y-auto max-h-[600px]" onScroll={handleScroll}>
                       <Table>
                         <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                           <TableRow>
@@ -3813,7 +3813,7 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                  <div className="rounded-md border overflow-y-auto max-h-[600px]">
+                  <div className="rounded-md border overflow-y-auto max-h-[600px]" onScroll={handleScroll}>
                     <Table>
                       <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
