@@ -2234,17 +2234,89 @@ export function VendorDashboard() {
         // Clear selected orders
         setSelectedUnclaimedOrders([]);
         
+        // OPTIMIZATION: Update UI state directly instead of fetching all orders
+        // Remove successfully claimed orders from "All Orders" tab
+        if (successful_claims && successful_claims.length > 0) {
+          const claimedUniqueIds = successful_claims.map((claim: any) => claim.unique_id);
+          
+          console.log('🔍 FRONTEND: Verifying order statuses in database before removing from UI...');
+          console.log('  - Unique IDs to verify:', claimedUniqueIds);
+          
+          // STEP 1: Verify orders are actually marked as "claimed" in database
+          try {
+            const verifyResponse = await apiClient.verifyOrderStatuses(claimedUniqueIds);
+            
+            if (verifyResponse.success && verifyResponse.data && verifyResponse.data.statuses) {
+              const statuses = verifyResponse.data.statuses;
+              const verifiedClaimedIds = new Set<string>();
+              const notClaimedIds: string[] = [];
+              
+              // STEP 2: Check each order's status and collect only verified "claimed" orders
+              claimedUniqueIds.forEach((unique_id: string) => {
+                const orderStatus = statuses[unique_id];
+                if (orderStatus && orderStatus.status === 'claimed') {
+                  verifiedClaimedIds.add(unique_id);
+                  console.log(`✅ Verified: ${unique_id} is marked as "claimed" in database`);
+                } else {
+                  notClaimedIds.push(unique_id);
+                  console.log(`⚠️ Warning: ${unique_id} is NOT marked as "claimed" in database (status: ${orderStatus?.status || 'unknown'})`);
+                }
+              });
+              
+              if (notClaimedIds.length > 0) {
+                console.log(`⚠️ FRONTEND: ${notClaimedIds.length} orders were not verified as claimed - will NOT remove from UI`);
+                console.log('  - Not claimed unique_ids:', notClaimedIds);
+              }
+              
+              // STEP 3: Remove ONLY verified claimed orders from "All Orders" tab
+              if (verifiedClaimedIds.size > 0) {
+                console.log('🔄 FRONTEND: Removing verified claimed orders from All Orders tab...');
+                console.log('  - Verified unique IDs to remove:', Array.from(verifiedClaimedIds));
+                
+                setOrders((prevOrders) => {
+                  const filteredOrders = prevOrders.filter(
+                    (order) => !verifiedClaimedIds.has(order.unique_id)
+                  );
+                  const removedCount = prevOrders.length - filteredOrders.length;
+                  console.log(`✅ Removed ${removedCount} verified claimed orders from All Orders tab`);
+                  return filteredOrders;
+                });
+              } else {
+                console.log('⚠️ FRONTEND: No orders verified as claimed - skipping UI update');
+              }
+            } else {
+              console.log('⚠️ FRONTEND: Verification response invalid - will not remove orders from UI');
+              console.log('  - Response:', verifyResponse);
+            }
+          } catch (verifyError: any) {
+            console.log('⚠️ FRONTEND: Error verifying order statuses:', verifyError.message);
+            console.log('  - Will not remove orders from UI to prevent data inconsistency');
+            // Don't remove orders if verification fails - keep UI in sync with actual DB state
+          }
+        }
+        
+        // Refresh grouped orders for "My Orders" tab (this is fast - paginated)
+        console.log('🔄 FRONTEND: Refreshing grouped orders for My Orders tab...');
+        try {
+          setGroupedOrdersPage(1);
+          const groupedResponse = await apiClient.getGroupedOrders(1, 50);
+          if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+            setGroupedOrders(groupedResponse.data.groupedOrders);
+            if (groupedResponse.data.pagination) {
+              setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
+              setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
+            }
+            if (typeof groupedResponse.data.totalQuantity === 'number') {
+              setGroupedOrdersTotalQuantity(groupedResponse.data.totalQuantity);
+            }
+            console.log('✅ Grouped orders refreshed successfully');
+          }
+        } catch (groupedError) {
+          console.log('⚠️ FRONTEND: Failed to refresh grouped orders, but bulk claim was successful');
+        }
+        
         // Highlight My Orders tab to show the change
         highlightTab("my-orders");
-        
-        // Refresh orders to update the UI
-        console.log('🔄 FRONTEND: Refreshing orders after bulk claim...');
-        try {
-          await refreshOrders();
-          console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
-        } catch (refreshError) {
-          console.log('⚠️ FRONTEND: Failed to refresh orders, but bulk claim was successful');
-        }
         
       } else {
         console.log('❌ FRONTEND: Bulk claim failed');

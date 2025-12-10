@@ -67,6 +67,8 @@ class ApiClient {
       
       // Check if response is JSON
       const contentType = response.headers.get('content-type')
+      let data: any;
+      
       if (!contentType || !contentType.includes('application/json')) {
         // If not JSON, read as text to get the actual error
         const text = await response.text()
@@ -79,24 +81,57 @@ class ApiClient {
         })
         
         if (response.status === 404) {
-          throw new Error(`API endpoint not found: ${endpoint}`)
+          throw new Error(`API endpoint not found: ${endpoint}. Please ensure the backend server is running and has been restarted to register new endpoints.`)
         } else if (response.status >= 500) {
           throw new Error(`Server error: ${response.status} ${response.statusText}`)
         } else {
-          throw new Error(`Invalid response format: Expected JSON, got ${contentType}`)
+          throw new Error(`Invalid response format: Expected JSON, got ${contentType || 'unknown'}. Status: ${response.status}`)
         }
       }
       
-      const data = await response.json()
+      try {
+        data = await response.json()
+      } catch (jsonError) {
+        // If JSON parsing fails, it's not a valid JSON response
+        console.error('Failed to parse JSON response:', jsonError)
+        throw new Error(`Invalid JSON response from server. Status: ${response.status}. The endpoint may not exist or the server may need to be restarted.`)
+      }
 
       if (!response.ok) {
-        // Log detailed validation errors for debugging
-        if (data.errors && Array.isArray(data.errors)) {
-          console.error('Validation errors:', data.errors)
-          const errorMessages = data.errors.map((err: any) => `${err.field}: ${err.message}`).join(', ')
-          throw new Error(`${data.message}: ${errorMessages}`)
+        // Don't log errors for verification endpoint - it's optional and non-critical
+        const isVerificationEndpoint = endpoint.includes('/verify-status');
+        
+        if (!isVerificationEndpoint) {
+          // Log detailed error information for debugging (except for verification)
+          console.error('❌ API Error Response:', {
+            status: response.status,
+            statusText: response.statusText,
+            endpoint: endpoint,
+            data: data || 'No data received'
+          })
         }
-        throw new Error(data.message || `HTTP error! status: ${response.status}`)
+        
+        // Log detailed validation errors for debugging
+        if (data && data.errors && Array.isArray(data.errors)) {
+          if (!isVerificationEndpoint) {
+            console.error('Validation errors:', data.errors)
+          }
+          const errorMessages = data.errors.map((err: any) => `${err.field}: ${err.message}`).join(', ')
+          throw new Error(`${data.message || 'Validation error'}: ${errorMessages}`)
+        }
+        
+        // For 404 errors, provide more specific message
+        if (response.status === 404) {
+          if (isVerificationEndpoint) {
+            // Silent 404 for verification - endpoint may not exist yet
+            throw new Error(`Endpoint not found`)
+          }
+          throw new Error(`API endpoint not found: ${endpoint}. Please ensure the backend server is running and has been restarted to register new endpoints.`)
+        }
+        
+        // For other errors, use the message from the response, or provide a default
+        const errorMessage = data?.message || `HTTP error! status: ${response.status} ${response.statusText}`
+        throw new Error(errorMessage)
       }
 
       if (DEBUG_API) {
@@ -442,6 +477,33 @@ class ApiClient {
       },
       body: JSON.stringify({ unique_ids }),
     })
+  }
+
+  async verifyOrderStatuses(unique_ids: string[]): Promise<ApiResponse> {
+    console.log('🔵 API CLIENT: verifyOrderStatuses called');
+    console.log('  - unique_ids:', unique_ids);
+    
+    const vendorToken = localStorage.getItem('vendorToken')
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      return { success: false, message: 'No vendor token found' };
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/verify-status');
+    console.log('  - Method: POST');
+    console.log('  - Headers: Content-Type, Authorization');
+    console.log('  - Body:', JSON.stringify({ unique_ids }));
+
+    // Now that the backend method exists, errors should be actual errors, not missing methods
+    return this.makeRequest('/orders/verify-status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': vendorToken
+      },
+      body: JSON.stringify({ unique_ids }),
+    });
   }
 
   async getGroupedOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
