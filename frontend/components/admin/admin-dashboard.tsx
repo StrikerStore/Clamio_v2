@@ -358,6 +358,7 @@ export function AdminDashboard() {
       handover: "bg-yellow-100 text-yellow-800",
       picked: "bg-purple-100 text-purple-800",
       in_transit: "bg-indigo-100 text-indigo-800",
+      "in transit": "bg-indigo-100 text-indigo-800",
       out_for_delivery: "bg-orange-100 text-orange-800",
       delivered: "bg-green-100 text-green-800",
       rto: "bg-red-100 text-red-800",
@@ -388,6 +389,7 @@ export function AdminDashboard() {
       handover: "HANDOVER",
       picked: "PICKED",
       in_transit: "IN TRANSIT",
+      "in transit": "IN TRANSIT",
       out_for_delivery: "OUT FOR DELIVERY",
       delivered: "DELIVERED",
       rto: "RTO",
@@ -418,7 +420,8 @@ export function AdminDashboard() {
     }
 
     // Normalize status to lowercase for lookup (handles "ACTIVE", "active", etc.)
-    const normalizedStatus = (status || '').toString().trim().toLowerCase()
+    // Also normalize spaces to underscores to handle "in transit" -> "in_transit"
+    let normalizedStatus = (status || '').toString().trim().toLowerCase().replace(/\s+/g, '_')
     const statusKey = normalizedStatus as keyof typeof colors
 
     return (
