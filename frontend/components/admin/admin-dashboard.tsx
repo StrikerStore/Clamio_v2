@@ -414,12 +414,16 @@ export function AdminDashboard() {
 
     // Handle undefined or null status
     if (!status) {
-      return <Badge className="bg-gray-100 text-gray-800 text-xs truncate">UNKNOWN</Badge>
+      return <Badge variant="outline" className="bg-gray-100 text-gray-800 text-xs truncate">UNKNOWN</Badge>
     }
 
+    // Normalize status to lowercase for lookup (handles "ACTIVE", "active", etc.)
+    const normalizedStatus = (status || '').toString().trim().toLowerCase()
+    const statusKey = normalizedStatus as keyof typeof colors
+
     return (
-      <Badge className={`${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full px-1.5 py-0.5`}>
-        {displayNames[status as keyof typeof displayNames] || status.replace("_", " ").toUpperCase()}
+      <Badge variant="outline" className={`${colors[statusKey] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full px-1.5 py-0.5`}>
+        {displayNames[statusKey] || status.replace("_", " ").toUpperCase()}
       </Badge>
     )
   }
@@ -1802,7 +1806,7 @@ export function AdminDashboard() {
 
                 {/* Filters - Only show for orders, vendors, and carriers tabs */}
                 {(activeTab === "orders" || activeTab === "vendors" || activeTab === "carrier") && (
-                  <div className={`flex flex-col gap-3 mb-4 md:mb-6 ${!isMobile && 'sm:flex-row sm:items-center'}`}>
+                  <div className={`flex flex-col gap-3 ${isMobile && (activeTab === "orders" || activeTab === "vendors" || activeTab === "carrier") ? 'mb-2' : 'mb-4 md:mb-6'} ${!isMobile && 'sm:flex-row sm:items-center'}`}>
                     {/* Mobile Carrier Tab - All filters in one row */}
                     {activeTab === "carrier" && isMobile ? (
                       <div className="flex gap-1.5 items-center">
@@ -1894,6 +1898,71 @@ export function AdminDashboard() {
                                   </SelectContent>
                                 </Select>
                               </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    ) : activeTab === "vendors" && isMobile ? (
+                      <div className="flex gap-1.5 items-center">
+                        {/* Search Input */}
+                        <div className="flex-1 min-w-0">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                            <Input
+                              placeholder="Search vendors..."
+                              value={searchTerm}
+                              onChange={(e) => setSearchTerm(e.target.value)}
+                              className="pl-10 pr-10"
+                              id="admin-search-input"
+                            />
+                            {searchTerm && (
+                              <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                                type="button"
+                                title="Clear"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Status Filter - Icon only */}
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" className="w-9 h-9 p-0 justify-center flex-shrink-0">
+                              <Filter className="w-4 h-4" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-56 p-4" align="start">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-semibold text-sm">Status</h4>
+                                {statusFilter !== "all" && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-xs"
+                                    onClick={() => {
+                                      setStatusFilter("all");
+                                    }}
+                                  >
+                                    Clear
+                                  </Button>
+                                )}
+                              </div>
+                              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                <SelectTrigger className="w-full h-9">
+                                  <SelectValue placeholder="All Status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Status</SelectItem>
+                                  <SelectItem value="active">Active</SelectItem>
+                                  <SelectItem value="pending">Pending</SelectItem>
+                                  <SelectItem value="inactive">Inactive</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </div>
                           </PopoverContent>
                         </Popover>
@@ -2180,8 +2249,8 @@ export function AdminDashboard() {
                           )}
                         </div>
 
-                        {/* Status Filter for Non-Orders tabs and Desktop */}
-                        {(activeTab !== "orders" || !isMobile) && (
+                        {/* Status Filter for Non-Orders tabs and Desktop (exclude vendors mobile as it's inline) */}
+                        {(activeTab !== "orders" || !isMobile) && !(activeTab === "vendors" && isMobile) && (
                           <Select value={statusFilter} onValueChange={setStatusFilter}>
                             <SelectTrigger className="w-full sm:w-40">
                               <Filter className="w-4 h-4 mr-2" />
@@ -2756,8 +2825,8 @@ export function AdminDashboard() {
                                   />
                                 </div>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className={`text-xs sm:text-sm font-medium truncate ${String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-600' : 'text-blue-600'}`}>
-                                    {order.vendor_name || 'Unclaimed'}
+                                  <span className="text-xs sm:text-sm font-mono text-purple-600 truncate">
+                                    AWB: {order.awb || order.airway_bill || order.airwaybill || 'NA'}
                                   </span>
                                   {getStatusBadge(order.status)}
                                 </div>
@@ -2800,8 +2869,8 @@ export function AdminDashboard() {
                                 </div>
                               </div>
 
-                              {/* Details Row - Date, Qty, Customer side by side */}
-                              <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-xs sm:text-sm">
+                              {/* Details Row - Date, Qty, Vendor, Customer side by side */}
+                              <div className="grid grid-cols-4 gap-1.5 sm:gap-2 text-xs sm:text-sm">
                                 <div>
                                   <span className="text-gray-500">Date:</span>
                                   <p className="font-medium truncate">
@@ -2818,8 +2887,16 @@ export function AdminDashboard() {
                                   <p className="font-medium truncate">{order.quantity || '-'}</p>
                                 </div>
                                 <div>
+                                  <span className="text-gray-500">Vendor:</span>
+                                  <p className={`font-medium truncate ${String(order.vendor_name || '').toLowerCase().includes('unclaimed') ? 'text-red-600' : 'text-blue-600'}`}>
+                                    {order.vendor_name || 'Unclaimed'}
+                                  </p>
+                                </div>
+                                <div>
                                   <span className="text-gray-500">Customer:</span>
-                                  <p className="font-medium truncate">{order.customer_name || 'N/A'}</p>
+                                  <p className="font-medium break-words">
+                                    {order.customer_name ? order.customer_name.split(' ')[0] : 'N/A'}
+                                  </p>
                                 </div>
                               </div>
                               </div>
