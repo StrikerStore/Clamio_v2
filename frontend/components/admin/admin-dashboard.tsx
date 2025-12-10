@@ -357,8 +357,8 @@ export function AdminDashboard() {
       in_pack: "bg-blue-100 text-blue-800",
       handover: "bg-yellow-100 text-yellow-800",
       picked: "bg-purple-100 text-purple-800",
-      in_transit: "bg-indigo-100 text-indigo-800",
-      "in transit": "bg-indigo-100 text-indigo-800",
+      in_transit: "bg-orange-100 text-orange-800",
+      "in transit": "bg-orange-100 text-orange-800",
       out_for_delivery: "bg-orange-100 text-orange-800",
       delivered: "bg-green-100 text-green-800",
       rto: "bg-red-100 text-red-800",
@@ -372,6 +372,10 @@ export function AdminDashboard() {
       "returned": "bg-red-100 text-red-800",
       "cancelled": "bg-gray-100 text-gray-800",
       "failed delivery": "bg-red-100 text-red-800",
+      "pickup failed": "bg-red-100 text-red-800",
+      "pickup_failed": "bg-red-100 text-red-800",
+      "rto delivered": "bg-red-100 text-red-800",
+      "rto_delivered": "bg-red-100 text-red-800",
       // Legacy status values for backward compatibility
       claimed: "bg-blue-100 text-blue-800",
       ready_for_handover: "bg-purple-100 text-purple-800",
@@ -403,6 +407,10 @@ export function AdminDashboard() {
       "returned": "RETURNED",
       "cancelled": "CANCELLED",
       "failed delivery": "FAILED DELIVERY",
+      "pickup failed": "PICKUP FAILED",
+      "pickup_failed": "PICKUP FAILED",
+      "rto delivered": "RTO DELIVERED",
+      "rto_delivered": "RTO DELIVERED",
       // Legacy status values for backward compatibility
       claimed: "CLAIMED",
       ready_for_handover: "READY FOR HANDOVER",
@@ -425,7 +433,7 @@ export function AdminDashboard() {
     const statusKey = normalizedStatus as keyof typeof colors
 
     return (
-      <Badge variant="outline" className={`${colors[statusKey] || "bg-gray-100 text-gray-800"} text-xs sm:text-sm truncate max-w-full px-1.5 py-0.5`}>
+      <Badge variant="outline" className={`${colors[statusKey] || "bg-gray-100 text-gray-800"} text-xs truncate max-w-full px-1.5 py-0.5`}>
         {displayNames[statusKey] || status.replace("_", " ").toUpperCase()}
       </Badge>
     )
@@ -2290,7 +2298,7 @@ export function AdminDashboard() {
 
                         {/* Add New Vendor Button - Only for Vendors tab */}
                         {activeTab === "vendors" && !isMobile && (
-                          <Button onClick={() => setShowVendorModal(true)}>
+                          <Button onClick={() => setShowVendorModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white">
                             <UserPlus className="w-4 h-4 mr-2" />
                             Add New Vendor
                           </Button>
@@ -2447,6 +2455,7 @@ export function AdminDashboard() {
                         disabled={selectedOrders.length === 0}
                         variant="default"
                         size="sm"
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
                       >
                         Bulk Assign ({selectedOrders.length})
                       </Button>
@@ -4346,7 +4355,7 @@ export function AdminDashboard() {
                     {/* Add Vendor Button */}
                     <Button 
                       onClick={() => setShowVendorModal(true)}
-                      className="flex-1 h-10 sm:h-12 text-sm sm:text-base font-medium bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 border-0 shadow-lg min-w-0"
+                      className="flex-1 h-10 sm:h-12 text-sm sm:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
                     >
                       <UserPlus className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
                       <span className="truncate">Add Vendor</span>
