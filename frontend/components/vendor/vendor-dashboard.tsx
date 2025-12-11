@@ -1914,37 +1914,31 @@ export function VendorDashboard() {
     const isIOS = isIOSDevice();
     
     if (isIOS) {
-      // iOS: Use window.open() to auto-open PDF, then refocus main window
-      // This ensures PDF opens automatically AND refreshOrders() can update UI
-      console.log('🍎 iOS detected: Using window.open() with focus management');
-      const pdfWindow = window.open(url, '_blank');
+      // iOS: Use link.click() approach (more reliable than window.open() for blob URLs)
+      // This simulates a user click, which iOS Safari handles better
+      console.log('🍎 iOS detected: Using link.click() method for better iOS Safari compatibility');
       
-      // Immediately refocus main window to keep it active
+      // Create anchor element
+      const link = document.createElement('a');
+      link.href = url; // Blob URL
+      link.target = '_blank'; // Open in new tab
+      link.rel = 'noopener noreferrer'; // Security best practice
+      
+      // Append to DOM (required for iOS to recognize the element)
+      document.body.appendChild(link);
+      
+      // Programmatically click (simulates user click - better iOS support)
+      link.click();
+      
+      // Remove from DOM immediately after click
+      document.body.removeChild(link);
+      
+      // Refocus main window to keep it active
       // This ensures refreshOrders() executes properly and UI updates (green card color)
       // Also keeps polling mechanism active
       setTimeout(() => {
-        if (pdfWindow) {
-          // PDF tab opened successfully
-          window.focus(); // Bring focus back to main tab
-          console.log('✅ PDF opened, main tab refocused to keep polling active');
-        } else {
-          // Pop-up blocked, fallback to iframe
-          console.log('⚠️ window.open() blocked, falling back to iframe');
-          const iframe = document.createElement('iframe');
-          iframe.style.display = 'none';
-          iframe.style.width = '0';
-          iframe.style.height = '0';
-          iframe.style.position = 'absolute';
-          iframe.style.left = '-9999px';
-          iframe.src = url;
-          document.body.appendChild(iframe);
-          
-          setTimeout(() => {
-            if (document.body.contains(iframe)) {
-              document.body.removeChild(iframe);
-            }
-          }, 2000);
-        }
+        window.focus(); // Bring focus back to main tab
+        console.log('✅ PDF opened via link.click(), main tab refocused to keep polling active');
       }, 100); // Small delay to let PDF tab open first
       
       // Clean up blob URL after delay
