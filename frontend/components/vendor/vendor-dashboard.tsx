@@ -190,6 +190,7 @@ export function VendorDashboard() {
   const [selectedTrackingOrders, setSelectedTrackingOrders] = useState<string[]>([])
   const [bulkMarkReadyLoading, setBulkMarkReadyLoading] = useState(false)
   const [manifestDownloadLoading, setManifestDownloadLoading] = useState<string | null>(null)
+  const [claimLoading, setClaimLoading] = useState(false)
   const [vendorAddress, setVendorAddress] = useState<null | {
     warehouseId: string
     address: string
@@ -1913,22 +1914,41 @@ export function VendorDashboard() {
     const isIOS = isIOSDevice();
     
     if (isIOS) {
-      // iOS: Use iframe approach (doesn't block JavaScript execution)
-      console.log('🍎 iOS detected: Using iframe download method');
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.position = 'absolute';
-      iframe.style.left = '-9999px';
-      iframe.src = url;
-      document.body.appendChild(iframe);
+      // iOS: Use window.open() to auto-open PDF, then refocus main window
+      // This ensures PDF opens automatically AND refreshOrders() can update UI
+      console.log('🍎 iOS detected: Using window.open() with focus management');
+      const pdfWindow = window.open(url, '_blank');
       
-      // Clean up after delay
+      // Immediately refocus main window to keep it active
+      // This ensures refreshOrders() executes properly and UI updates (green card color)
+      // Also keeps polling mechanism active
       setTimeout(() => {
-        if (document.body.contains(iframe)) {
-          document.body.removeChild(iframe);
+        if (pdfWindow) {
+          // PDF tab opened successfully
+          window.focus(); // Bring focus back to main tab
+          console.log('✅ PDF opened, main tab refocused to keep polling active');
+        } else {
+          // Pop-up blocked, fallback to iframe
+          console.log('⚠️ window.open() blocked, falling back to iframe');
+          const iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.position = 'absolute';
+          iframe.style.left = '-9999px';
+          iframe.src = url;
+          document.body.appendChild(iframe);
+          
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+          }, 2000);
         }
+      }, 100); // Small delay to let PDF tab open first
+      
+      // Clean up blob URL after delay
+      setTimeout(() => {
         window.URL.revokeObjectURL(url);
       }, 2000);
     } else {
@@ -2210,6 +2230,9 @@ export function VendorDashboard() {
     console.log('🔵 FRONTEND: Starting bulk claim process');
     console.log('  - selected orders:', selectedUnclaimedOrders);
 
+    // Set loading state
+    setClaimLoading(true);
+
     try {
       console.log('📤 FRONTEND: Calling apiClient.bulkClaimOrders...');
       const response = await apiClient.bulkClaimOrders(selectedUnclaimedOrders);
@@ -2337,6 +2360,9 @@ export function VendorDashboard() {
         description: err.message || 'Network error occurred',
         variant: 'destructive',
       });
+    } finally {
+      // Clear loading state
+      setClaimLoading(false);
     }
   }
 
@@ -3126,11 +3152,20 @@ export function VendorDashboard() {
                   {activeTab === "all-orders" && !isMobile && (
                     <Button 
                       onClick={() => handleBulkClaimOrders()} 
-                      disabled={selectedUnclaimedOrders.length === 0} 
+                      disabled={selectedUnclaimedOrders.length === 0 || claimLoading} 
                       className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                     >
-                      <Package className="w-4 h-4 mr-2" />
-                      Claim Selected ({selectedUnclaimedOrders.length})
+                      {claimLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Claiming...
+                        </>
+                      ) : (
+                        <>
+                          <Package className="w-4 h-4 mr-2" />
+                          Claim Selected ({selectedUnclaimedOrders.length})
+                        </>
+                      )}
                     </Button>
                   )}
                   
@@ -4088,11 +4123,20 @@ export function VendorDashboard() {
                     {/* Bulk Claim Button */}
                     <Button 
                       onClick={() => handleBulkClaimOrders()} 
-                      disabled={selectedUnclaimedOrders.length === 0} 
+                      disabled={selectedUnclaimedOrders.length === 0 || claimLoading} 
                       className="flex-1 h-10 sm:h-12 text-base sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
                     >
-                      <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                      <span className="truncate">Claim ({selectedUnclaimedOrders.length})</span>
+                      {claimLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
+                          <span className="truncate">Claiming...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                          <span className="truncate">Claim ({selectedUnclaimedOrders.length})</span>
+                        </>
+                      )}
                     </Button>
                   </div>
                 </div>
