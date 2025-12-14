@@ -40,7 +40,7 @@ import {
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { useDeviceType } from "@/hooks/use-mobile"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { DatePicker } from "@/components/ui/date-picker"
 import { apiClient } from "@/lib/api"
 import { vendorErrorTracker } from "@/lib/vendorErrorTracker"
@@ -257,6 +257,17 @@ export function VendorDashboard() {
   // Loading states for label downloads
   const [labelDownloadLoading, setLabelDownloadLoading] = useState<{[key: string]: boolean}>({})
   const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false)
+  
+  // Merge confirmation dialog state
+  const [showMergeDialog, setShowMergeDialog] = useState(false)
+  const [mergeDialogData, setMergeDialogData] = useState<{
+    successful: string[]
+    failed: string[]
+    totalSuccessful: number
+    totalFailed: number
+  } | null>(null)
+  const [selectedMergeFormat, setSelectedMergeFormat] = useState<string>("thermal")
+  const [mergeLoading, setMergeLoading] = useState(false)
   
   // Loading states for reverse operations
   const [reverseLoading, setReverseLoading] = useState<{[key: string]: boolean}>({})
@@ -2138,18 +2149,71 @@ export function VendorDashboard() {
 
     try {
       toast({
-        title: "Bulk Download Started",
-        description: `Generating ${labelFormat} labels for ${selectedOrders.length} orders...`,
+        title: "Generating Labels",
+        description: `Generating labels for ${selectedOrders.length} orders...`,
       })
 
-      console.log('🔵 FRONTEND: Starting bulk download labels process');
+      console.log('🔵 FRONTEND: Starting bulk label generation process');
       console.log('  - selected orders:', selectedOrders);
       console.log('  - tab:', tab);
 
-      // Call the bulk download labels API with format parameter
-      const blob = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat);
+      // Step 1: Generate labels only (without merging)
+      const generateResponse = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat, true);
       
-      console.log('📥 FRONTEND: Bulk download labels response received');
+      console.log('📥 FRONTEND: Label generation response received');
+      console.log('  - response:', generateResponse);
+
+      // Check if response is ApiResponse (from generate_only call)
+      if (generateResponse && 'success' in generateResponse && generateResponse.success) {
+        const data = generateResponse.data;
+        
+        // Show merge confirmation dialog
+        setMergeDialogData({
+          successful: data.successful || [],
+          failed: data.failed || [],
+          totalSuccessful: data.total_successful || 0,
+          totalFailed: data.total_failed || 0
+        });
+        setSelectedMergeFormat(labelFormat); // Default to current label format
+        setShowMergeDialog(true);
+      } else {
+        throw new Error('Invalid response from label generation');
+      }
+
+    } catch (error) {
+      console.error('❌ FRONTEND: Bulk label generation error:', error);
+      toast({
+        title: 'Label Generation Failed',
+        description: error instanceof Error ? error.message : 'An error occurred while generating labels',
+        variant: 'destructive',
+      })
+    } finally {
+      // Clear bulk download loading state
+      setBulkDownloadLoading(false);
+    }
+  }
+
+  const handleMergeAndDownload = async () => {
+    if (!mergeDialogData || mergeDialogData.successful.length === 0) {
+      return;
+    }
+
+    setMergeLoading(true);
+
+    try {
+      toast({
+        title: "Merging Labels",
+        description: `Merging ${mergeDialogData.successful.length} labels into PDF (${selectedMergeFormat} format)...`,
+      })
+
+      console.log('🔵 FRONTEND: Starting PDF merge process');
+      console.log('  - order_ids:', mergeDialogData.successful);
+      console.log('  - format:', selectedMergeFormat);
+
+      // Step 2: Call merge endpoint with selected format
+      const blob = await apiClient.bulkDownloadLabelsMerge(mergeDialogData.successful, selectedMergeFormat);
+      
+      console.log('📥 FRONTEND: PDF merge response received');
       console.log('  - blob size:', blob.size);
       console.log('  - blob type:', blob.type);
       
@@ -2160,54 +2224,65 @@ export function VendorDashboard() {
       const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
       const vendorId = user?.warehouseId || 'unknown';
       const vendorCity = vendorAddress?.city || 'unknown';
-      const filename = `${vendorId}_${vendorCity}_${currentDate}_${labelFormat}.pdf`;
+      const filename = `${vendorId}_${vendorCity}_${currentDate}_${selectedMergeFormat}.pdf`;
       
       // Download using iOS-compatible method
       await downloadFile(url, filename);
       
-      console.log('✅ FRONTEND: Bulk labels PDF downloaded successfully');
+      console.log('✅ FRONTEND: Bulk labels PDF merged and downloaded successfully');
       
-      // Check if there are warnings
-      const warnings = (blob as any)._warnings;
-      const failedOrders = (blob as any)._failedOrders;
-      
-      if (warnings && failedOrders && failedOrders.length > 0) {
-        console.log('⚠️ FRONTEND: Some orders failed during bulk download');
-        console.log('  - Failed orders:', failedOrders);
-        
-        // Show warning toast
+      // Show success toast
+      if (mergeDialogData.totalFailed > 0) {
         toast({
           title: "⚠️ Bulk Download Completed with Warnings",
-          description: `Downloaded labels successfully, but ${failedOrders.length} order(s) failed. Please contact admin for: ${failedOrders.join(', ')}`,
+          description: `Downloaded labels successfully, but ${mergeDialogData.totalFailed} order(s) failed. Please contact admin.`,
           className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
         });
       } else {
         toast({
           title: "Bulk Download Complete",
-          description: `Successfully downloaded labels for ${selectedOrders.length} orders`,
+          description: `Successfully downloaded labels for ${mergeDialogData.totalSuccessful} orders`,
         });
       }
 
-      // Refresh orders to update the UI (works immediately on iOS with iframe approach)
-      await refreshOrders();
+      // Close dialog
+      setShowMergeDialog(false);
+      setMergeDialogData(null);
+
+      // OPTIMIZATION: Only refresh "My Orders" tab with pagination (fast) instead of all orders (slow)
+      console.log('🔄 FRONTEND: Refreshing grouped orders for My Orders tab...');
+      try {
+        setGroupedOrdersPage(1);
+        const groupedResponse = await apiClient.getGroupedOrders(1, 50);
+        if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+          setGroupedOrders(groupedResponse.data.groupedOrders);
+          if (groupedResponse.data.pagination) {
+            setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
+            setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
+          }
+          console.log('✅ FRONTEND: Grouped orders refreshed successfully');
+        }
+      } catch (refreshError) {
+        console.log('⚠️ FRONTEND: Failed to refresh grouped orders, but bulk download was successful:', refreshError);
+      }
 
       // Clear selected orders
-      if (tab === "my-orders") {
+      const activeTab = selectedMyOrders.length > 0 ? "my-orders" : "all-orders";
+      if (activeTab === "my-orders") {
         setSelectedMyOrders([])
       } else {
         setSelectedOrdersForDownload([])
       }
       
     } catch (error) {
-      console.error('❌ FRONTEND: Bulk download labels error:', error);
+      console.error('❌ FRONTEND: PDF merge error:', error);
       toast({
-        title: 'Bulk Download Failed',
-        description: error instanceof Error ? error.message : 'An error occurred while downloading labels',
+        title: 'PDF Merge Failed',
+        description: error instanceof Error ? error.message : 'An error occurred while merging PDFs',
         variant: 'destructive',
       })
     } finally {
-      // Clear bulk download loading state
-      setBulkDownloadLoading(false);
+      setMergeLoading(false);
     }
   }
 
@@ -4921,6 +4996,137 @@ export function VendorDashboard() {
           </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Merge Confirmation Dialog */}
+      <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
+        <DialogContent 
+          className={`${isMobile ? 'max-w-[95vw] p-4' : 'max-w-md'}`}
+          onInteractOutside={(e) => {
+            // Prevent closing when clicking outside the dialog
+            // User must explicitly click Cancel or Merge & Download
+            e.preventDefault();
+          }}
+          onEscapeKeyDown={(e) => {
+            // Prevent closing when pressing Escape key
+            // User must explicitly click Cancel or Merge & Download
+            e.preventDefault();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className={isMobile ? 'text-lg' : 'text-xl'}>
+              Labels Generated Successfully!
+            </DialogTitle>
+            <DialogDescription className={isMobile ? 'text-sm' : ''}>
+              Select a format to merge and download your labels
+            </DialogDescription>
+          </DialogHeader>
+          
+          {mergeDialogData && (
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-green-600" />
+                <span className="text-sm font-medium text-green-700">
+                  {mergeDialogData.totalSuccessful} labels generated
+                </span>
+              </div>
+              {mergeDialogData.totalFailed > 0 && (
+                <div className="flex items-center gap-2">
+                  <X className="w-4 h-4 text-red-600" />
+                  <span className="text-sm font-medium text-red-700">
+                    {mergeDialogData.totalFailed} failed
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-base font-semibold mb-3 block">
+                Select Merge Format:
+              </Label>
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="mergeFormat"
+                    value="thermal"
+                    checked={selectedMergeFormat === "thermal"}
+                    onChange={(e) => setSelectedMergeFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <div>
+                    <span className="font-medium">Thermal (Default)</span>
+                    <p className="text-sm text-gray-500">4x6 labels in sequence</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="mergeFormat"
+                    value="a4"
+                    checked={selectedMergeFormat === "a4"}
+                    onChange={(e) => setSelectedMergeFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <div>
+                    <span className="font-medium">A4</span>
+                    <p className="text-sm text-gray-500">One label per A4 page</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="mergeFormat"
+                    value="four-in-one"
+                    checked={selectedMergeFormat === "four-in-one"}
+                    onChange={(e) => setSelectedMergeFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <div>
+                    <span className="font-medium">Four-in-One</span>
+                    <p className="text-sm text-gray-500">4 labels per A4 page</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className={isMobile ? 'flex-col gap-2' : ''}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                // Explicitly close dialog - this bypasses onOpenChange restrictions
+                setShowMergeDialog(false);
+                setMergeDialogData(null);
+              }}
+              disabled={mergeLoading}
+              className={isMobile ? 'w-full' : ''}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleMergeAndDownload}
+              disabled={mergeLoading || !mergeDialogData || mergeDialogData.successful.length === 0}
+              className={isMobile ? 'w-full' : ''}
+            >
+              {mergeLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Merging...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 mr-2" />
+                  Merge & Download
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

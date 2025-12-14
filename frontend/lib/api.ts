@@ -1068,7 +1068,7 @@ class ApiClient {
     }
   }
 
-  async bulkDownloadLabels(orderIds: string[], format: string = 'thermal'): Promise<Blob> {
+  async bulkDownloadLabels(orderIds: string[], format: string = 'thermal', generateOnly: boolean = false): Promise<Blob | ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
     
@@ -1076,6 +1076,7 @@ class ApiClient {
     console.log('  - Order IDs being sent:', orderIds);
     console.log('  - Order IDs count:', orderIds.length);
     console.log('  - Format being sent:', format);
+    console.log('  - Generate only:', generateOnly);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
     
     const config: RequestInit = {
@@ -1084,10 +1085,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_ids: orderIds, format: format })
+      body: JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format }));
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)
@@ -1100,6 +1101,14 @@ class ApiClient {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+      }
+
+      // If generate_only is true, return JSON response
+      if (generateOnly) {
+        const data = await response.json();
+        console.log('✅ Bulk labels generated successfully (generate_only=true)');
+        console.log('  - Response data:', data);
+        return data as ApiResponse;
       }
 
       // Get the blob from the response
@@ -1127,6 +1136,53 @@ class ApiClient {
       return blob
     } catch (error) {
       console.error('Bulk download labels API request failed:', error)
+      throw error
+    }
+  }
+
+  async bulkDownloadLabelsMerge(orderIds: string[], format: string = 'thermal'): Promise<Blob> {
+    // For vendor endpoints, use vendorToken instead of authHeader
+    const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
+    
+    console.log('🔍 BULK DOWNLOAD LABELS MERGE API CLIENT DEBUG:');
+    console.log('  - Order IDs being sent:', orderIds);
+    console.log('  - Order IDs count:', orderIds.length);
+    console.log('  - Format being sent:', format);
+    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    
+    const config: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(vendorToken && { 'Authorization': vendorToken }),
+      },
+      body: JSON.stringify({ order_ids: orderIds, format: format })
+    }
+
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format }));
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels-merge`, config)
+      
+      console.log('🔍 BULK DOWNLOAD LABELS MERGE API RESPONSE DEBUG:');
+      console.log('  - Status:', response.status);
+      console.log('  - OK:', response.ok);
+      console.log('  - Content-Type:', response.headers.get('content-type'));
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+      }
+
+      // Get the blob from the response
+      const blob = await response.blob()
+      console.log('✅ Bulk labels PDF merged and downloaded successfully');
+      console.log('  - Blob size:', blob.size, 'bytes');
+      console.log('  - Blob type:', blob.type);
+      
+      return blob
+    } catch (error) {
+      console.error('Bulk download labels merge API request failed:', error)
       throw error
     }
   }
