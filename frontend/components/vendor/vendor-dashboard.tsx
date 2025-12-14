@@ -1925,37 +1925,33 @@ export function VendorDashboard() {
     const isIOS = isIOSDevice();
     
     if (isIOS) {
-      // iOS: Use link.click() approach (more reliable than window.open() for blob URLs)
-      // This simulates a user click, which iOS Safari handles better
-      console.log('🍎 iOS detected: Using link.click() method for better iOS Safari compatibility');
+      // iOS: Use same approach as Android (link.click() with download attribute)
+      // Match Android's working implementation exactly
+      console.log('🍎 iOS detected: Using link.click() with download attribute (matching Android logic)');
       
-      // Create anchor element
+      // Create anchor element (same as Android)
       const link = document.createElement('a');
       link.href = url; // Blob URL
-      link.target = '_blank'; // Open in new tab
-      link.rel = 'noopener noreferrer'; // Security best practice
+      link.download = filename; // ✅ CRITICAL: Set download attribute (same as Android)
+      // NO target='_blank' - let download attribute handle it (same as Android)
       
       // Append to DOM (required for iOS to recognize the element)
       document.body.appendChild(link);
       
-      // Programmatically click (simulates user click - better iOS support)
+      // Programmatically click (same as Android)
       link.click();
       
-      // Remove from DOM immediately after click
+      // Remove from DOM immediately after click (same as Android)
       document.body.removeChild(link);
       
-      // Refocus main window to keep it active
-      // This ensures refreshOrders() executes properly and UI updates (green card color)
-      // Also keeps polling mechanism active
-      setTimeout(() => {
-        window.focus(); // Bring focus back to main tab
-        console.log('✅ PDF opened via link.click(), main tab refocused to keep polling active');
-      }, 100); // Small delay to let PDF tab open first
+      // Clean up blob URL immediately (same as Android)
+      window.URL.revokeObjectURL(url);
       
-      // Clean up blob URL after delay
+      // Refocus main window to keep it active (iOS-specific addition for polling)
       setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-      }, 2000);
+        window.focus(); // Bring focus back to main tab to keep polling active
+        console.log('✅ PDF downloaded, main tab refocused to keep polling active');
+      }, 100);
     } else {
       // Non-iOS: Use link.click() approach
       console.log('📱 Non-iOS device: Using link.click() download method');
@@ -3869,7 +3865,7 @@ export function VendorDashboard() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
                                     {(order.current_shipment_status || order.status) && (
-                                      <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                      <div className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
                                         {order.current_shipment_status || order.status}
                                       </div>
                                     )}
@@ -4086,7 +4082,7 @@ export function VendorDashboard() {
                             </TableCell>
                             <TableCell>
                               {(order.current_shipment_status || order.status) && (
-                                <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block whitespace-nowrap ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
                                   {order.current_shipment_status || order.status}
                                 </div>
                               )}

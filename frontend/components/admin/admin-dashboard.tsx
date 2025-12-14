@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Separator } from "@/components/ui/separator"
 import { DatePicker } from "@/components/ui/date-picker"
 import {
   Popover,
@@ -207,6 +208,9 @@ export function AdminDashboard() {
     phone: "",
     warehouseId: "",
     contactNumber: "",
+    address: "",
+    city: "",
+    pincode: "",
     password: "",
     confirmPassword: "",
   })
@@ -224,7 +228,7 @@ export function AdminDashboard() {
   const [vendorDialogVendor, setVendorDialogVendor] = useState<any>(null)
   const [showVendorViewDialog, setShowVendorViewDialog] = useState(false)
   const [showVendorEditDialog, setShowVendorEditDialog] = useState(false)
-  const [editVendorForm, setEditVendorForm] = useState({ name: "", email: "", phone: "", status: "active", warehouseId: "", contactNumber: "" })
+  const [editVendorForm, setEditVendorForm] = useState({ name: "", email: "", phone: "", status: "active", warehouseId: "", contactNumber: "", address: "", city: "", pincode: "" })
   const [newCarrier, setNewCarrier] = useState({
     name: "",
     priority: 1,
@@ -617,19 +621,19 @@ export function AdminDashboard() {
   }
 
   const handleAddVendor = async () => {
-    if (!newVendor.name || !newVendor.email || !newVendor.phone || !newVendor.password || !newVendor.confirmPassword) {
+    if (!newVendor.name || !newVendor.email || !newVendor.phone || !newVendor.warehouseId || !newVendor.password || !newVendor.confirmPassword) {
       toast({
         title: "Missing Information",
-        description: "Please fill in all vendor details",
+        description: "Please fill in all required vendor details",
         variant: "destructive",
       })
       return
     }
 
-    if (!vendorWarehouseVerified) {
+    if (newVendor.password !== newVendor.confirmPassword) {
       toast({
-        title: "Verify Warehouse",
-        description: "Please verify the warehouse ID before creating vendor",
+        title: "Password Mismatch",
+        description: "Passwords do not match",
         variant: "destructive",
       })
       return
@@ -642,18 +646,19 @@ export function AdminDashboard() {
         phone: newVendor.phone,
         password: newVendor.password,
         role: 'vendor',
-        warehouseId: newVendor.warehouseId,
-        contactNumber: newVendor.contactNumber,
+        warehouseId: newVendor.warehouseId.trim(),
         status: 'active',
+        ...(newVendor.contactNumber && { contactNumber: newVendor.contactNumber }),
+        ...(newVendor.address && { address: newVendor.address.trim() }),
+        ...(newVendor.city && { city: newVendor.city.trim() }),
+        ...(newVendor.pincode && { pincode: newVendor.pincode.trim() }),
       })
       if (response.success) {
         toast({
           title: "Vendor Added",
           description: `${newVendor.name} has been added successfully`,
         })
-        setNewVendor({ name: "", email: "", phone: "", warehouseId: "", contactNumber: "", password: "", confirmPassword: "" })
-        setVendorWarehouseVerified(false)
-        setVendorWarehouseInfo(null)
+        setNewVendor({ name: "", email: "", phone: "", warehouseId: "", contactNumber: "", address: "", city: "", pincode: "", password: "", confirmPassword: "" })
         setShowVendorModal(false)
         fetchVendors()
       } else {
@@ -2495,99 +2500,110 @@ export function AdminDashboard() {
 
                 {/* Add Vendor Dialog - Accessible from both desktop and mobile */}
                 <Dialog open={showVendorModal} onOpenChange={setShowVendorModal}>
-                  <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[85vh]' : 'max-w-2xl max-h-[85vh]'} overflow-y-auto`}>
+                  <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh]' : 'max-w-2xl max-h-[90vh]'} overflow-y-auto`}>
                             <DialogHeader>
                               <DialogTitle>Add New Vendor</DialogTitle>
-                              <DialogDescription>Enter vendor details to add them to the system</DialogDescription>
+                              <DialogDescription>Create a new vendor account with full system access</DialogDescription>
                             </DialogHeader>
-                            <div className="space-y-4">
-                              <div>
-                                <Label htmlFor="vendor-name">Vendor Name</Label>
-                                <Input
-                                  id="vendor-name"
-                                  value={newVendor.name}
-                                  onChange={(e) => setNewVendor({ ...newVendor, name: e.target.value })}
-                                  placeholder="Enter vendor name"
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor="vendor-email">Email</Label>
-                                <Input
-                                  id="vendor-email"
-                                  type="email"
-                                  value={newVendor.email}
-                                  onChange={(e) => setNewVendor({ ...newVendor, email: e.target.value })}
-                                  placeholder="Enter email address"
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor="vendor-phone">Phone</Label>
-                                <Input
-                                  id="vendor-phone"
-                                  value={newVendor.phone}
-                                  onChange={(e) => setNewVendor({ ...newVendor, phone: e.target.value })}
-                                  placeholder="Enter phone number"
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor="vendor-warehouse">Warehouse ID</Label>
-                                <div className="flex items-center gap-2">
+                            <form onSubmit={(e) => { e.preventDefault(); handleAddVendor(); }} className="space-y-6">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-name" className="text-sm font-medium text-gray-700">Full Name *</Label>
+                                  <Input
+                                    id="vendor-name"
+                                    value={newVendor.name}
+                                    onChange={(e) => setNewVendor({ ...newVendor, name: e.target.value })}
+                                    required
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Enter full name"
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-email" className="text-sm font-medium text-gray-700">Email Address *</Label>
+                                  <Input
+                                    id="vendor-email"
+                                    type="email"
+                                    value={newVendor.email}
+                                    onChange={(e) => setNewVendor({ ...newVendor, email: e.target.value })}
+                                    required
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Enter email address"
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-phone" className="text-sm font-medium text-gray-700">Phone Number *</Label>
+                                  <Input
+                                    id="vendor-phone"
+                                    value={newVendor.phone}
+                                    onChange={(e) => setNewVendor({ ...newVendor, phone: e.target.value })}
+                                    required
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Enter phone number"
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-warehouse" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
                                   <Input
                                     id="vendor-warehouse"
                                     value={newVendor.warehouseId}
                                     onChange={(e) => setNewVendor({ ...newVendor, warehouseId: e.target.value })}
+                                    required
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
                                     placeholder="Enter warehouse ID"
                                   />
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleVerifyVendorWarehouse()}
-                                    disabled={vendorWarehouseVerifyLoading || !newVendor.warehouseId.trim()}
-                                  >
-                                    {vendorWarehouseVerifyLoading ? 'Verifying...' : 'Verify'}
-                                  </Button>
                                 </div>
-                                {vendorWarehouseVerified && vendorWarehouseInfo && (
-                                  <p className="text-xs text-green-700 mt-1">
-                                    Verified: {vendorWarehouseInfo.address}, {vendorWarehouseInfo.city}, {vendorWarehouseInfo.state}, {vendorWarehouseInfo.country} (Pincode: {vendorWarehouseInfo.pincode})
-                                  </p>
-                                )}
-                                {vendorWarehouseVerifyError && !vendorWarehouseVerifyLoading && (
-                                  <p className="text-xs text-red-600 mt-1">{vendorWarehouseVerifyError}</p>
-                                )}
-                              </div>
-                              <div>
-                                <Label htmlFor="vendor-contact">Contact Number</Label>
-                                <Input
-                                  id="vendor-contact"
-                                  value={newVendor.contactNumber}
-                                  onChange={(e) => setNewVendor({ ...newVendor, contactNumber: e.target.value })}
-                                  placeholder="Enter contact number (optional)"
-                                />
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                  <Label htmlFor="vendor-password">Password</Label>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-contact" className="text-sm font-medium text-gray-700">Contact Number</Label>
                                   <Input
-                                    id="vendor-password"
-                                    type="password"
-                                    value={newVendor.password}
-                                    onChange={(e) => setNewVendor({ ...newVendor, password: e.target.value })}
-                                    placeholder="Enter password"
+                                    id="vendor-contact"
+                                    value={newVendor.contactNumber}
+                                    onChange={(e) => setNewVendor({ ...newVendor, contactNumber: e.target.value })}
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Enter contact number (optional)"
                                   />
                                 </div>
-                                <div>
-                                  <Label htmlFor="vendor-cpassword">Confirm Password</Label>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-address" className="text-sm font-medium text-gray-700">Address</Label>
                                   <Input
-                                    id="vendor-cpassword"
-                                    type="password"
-                                    value={newVendor.confirmPassword}
-                                    onChange={(e) => setNewVendor({ ...newVendor, confirmPassword: e.target.value })}
-                                    placeholder="Confirm password"
+                                    id="vendor-address"
+                                    value={newVendor.address}
+                                    onChange={(e) => setNewVendor({ ...newVendor, address: e.target.value })}
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Enter address (optional)"
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-city" className="text-sm font-medium text-gray-700">City</Label>
+                                  <Input
+                                    id="vendor-city"
+                                    value={newVendor.city}
+                                    onChange={(e) => setNewVendor({ ...newVendor, city: e.target.value })}
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Enter city (optional)"
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-pincode" className="text-sm font-medium text-gray-700">Pincode</Label>
+                                  <Input
+                                    id="vendor-pincode"
+                                    value={newVendor.pincode}
+                                    onChange={(e) => setNewVendor({ ...newVendor, pincode: e.target.value })}
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Enter pincode (optional)"
                                   />
                                 </div>
                               </div>
+
+                              <Separator />
+
+                              {/* Password Requirements Alert */}
                               <Alert className="border-blue-200 bg-blue-50">
                                 <Shield className="h-4 w-4 text-blue-600" />
                                 <AlertDescription className="text-blue-800 text-sm">
@@ -2600,10 +2616,51 @@ export function AdminDashboard() {
                                   </ul>
                                 </AlertDescription>
                               </Alert>
-                              <Button onClick={handleAddVendor} className="w-full">
-                                Add Vendor
-                              </Button>
-                            </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-password" className="text-sm font-medium text-gray-700">Password *</Label>
+                                  <Input
+                                    id="vendor-password"
+                                    type="password"
+                                    value={newVendor.password}
+                                    onChange={(e) => setNewVendor({ ...newVendor, password: e.target.value })}
+                                    required
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Enter password"
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="vendor-cpassword" className="text-sm font-medium text-gray-700">Confirm Password *</Label>
+                                  <Input
+                                    id="vendor-cpassword"
+                                    type="password"
+                                    value={newVendor.confirmPassword}
+                                    onChange={(e) => setNewVendor({ ...newVendor, confirmPassword: e.target.value })}
+                                    required
+                                    className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                                    placeholder="Confirm password"
+                                  />
+                                </div>
+                              </div>
+
+                              <DialogFooter>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setShowVendorModal(false)
+                                    setNewVendor({ name: "", email: "", phone: "", warehouseId: "", contactNumber: "", address: "", city: "", pincode: "", password: "", confirmPassword: "" })
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
+                                  Create Vendor
+                                </Button>
+                              </DialogFooter>
+                            </form>
                   </DialogContent>
                 </Dialog>
 
@@ -2991,7 +3048,7 @@ export function AdminDashboard() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => { setVendorDialogVendor(vendor); setEditVendorForm({ name: vendor.name, email: vendor.email, phone: vendor.phone, status: vendor.status, warehouseId: vendor.warehouseId || '', contactNumber: vendor.contactNumber || '' }); setShowVendorEditDialog(true) }}
+                                  onClick={() => { setVendorDialogVendor(vendor); setEditVendorForm({ name: vendor.name, email: vendor.email, phone: vendor.phone, status: vendor.status, warehouseId: vendor.warehouseId || '', contactNumber: vendor.contactNumber || '', address: vendor.address || '', city: vendor.city || '', pincode: vendor.pincode || '' }); setShowVendorEditDialog(true) }}
                                 >
                                   <Edit className="w-3 h-3" />
                                 </Button>
@@ -3059,7 +3116,7 @@ export function AdminDashboard() {
                             </div>
                             <div className="mt-2 flex gap-2">
                               <Button size="sm" variant="outline" onClick={() => { setVendorDialogVendor(vendor); setShowVendorViewDialog(true) }}><Eye className="w-3 h-3" /></Button>
-                              <Button size="sm" variant="outline" onClick={() => { setVendorDialogVendor(vendor); setEditVendorForm({ name: vendor.name, email: vendor.email, phone: vendor.phone, status: vendor.status, warehouseId: vendor.warehouseId || '', contactNumber: vendor.contactNumber || '' }); setShowVendorEditDialog(true) }}><Edit className="w-3 h-3" /></Button>
+                              <Button size="sm" variant="outline" onClick={() => { setVendorDialogVendor(vendor); setEditVendorForm({ name: vendor.name, email: vendor.email, phone: vendor.phone, status: vendor.status, warehouseId: vendor.warehouseId || '', contactNumber: vendor.contactNumber || '', address: vendor.address || '', city: vendor.city || '', pincode: vendor.pincode || '' }); setShowVendorEditDialog(true) }}><Edit className="w-3 h-3" /></Button>
                               <Button size="sm" variant="destructive" onClick={async () => {
                                 try {
                                   // Ensure auth header exists (admin only action) - check localStorage directly
@@ -3108,125 +3165,170 @@ export function AdminDashboard() {
                 {/* Edit Vendor Dialog */}
                 {vendorDialogVendor && (
                   <Dialog open={showVendorEditDialog} onOpenChange={(open) => {
-                    // Reset edit verification state when dialog closes
-                    if (!open) {
-                      setEditWarehouseVerifyLoading(false)
-                      setEditWarehouseVerifyError("")
-                      setEditWarehouseInfo(null)
-                      setEditWarehouseVerified(false)
-                    }
                     setShowVendorEditDialog(open)
                   }}>
-                    <DialogContent>
+                    <DialogContent className={`${isMobile ? 'max-w-[95vw] max-h-[90vh]' : 'max-w-2xl max-h-[90vh]'} overflow-y-auto`}>
                       <DialogHeader>
                         <DialogTitle>Edit Vendor</DialogTitle>
                         <DialogDescription>Update vendor details</DialogDescription>
                       </DialogHeader>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <Label>Name</Label>
-                          <Input value={editVendorForm.name} onChange={(e) => setEditVendorForm({ ...editVendorForm, name: e.target.value })} />
-                        </div>
-                        <div>
-                          <Label>Email</Label>
-                          <Input type="email" value={editVendorForm.email} onChange={(e) => setEditVendorForm({ ...editVendorForm, email: e.target.value })} />
-                        </div>
-                        <div>
-                          <Label>Phone</Label>
-                          <Input value={editVendorForm.phone} onChange={(e) => setEditVendorForm({ ...editVendorForm, phone: e.target.value })} />
-                        </div>
-                        <div>
-                          <Label>Warehouse ID</Label>
-                          <Input 
-                            value={editVendorForm.warehouseId} 
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setEditVendorForm({ ...editVendorForm, warehouseId: value });
-                              // Reset verification state when input changes
-                              setEditWarehouseVerified(false);
-                              setEditWarehouseInfo(null);
-                              setEditWarehouseVerifyError("");
-                            }} 
-                          />
-                          <div className="flex items-center gap-2 mt-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleVerifyEditWarehouse(editVendorForm.warehouseId)}
-                              disabled={editWarehouseVerifyLoading || !editVendorForm.warehouseId.trim()}
-                            >
-                              {editWarehouseVerifyLoading ? 'Verifying...' : 'Verify Warehouse'}
-                            </Button>
-                            {editWarehouseVerified && (
-                              <Badge className="bg-green-100 text-green-800">Verified</Badge>
-                            )}
+                      <form onSubmit={(e) => { e.preventDefault(); }} className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-name" className="text-sm font-medium text-gray-700">Full Name *</Label>
+                            <Input
+                              id="edit-name"
+                              value={editVendorForm.name}
+                              onChange={(e) => setEditVendorForm({ ...editVendorForm, name: e.target.value })}
+                              required
+                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                              placeholder="Enter full name"
+                            />
                           </div>
-                          {editWarehouseVerified && editWarehouseInfo && (
-                            <p className="text-xs text-green-700 mt-1">
-                              {editWarehouseInfo.address && editWarehouseInfo.city && editWarehouseInfo.state && editWarehouseInfo.pincode
-                                ? `${editWarehouseInfo.address}, ${editWarehouseInfo.city}, ${editWarehouseInfo.state} - ${editWarehouseInfo.pincode}`
-                                : `${editWarehouseInfo.address || ''}${editWarehouseInfo.city ? (editWarehouseInfo.address ? ', ' : '') + editWarehouseInfo.city : ''}${editWarehouseInfo.state ? (editWarehouseInfo.address || editWarehouseInfo.city ? ', ' : '') + editWarehouseInfo.state : ''}${editWarehouseInfo.pincode ? ` - ${editWarehouseInfo.pincode}` : ''}`}
-                            </p>
-                          )}
-                          {editWarehouseVerifyError && !editWarehouseVerifyLoading && (
-                            <p className="text-xs text-red-600 mt-1">{editWarehouseVerifyError}</p>
-                          )}
-                        </div>
-                        <div>
-                          <Label>Contact Number</Label>
-                          <Input value={editVendorForm.contactNumber} onChange={(e) => setEditVendorForm({ ...editVendorForm, contactNumber: e.target.value })} />
-                        </div>
-                        <div>
-                          <Label>Status</Label>
-                          <Select value={editVendorForm.status} onValueChange={(value) => setEditVendorForm({ ...editVendorForm, status: value })}>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="active">Active</SelectItem>
-                              <SelectItem value="inactive">Inactive</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <div className="flex justify-end gap-2 mt-4">
-                        <Button variant="outline" onClick={() => setShowVendorEditDialog(false)}>Cancel</Button>
-                        <Button onClick={async () => {
-                          try {
-                            // Check localStorage directly for auth header
-                            const storedAuthHeader = localStorage.getItem('authHeader')
-                            if (!storedAuthHeader) throw new Error('Not authenticated. Please login again.')
-                            const payload: any = {}
-                            if (editVendorForm.name && editVendorForm.name.trim()) payload.name = editVendorForm.name.trim()
-                            if (editVendorForm.email && editVendorForm.email.trim()) payload.email = editVendorForm.email.trim()
-                            if (editVendorForm.phone && editVendorForm.phone.trim()) payload.phone = editVendorForm.phone.trim()
-                            if (editVendorForm.status) payload.status = editVendorForm.status
-                            if (editVendorForm.contactNumber && editVendorForm.contactNumber.trim()) payload.contactNumber = editVendorForm.contactNumber.trim()
-                            if (editVendorForm.warehouseId && editVendorForm.warehouseId.trim()) {
-                              const wid = editVendorForm.warehouseId.trim()
-                              const currentWid = String(vendorDialogVendor.warehouseId || vendorDialogVendor.warehouse_id || '')
-                              // Only send warehouseId if unchanged OR verified
-                              if (wid === currentWid || editWarehouseVerified) {
-                                payload.warehouseId = wid
-                              }
-                            }
 
-                            const res = await apiClient.updateUser(vendorDialogVendor.id, payload)
-                            if (res.success) {
-                              toast({ title: 'Vendor Updated', description: 'Changes saved.' })
-                              setShowVendorEditDialog(false)
-                              fetchVendors()
-                            } else {
-                              toast({ title: 'Error', description: res.message, variant: 'destructive' })
-                            }
-                          } catch (err: any) {
-                            // Surface backend validation errors if available
-                            const msg = err?.message || 'Failed to update vendor'
-                            toast({ title: 'Validation error', description: msg, variant: 'destructive' })
-                          }
-                        }}>Save</Button>
-                      </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-email" className="text-sm font-medium text-gray-700">Email Address *</Label>
+                            <Input
+                              id="edit-email"
+                              type="email"
+                              value={editVendorForm.email}
+                              onChange={(e) => setEditVendorForm({ ...editVendorForm, email: e.target.value })}
+                              required
+                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                              placeholder="Enter email address"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-phone" className="text-sm font-medium text-gray-700">Phone Number *</Label>
+                            <Input
+                              id="edit-phone"
+                              value={editVendorForm.phone}
+                              onChange={(e) => setEditVendorForm({ ...editVendorForm, phone: e.target.value })}
+                              required
+                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                              placeholder="Enter phone number"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-warehouse" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
+                            <Input
+                              id="edit-warehouse"
+                              value={editVendorForm.warehouseId}
+                              disabled
+                              readOnly
+                              className="bg-gray-100 border-gray-300 text-gray-600 cursor-not-allowed"
+                              placeholder="Warehouse ID (cannot be changed)"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Warehouse ID cannot be changed after creation</p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-contact" className="text-sm font-medium text-gray-700">Contact Number</Label>
+                            <Input
+                              id="edit-contact"
+                              value={editVendorForm.contactNumber}
+                              onChange={(e) => setEditVendorForm({ ...editVendorForm, contactNumber: e.target.value })}
+                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                              placeholder="Enter contact number (optional)"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-address" className="text-sm font-medium text-gray-700">Address</Label>
+                            <Input
+                              id="edit-address"
+                              value={editVendorForm.address}
+                              onChange={(e) => setEditVendorForm({ ...editVendorForm, address: e.target.value })}
+                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                              placeholder="Enter address (optional)"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-city" className="text-sm font-medium text-gray-700">City</Label>
+                            <Input
+                              id="edit-city"
+                              value={editVendorForm.city}
+                              onChange={(e) => setEditVendorForm({ ...editVendorForm, city: e.target.value })}
+                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                              placeholder="Enter city (optional)"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-pincode" className="text-sm font-medium text-gray-700">Pincode</Label>
+                            <Input
+                              id="edit-pincode"
+                              value={editVendorForm.pincode}
+                              onChange={(e) => setEditVendorForm({ ...editVendorForm, pincode: e.target.value })}
+                              className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                              placeholder="Enter pincode (optional)"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="edit-status" className="text-sm font-medium text-gray-700">Status *</Label>
+                            <Select value={editVendorForm.status} onValueChange={(value) => setEditVendorForm({ ...editVendorForm, status: value })}>
+                              <SelectTrigger className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="active">Active</SelectItem>
+                                <SelectItem value="inactive">Inactive</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        <DialogFooter>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setShowVendorEditDialog(false)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                // Check localStorage directly for auth header
+                                const storedAuthHeader = localStorage.getItem('authHeader')
+                                if (!storedAuthHeader) throw new Error('Not authenticated. Please login again.')
+                                const payload: any = {}
+                                if (editVendorForm.name && editVendorForm.name.trim()) payload.name = editVendorForm.name.trim()
+                                if (editVendorForm.email && editVendorForm.email.trim()) payload.email = editVendorForm.email.trim()
+                                if (editVendorForm.phone && editVendorForm.phone.trim()) payload.phone = editVendorForm.phone.trim()
+                                if (editVendorForm.status) payload.status = editVendorForm.status
+                                if (editVendorForm.contactNumber && editVendorForm.contactNumber.trim()) payload.contactNumber = editVendorForm.contactNumber.trim()
+                                // Include address, city, pincode if provided
+                                if (editVendorForm.address && editVendorForm.address.trim()) payload.address = editVendorForm.address.trim()
+                                if (editVendorForm.city && editVendorForm.city.trim()) payload.city = editVendorForm.city.trim()
+                                if (editVendorForm.pincode && editVendorForm.pincode.trim()) payload.pincode = editVendorForm.pincode.trim()
+                                // DO NOT include warehouseId - it cannot be changed
+
+                                const res = await apiClient.updateUser(vendorDialogVendor.id, payload)
+                                if (res.success) {
+                                  toast({ title: 'Vendor Updated', description: 'Changes saved.' })
+                                  setShowVendorEditDialog(false)
+                                  fetchVendors()
+                                } else {
+                                  toast({ title: 'Error', description: res.message, variant: 'destructive' })
+                                }
+                              } catch (err: any) {
+                                // Surface backend validation errors if available
+                                const msg = err?.message || 'Failed to update vendor'
+                                toast({ title: 'Validation error', description: msg, variant: 'destructive' })
+                              }
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            Save Changes
+                          </Button>
+                        </DialogFooter>
+                      </form>
                     </DialogContent>
                   </Dialog>
                 )}
