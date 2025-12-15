@@ -68,7 +68,7 @@ export default function RootLayout({
         {/* Android/PWA splash */}
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body className={inter.className}>
+      <body className={inter.className} suppressHydrationWarning>
         <AuthProvider>
           {children}
           <Toaster />
