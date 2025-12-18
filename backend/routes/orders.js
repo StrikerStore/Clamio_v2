@@ -3502,9 +3502,14 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
   console.log(`  - Shipping phone: ${maskedPhone} (length: ${shippingPhone.length})`);
   
   // Convert customer_info to originalOrder format expected by prepareShipwayRequestBody
+  // Get order_date from products (orders table) since customer_info may not have it
+  const orderDate = allOrderProducts[0]?.order_date || customerInfo.order_date || null;
+  
   const originalOrder = {
     order_id: originalOrderId,
+    store_code: customerInfo.store_code || '1', // Use dynamic store_code from database
     email: customerInfo.email,
+    order_date: orderDate, // Get from products table or customer_info
     b_address: customerInfo.billing_address,
     b_address_2: customerInfo.billing_address2,
     b_city: customerInfo.billing_city,
