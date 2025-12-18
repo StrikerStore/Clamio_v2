@@ -284,6 +284,17 @@ export function VendorDashboard() {
   // Label download filter state for my orders tab
   const [selectedLabelFilter, setSelectedLabelFilter] = useState<string>('all')
 
+  // Dashboard stats state (pre-calculated from backend)
+  const [dashboardStats, setDashboardStats] = useState<{
+    allOrders: { totalQuantity: number }
+    myOrders: { totalQuantity: number }
+    handover: { totalQuantity: number }
+    orderTracking: { totalQuantity: number }
+    lastUpdated: string
+  } | null>(null)
+  const [dashboardStatsLoading, setDashboardStatsLoading] = useState(false)
+  const [dashboardStatsError, setDashboardStatsError] = useState("")
+
   useEffect(() => {
     async function fetchAddress() {
       console.log("fetchAddress: Starting address fetch...");
@@ -351,6 +362,27 @@ export function VendorDashboard() {
         console.error("Error fetching transactions:", err);
       }
     }
+
+    async function fetchDashboardStats() {
+      setDashboardStatsLoading(true);
+      setDashboardStatsError("");
+      try {
+        console.log("📊 Fetching dashboard stats...");
+        const response = await apiClient.getDashboardStats();
+        if (response.success && response.data) {
+          console.log("✅ Dashboard stats received:", response.data);
+          setDashboardStats(response.data);
+        } else {
+          console.error("❌ Dashboard stats failed:", response.message);
+          setDashboardStatsError(response.message || "Failed to fetch dashboard stats");
+        }
+      } catch (err) {
+        console.error("Error fetching dashboard stats:", err);
+        setDashboardStatsError(err instanceof Error ? err.message : "Failed to fetch dashboard stats");
+      } finally {
+        setDashboardStatsLoading(false);
+      }
+    }
     
     console.log("useEffect: User object:", user);
     console.log("useEffect: User role:", user?.role);
@@ -360,6 +392,7 @@ export function VendorDashboard() {
       fetchPayments();
       fetchSettlements();
       fetchTransactions();
+      fetchDashboardStats(); // Fetch dashboard stats immediately
     } else {
       console.log("useEffect: User is not a vendor, skipping fetch functions");
     }
@@ -431,6 +464,14 @@ export function VendorDashboard() {
       // Refresh Order Tracking orders
       console.log('🔄 Refreshing order tracking orders data...');
       await fetchOrderTrackingOrders();
+
+      // Refresh dashboard stats to update cards
+      console.log('🔄 Refreshing dashboard stats...');
+      const statsResponse = await apiClient.getDashboardStats();
+      if (statsResponse.success && statsResponse.data) {
+        setDashboardStats(statsResponse.data);
+        console.log('✅ Dashboard stats refreshed');
+      }
     } catch (err: any) {
       console.error("Error refreshing orders:", err);
       setOrdersError(err.message || "Failed to refresh orders");
@@ -2475,7 +2516,25 @@ export function VendorDashboard() {
   // - All counts show PRODUCT totals (sum of quantities), not order counts
   // - Cards ALWAYS show TOTAL (unfiltered) counts, regardless of any active filters
   // - Example: 3 orders with one order having 3 products = 5 total products displayed
+  // - Now uses pre-calculated backend stats for instant display
   const getTotalQuantitySumForTab = (tabName: string) => {
+    // Use pre-calculated dashboard stats if available (much faster!)
+    if (dashboardStats) {
+      switch (tabName) {
+        case "all-orders":
+          return dashboardStats.allOrders.totalQuantity;
+        case "my-orders":
+          return dashboardStats.myOrders.totalQuantity;
+        case "handover":
+          return dashboardStats.handover.totalQuantity;
+        case "order-tracking":
+          return dashboardStats.orderTracking.totalQuantity;
+        default:
+          return 0;
+      }
+    }
+
+    // Fallback to client-side calculation if stats not loaded yet
     if (tabName === "my-orders") {
       // For My Orders card, use the absolute total (no filtering applied)
       console.log('🔍 CARD DEBUG: Using absolute total for card (no filters)');

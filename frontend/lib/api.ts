@@ -588,6 +588,31 @@ class ApiClient {
     })
   }
 
+  async getDashboardStats(): Promise<ApiResponse> {
+    console.log('📊 API CLIENT: getDashboardStats called');
+    
+    // Use vendor token for dashboard stats endpoint
+    const vendorToken = localStorage.getItem('vendorToken')
+    console.log('🔑 API CLIENT: Token check');
+    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    
+    if (!vendorToken) {
+      console.log('❌ API CLIENT: No vendor token found');
+      throw new Error('No vendor token found. Please login again.')
+    }
+
+    console.log('📤 API CLIENT: Making request to /orders/dashboard-stats');
+    console.log('  - Method: GET');
+    console.log('  - Headers: Authorization');
+
+    return this.makeRequest(`/orders/dashboard-stats`, {
+      method: 'GET',
+      headers: {
+        'Authorization': vendorToken
+      },
+    })
+  }
+
   async reverseOrder(unique_id: string): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: reverseOrder called');
     console.log('  - unique_id:', unique_id);
