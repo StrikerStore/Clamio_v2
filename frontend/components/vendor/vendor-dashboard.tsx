@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -204,6 +204,12 @@ export function VendorDashboard() {
   const [ordersError, setOrdersError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [ordersRefreshing, setOrdersRefreshing] = useState(false);
+  // Pagination state for All Orders
+  const [allOrdersPage, setAllOrdersPage] = useState(1);
+  const [allOrdersHasMore, setAllOrdersHasMore] = useState(true);
+  const [allOrdersTotalCount, setAllOrdersTotalCount] = useState(0);
+  const [allOrdersTotalQuantity, setAllOrdersTotalQuantity] = useState(0);
+  const [isLoadingMoreAllOrders, setIsLoadingMoreAllOrders] = useState(false);
   
   // Use ref to store latest lastUpdated value to avoid stale closure in polling
   const lastUpdatedRef = useRef<string | null>(null);
@@ -234,12 +240,15 @@ export function VendorDashboard() {
   const [handoverOrdersTotalQuantity, setHandoverOrdersTotalQuantity] = useState(0);
   const [isLoadingMoreHandover, setIsLoadingMoreHandover] = useState(false);
 
-  // Order Tracking orders state (no pagination - loads all orders at once)
+  // Order Tracking orders state (with pagination)
   const [trackingOrders, setTrackingOrders] = useState<any[]>([]);
   const [trackingOrdersLoading, setTrackingOrdersLoading] = useState(true);
   const [trackingOrdersError, setTrackingOrdersError] = useState("");
+  const [trackingOrdersPage, setTrackingOrdersPage] = useState(1);
+  const [trackingOrdersHasMore, setTrackingOrdersHasMore] = useState(true);
   const [trackingOrdersTotalCount, setTrackingOrdersTotalCount] = useState(0);
   const [trackingOrdersTotalQuantity, setTrackingOrdersTotalQuantity] = useState(0);
+  const [isLoadingMoreTracking, setIsLoadingMoreTracking] = useState(false);
 
   // Settlement-related state
   const [payments, setPayments] = useState<{ currentPayment: number; futurePayment: number } | null>(null)
@@ -286,14 +295,54 @@ export function VendorDashboard() {
 
   // Dashboard stats state (pre-calculated from backend)
   const [dashboardStats, setDashboardStats] = useState<{
-    allOrders: { totalQuantity: number }
-    myOrders: { totalQuantity: number }
-    handover: { totalQuantity: number }
-    orderTracking: { totalQuantity: number }
+    allOrders: { totalCount: number; totalQuantity: number }
+    myOrders: { totalCount: number; totalQuantity: number }
+    handover: { totalCount: number; totalQuantity: number }
+    orderTracking: { totalCount: number; totalQuantity: number }
     lastUpdated: string
   } | null>(null)
   const [dashboardStatsLoading, setDashboardStatsLoading] = useState(false)
   const [dashboardStatsError, setDashboardStatsError] = useState("")
+  
+  // Tab cache tracking - which tabs have been loaded
+  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set());
+  
+  // Cache for each tab's data to persist when switching tabs
+  const [tabDataCache, setTabDataCache] = useState<{
+    'all-orders'?: {
+      orders: any[];
+      page: number;
+      hasMore: boolean;
+      totalCount: number;
+      totalQuantity: number;
+    };
+    'my-orders'?: {
+      groupedOrders: any[];
+      allGroupedOrders: any[];
+      page: number;
+      hasMore: boolean;
+      totalCount: number;
+      totalQuantity: number;
+    };
+    'handover'?: {
+      orders: any[];
+      page: number;
+      hasMore: boolean;
+      totalCount: number;
+      totalQuantity: number;
+    };
+    'order-tracking'?: {
+      orders: any[];
+      page: number;
+      hasMore: boolean;
+      totalCount: number;
+    };
+  }>({});
+  
+  // Loading progress state for each tab
+  const [loadingProgress, setLoadingProgress] = useState<{
+    [key: string]: { loaded: number; total: number; isLoading: boolean }
+  }>({});
 
   useEffect(() => {
     async function fetchAddress() {
@@ -362,27 +411,6 @@ export function VendorDashboard() {
         console.error("Error fetching transactions:", err);
       }
     }
-
-    async function fetchDashboardStats() {
-      setDashboardStatsLoading(true);
-      setDashboardStatsError("");
-      try {
-        console.log("📊 Fetching dashboard stats...");
-        const response = await apiClient.getDashboardStats();
-        if (response.success && response.data) {
-          console.log("✅ Dashboard stats received:", response.data);
-          setDashboardStats(response.data);
-        } else {
-          console.error("❌ Dashboard stats failed:", response.message);
-          setDashboardStatsError(response.message || "Failed to fetch dashboard stats");
-        }
-      } catch (err) {
-        console.error("Error fetching dashboard stats:", err);
-        setDashboardStatsError(err instanceof Error ? err.message : "Failed to fetch dashboard stats");
-      } finally {
-        setDashboardStatsLoading(false);
-      }
-    }
     
     console.log("useEffect: User object:", user);
     console.log("useEffect: User role:", user?.role);
@@ -392,18 +420,69 @@ export function VendorDashboard() {
       fetchPayments();
       fetchSettlements();
       fetchTransactions();
-      fetchDashboardStats(); // Fetch dashboard stats immediately
+      // Dashboard stats is now fetched in separate useEffect for lazy loading
     } else {
       console.log("useEffect: User is not a vendor, skipping fetch functions");
     }
   }, [user])
 
+  // Dashboard stats fetch function (moved outside useEffect to be accessible from multiple places)
+  const fetchDashboardStats = async () => {
+    setDashboardStatsLoading(true);
+    setDashboardStatsError("");
+    try {
+      console.log("📊 Fetching dashboard stats...");
+      const response = await apiClient.getDashboardStats();
+      if (response.success && response.data) {
+        console.log("✅ Dashboard stats received:", response.data);
+        setDashboardStats(response.data);
+        
+        // Initialize loading progress for all tabs with total counts from stats
+        setLoadingProgress(prev => ({
+          ...prev,
+          'all-orders': {
+            ...prev['all-orders'],
+            total: response.data.allOrders?.totalCount || 0,
+            loaded: prev['all-orders']?.loaded || 0
+          },
+          'my-orders': {
+            ...prev['my-orders'],
+            total: response.data.myOrders?.totalCount || 0,
+            loaded: prev['my-orders']?.loaded || 0
+          },
+          'handover': {
+            ...prev['handover'],
+            total: response.data.handover?.totalCount || 0,
+            loaded: prev['handover']?.loaded || 0
+          },
+          'order-tracking': {
+            ...prev['order-tracking'],
+            total: response.data.orderTracking?.totalCount || 0,
+            loaded: prev['order-tracking']?.loaded || 0
+          }
+        }));
+      } else {
+        console.error("❌ Dashboard stats failed:", response.message);
+        setDashboardStatsError(response.message || "Failed to fetch dashboard stats");
+      }
+    } catch (err) {
+      console.error("Error fetching dashboard stats:", err);
+      setDashboardStatsError(err instanceof Error ? err.message : "Failed to fetch dashboard stats");
+    } finally {
+      setDashboardStatsLoading(false);
+    }
+  }
+
   // Reusable function to refresh orders data
   const refreshOrders = async () => {
     try {
       console.log('🔄 Refreshing orders data...');
-      const response = await apiClient.getOrders();
-      if (response.success && response.data && Array.isArray(response.data.orders)) {
+      const response = await apiClient.getOrders(1, 50, 'unclaimed');
+      if (response.success && response.data) {
+        const ordersData = response.data.orders || [];
+        const pagination = response.data.pagination;
+        
+        if (Array.isArray(ordersData)) {
         console.log('📊 Raw orders data:', response.data.orders.length, 'orders');
         // Check for duplicates in raw data
         const uniqueIds = new Set<string>();
@@ -424,11 +503,32 @@ export function VendorDashboard() {
           index === self.findIndex((o: any) => o.unique_id === order.unique_id)
         );
         
-        setOrders(uniqueOrders);
-        console.log('✅ Orders refreshed successfully');
-      } else if (response.success && response.data && response.data.orders) {
-        setOrders([response.data.orders]);
-        console.log('✅ Orders refreshed successfully');
+          setOrders(uniqueOrders);
+          
+          // Update pagination metadata
+          if (pagination) {
+            setAllOrdersHasMore(pagination.hasMore || false);
+            setAllOrdersTotalCount(pagination.total || 0);
+            setAllOrdersTotalQuantity(pagination.totalQuantity || 0);
+            
+            // Update loading progress
+            setLoadingProgress(prev => ({
+              ...prev,
+              'all-orders': {
+                loaded: uniqueOrders.length,
+                total: pagination.total || 0,
+                isLoading: false
+              }
+            }));
+            
+            setAllOrdersPage(2);
+          }
+          
+          console.log('✅ Orders refreshed successfully');
+        } else {
+          setOrders([]);
+          setOrdersError("No orders found");
+        }
       } else {
         setOrders([]);
         setOrdersError("No orders found");
@@ -483,23 +583,189 @@ export function VendorDashboard() {
   //   fetchOrders();
   // }, []);
 
-  const fetchOrders = async () => {
-    setOrdersLoading(true);
+  const fetchOrders = async (resetPagination: boolean = true, filters?: { search?: string, dateFrom?: Date, dateTo?: Date }) => {
+    // PARALLEL LOADING: Orders can load independently of dashboard stats
+    // Cards will show stats when available, orders will show when available
+    
+    if (resetPagination) {
+      setOrdersLoading(true);
+      setAllOrdersPage(1);
+    } else {
+      setIsLoadingMoreAllOrders(true);
+    }
     setOrdersError("");
+    
     try {
+      const pageToFetch = resetPagination ? 1 : allOrdersPage;
+      
+      // OPTIMIZATION: For initial load without filters, load 20 orders first, then 30 more in background
+      // If filters are provided, use a large limit to fetch all matching orders
+      // Otherwise use optimized pagination: 20 first, then 30 more
+      const isInitialLoad = resetPagination && !filters;
+      const initialLimit = isInitialLoad ? 20 : (filters ? 10000 : 50);
+      
+      // Format dates for API if filters are provided
+      const searchParam = filters?.search;
+      const dateFromStr = filters?.dateFrom ? filters.dateFrom.toISOString().split('T')[0] : undefined;
+      const dateToStr = filters?.dateTo ? filters.dateTo.toISOString().split('T')[0] : undefined;
+      
       // Run both API calls in parallel for better performance
       const [ordersResponse, lastUpdatedResponse] = await Promise.all([
-        apiClient.getOrders(),
+        apiClient.getOrders(pageToFetch, initialLimit, 'unclaimed', searchParam, dateFromStr, dateToStr),
         apiClient.getOrdersLastUpdated()
       ]);
       
       // Process orders response
-      if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
-        setOrders(ordersResponse.data.orders);
-      } else if (ordersResponse.success && ordersResponse.data && ordersResponse.data.orders) {
-        setOrders([ordersResponse.data.orders]);
+      if (ordersResponse.success && ordersResponse.data) {
+        const ordersData = ordersResponse.data.orders || [];
+        const pagination = ordersResponse.data.pagination;
+        
+        // Update orders and pagination
+        if (resetPagination) {
+          const nextPage = filters ? 1 : 2; // Next page will be 2 if no filters
+          const hasMore = filters ? false : (pagination?.hasMore || false);
+          
+          // Display first batch immediately
+          setOrders(ordersData);
+          setOrdersLoading(false); // Stop loading state after first 20 orders
+          
+          // Update pagination metadata
+          if (pagination) {
+            setAllOrdersHasMore(hasMore);
+            setAllOrdersTotalCount(pagination.total || 0);
+            setAllOrdersTotalQuantity(pagination.totalQuantity || 0);
+            
+            // Only increment page if no filters (normal pagination)
+            if (!filters) {
+              setAllOrdersPage(nextPage);
+            }
+            
+            // Update loading progress
+            setLoadingProgress(prev => ({
+              ...prev,
+              'all-orders': {
+                loaded: ordersData.length,
+                total: pagination.total || 0,
+                isLoading: false
+              }
+            }));
+          }
+          
+          // For initial load without filters, fetch remaining orders in background
+          // First batch shows 20 orders quickly, then we fetch full 50 and update silently
+          if (isInitialLoad && ordersData.length === 20 && pagination && pagination.total > 20) {
+            console.log('🚀 Fetching remaining orders in background (completing first page to 50)...');
+            // Fetch full first page (50 orders) in background (no filters for initial load)
+            apiClient.getOrders(1, 50, 'unclaimed').then((fullResponse) => {
+              if (fullResponse.success && fullResponse.data) {
+                const fullOrdersData = fullResponse.data.orders || [];
+                const fullPagination = fullResponse.data.pagination;
+                
+                // Replace with full first page (50 orders) when background load completes
+                if (fullOrdersData.length > ordersData.length) {
+                  console.log(`✅ Background load complete: Updated to ${fullOrdersData.length} orders (from ${ordersData.length})`);
+                  
+                  setOrders(fullOrdersData);
+                  
+                  // Update cache with full first page
+                  setTabDataCache(prev => ({
+                    ...prev,
+                    'all-orders': {
+                      orders: fullOrdersData,
+                      page: nextPage,
+                      hasMore: fullPagination?.hasMore || false,
+                      totalCount: fullPagination?.total || 0,
+                      totalQuantity: fullPagination?.totalQuantity || 0,
+                    }
+                  }));
+                  
+                  // Update pagination metadata with full data
+                  if (fullPagination) {
+                    setAllOrdersTotalCount(fullPagination.total || 0);
+                    setAllOrdersTotalQuantity(fullPagination.totalQuantity || 0);
+                    setAllOrdersHasMore(fullPagination.hasMore || false);
+                    
+                    // Update loading progress with full count
+                    setLoadingProgress(prev => ({
+                      ...prev,
+                      'all-orders': {
+                        loaded: fullOrdersData.length,
+                        total: fullPagination.total || 0,
+                        isLoading: false
+                      }
+                    }));
+                  }
+                }
+              }
+            }).catch((error) => {
+              console.error('Error loading remaining orders in background:', error);
+              // Don't show error to user - first 20 orders are already displayed
+            });
+          }
+          
+          // Store initial cache (will be updated when background load completes)
+          setTabDataCache(prev => ({
+            ...prev,
+            'all-orders': {
+              orders: ordersData,
+              page: nextPage,
+              hasMore: hasMore,
+              totalCount: pagination?.total || 0,
+              totalQuantity: pagination?.totalQuantity || 0,
+            }
+          }));
+          
+          // Mark tab as loaded
+          setLoadedTabs(prev => new Set(prev).add('all-orders'));
+        } else {
+          // Infinite scroll - append orders
+          // Calculate new count first
+          const currentLoaded = orders.length + ordersData.length;
+          
+          // Update orders state
+          setOrders(prev => {
+            const updatedOrders = [...prev, ...ordersData];
+            
+            // Update cache with appended orders
+            if (pagination) {
+              const nextPage = allOrdersPage + 1;
+              setTabDataCache(prevCache => ({
+                ...prevCache,
+                'all-orders': {
+                  orders: updatedOrders,
+                  page: nextPage,
+                  hasMore: pagination.hasMore || false,
+                  totalCount: pagination.total || 0,
+                  totalQuantity: pagination.totalQuantity || 0,
+                }
+              }));
+              
+              // Update pagination metadata AFTER orders state update
+              setAllOrdersHasMore(pagination.hasMore || false);
+              setAllOrdersTotalCount(pagination.total || 0);
+              setAllOrdersTotalQuantity(pagination.totalQuantity || 0);
+              
+              // Update loading progress with correct count
+              setLoadingProgress(prevProgress => ({
+                ...prevProgress,
+                'all-orders': {
+                  loaded: currentLoaded,
+                  total: pagination.total || 0,
+                  isLoading: false
+                }
+              }));
+              
+              // Increment page for next load
+              setAllOrdersPage(nextPage);
+            }
+            
+            return updatedOrders;
+          });
+        }
       } else {
-        setOrders([]);
+        if (resetPagination) {
+          setOrders([]);
+        }
         setOrdersError("No orders found");
       }
       
@@ -511,9 +777,12 @@ export function VendorDashboard() {
       }
     } catch (err: any) {
       setOrdersError(err.message || "Failed to fetch orders");
-      setOrders([]);
+      if (resetPagination) {
+        setOrders([]);
+      }
     } finally {
       setOrdersLoading(false);
+      setIsLoadingMoreAllOrders(false);
     }
   }
 
@@ -567,32 +836,69 @@ export function VendorDashboard() {
       const response = await apiClient.getGroupedOrders(pageToFetch, 50);
       
       if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
+        const nextPage = resetPagination ? 2 : groupedOrdersPage + 1;
+        const pagination = response.data.pagination;
+        
         if (resetPagination) {
           // Replace orders on reset (initial load or refresh)
           setGroupedOrders(response.data.groupedOrders);
+          
+          // Update pagination metadata
+          if (pagination) {
+            setGroupedOrdersHasMore(pagination.hasMore);
+            setGroupedOrdersTotalCount(pagination.total);
+            setGroupedOrdersPage(nextPage);
+          }
+          
+          // Update total quantity (only on reset to avoid overwriting with partial data)
+          if (response.data.totalQuantity !== undefined) {
+            console.log('🔢 Setting groupedOrdersTotalQuantity:', response.data.totalQuantity);
+            setGroupedOrdersTotalQuantity(response.data.totalQuantity);
+          } else {
+            console.log('⚠️ totalQuantity not found in response data:', response.data);
+          }
+          
+          // Store in cache (also include allGroupedOrders if available)
+          setTabDataCache(prev => ({
+            ...prev,
+            'my-orders': {
+              groupedOrders: response.data.groupedOrders,
+              allGroupedOrders: allGroupedOrders.length > 0 ? allGroupedOrders : response.data.groupedOrders,
+              page: nextPage,
+              hasMore: pagination?.hasMore || false,
+              totalCount: pagination?.total || 0,
+              totalQuantity: response.data.totalQuantity || 0,
+            }
+          }));
+          
+          // Mark tab as loaded
+          setLoadedTabs(prev => new Set(prev).add('my-orders'));
         } else {
           // Append orders for infinite scroll
-          setGroupedOrders(prev => [...prev, ...response.data.groupedOrders]);
-        }
-        
-        // Update pagination metadata
-        if (response.data.pagination) {
-          setGroupedOrdersHasMore(response.data.pagination.hasMore);
-          setGroupedOrdersTotalCount(response.data.pagination.total);
-          // Increment page number for next load
-          if (resetPagination) {
-            setGroupedOrdersPage(2); // Set to 2 after initial load
-          } else {
-            setGroupedOrdersPage(prev => prev + 1);
-          }
-        }
-        
-        // Update total quantity (only on reset to avoid overwriting with partial data)
-        if (resetPagination && response.data.totalQuantity !== undefined) {
-          console.log('🔢 Setting groupedOrdersTotalQuantity:', response.data.totalQuantity);
-          setGroupedOrdersTotalQuantity(response.data.totalQuantity);
-        } else if (resetPagination) {
-          console.log('⚠️ totalQuantity not found in response data:', response.data);
+          setGroupedOrders(prev => {
+            const updatedOrders = [...prev, ...response.data.groupedOrders];
+            
+            // Update cache with appended orders
+            if (pagination) {
+              setTabDataCache(prevCache => ({
+                ...prevCache,
+                'my-orders': {
+                  groupedOrders: updatedOrders,
+                  allGroupedOrders: allGroupedOrders.length > 0 ? allGroupedOrders : updatedOrders,
+                  page: nextPage,
+                  hasMore: pagination.hasMore,
+                  totalCount: pagination.total,
+                  totalQuantity: prevCache['my-orders']?.totalQuantity || 0,
+                }
+              }));
+              
+              setGroupedOrdersHasMore(pagination.hasMore);
+              setGroupedOrdersTotalCount(pagination.total);
+              setGroupedOrdersPage(nextPage);
+            }
+            
+            return updatedOrders;
+          });
         }
       } else {
         if (resetPagination) {
@@ -627,29 +933,68 @@ export function VendorDashboard() {
       
       if (response.success && response.data) {
         const newOrders = response.data.handoverOrders || [];
+        const pagination = response.data.pagination;
+        const nextPage = resetPagination ? 2 : handoverOrdersPage + 1;
         
         if (resetPagination) {
           setHandoverOrders(newOrders);
+          
+          // Update pagination metadata
+          if (pagination) {
+            setHandoverOrdersHasMore(pagination.hasMore);
+            setHandoverOrdersTotalCount(pagination.total);
+            setHandoverOrdersTotalQuantity(pagination.totalQuantity || 0);
+            setHandoverOrdersPage(nextPage);
+          }
+          
+          // Store in cache
+          setTabDataCache(prev => ({
+            ...prev,
+            'handover': {
+              orders: newOrders,
+              page: nextPage,
+              hasMore: pagination?.hasMore || false,
+              totalCount: pagination?.total || 0,
+              totalQuantity: pagination?.totalQuantity || 0,
+            }
+          }));
+          
+          // Mark tab as loaded
+          setLoadedTabs(prev => new Set(prev).add('handover'));
         } else {
-          setHandoverOrders(prev => [...prev, ...newOrders]);
-        }
-        
-        // Update pagination metadata
-        setHandoverOrdersHasMore(response.data.pagination?.has_next || false);
-        
-        // Always update total count from API (even if page is not fully loaded)
-        if (response.data.summary?.total_orders !== undefined) {
-          setHandoverOrdersTotalCount(response.data.summary.total_orders);
-        }
-        if (response.data.summary?.total_quantity !== undefined) {
-          setHandoverOrdersTotalQuantity(response.data.summary.total_quantity);
-        }
-        
-        // Increment page number for next load
-        if (resetPagination) {
-          setHandoverOrdersPage(2); // Set to 2 after initial load
-        } else {
-          setHandoverOrdersPage(prev => prev + 1);
+          // Append orders for infinite scroll
+          setHandoverOrders(prev => {
+            const updatedOrders = [...prev, ...newOrders];
+            
+            // Update cache with appended orders
+            const summary = response.data.summary;
+            if (summary || response.data.pagination) {
+              const totalCount = summary?.total_orders || response.data.pagination?.total || 0;
+              const totalQuantity = summary?.total_quantity || 0;
+              
+              setTabDataCache(prevCache => ({
+                ...prevCache,
+                'handover': {
+                  orders: updatedOrders,
+                  page: nextPage,
+                  hasMore: response.data.pagination?.has_next || false,
+                  totalCount: totalCount,
+                  totalQuantity: totalQuantity,
+                }
+              }));
+              
+              setHandoverOrdersHasMore(response.data.pagination?.has_next || false);
+              if (summary?.total_orders !== undefined) {
+                setHandoverOrdersTotalCount(summary.total_orders);
+              }
+              if (summary?.total_quantity !== undefined) {
+                setHandoverOrdersTotalQuantity(summary.total_quantity);
+              }
+              setHandoverOrdersPage(nextPage);
+            }
+            
+            return updatedOrders;
+          });
         }
       }
     } catch (err: any) {
@@ -663,39 +1008,394 @@ export function VendorDashboard() {
     }
   };
 
-  const fetchOrderTrackingOrders = async () => {
-    setTrackingOrdersLoading(true);
+  const fetchOrderTrackingOrders = async (resetPagination: boolean = true) => {
+    if (resetPagination) {
+      setTrackingOrdersLoading(true);
+      setTrackingOrdersPage(1);
+    } else {
+      setIsLoadingMoreTracking(true);
+    }
     setTrackingOrdersError("");
     
     try {
-      const response = await apiClient.getOrderTrackingOrders();
+      const pageToFetch = resetPagination ? 1 : trackingOrdersPage;
+      const response = await apiClient.getOrderTrackingOrders(pageToFetch, 50);
       
       if (response.success && response.data) {
-        const allOrders = response.data.trackingOrders || [];
-        setTrackingOrders(allOrders);
+        const newOrders = response.data.trackingOrders || [];
         
-        // Update summary data
-        if (response.data.summary?.total_orders !== undefined) {
-          setTrackingOrdersTotalCount(response.data.summary.total_orders);
+        const pagination = response.data.pagination;
+        const nextPage = resetPagination ? 2 : trackingOrdersPage + 1;
+        
+        if (resetPagination) {
+          setTrackingOrders(newOrders);
+          
+          // Update pagination metadata
+          if (pagination) {
+            setTrackingOrdersHasMore(pagination.hasMore || false);
+            setTrackingOrdersTotalCount(pagination.total || 0);
+            setTrackingOrdersPage(nextPage);
+            
+            // Update loading progress
+            setLoadingProgress(prev => ({
+              ...prev,
+              'order-tracking': {
+                loaded: newOrders.length,
+                total: pagination.total || 0,
+                isLoading: false
+              }
+            }));
+          }
+          
+          // Store in cache
+          setTabDataCache(prev => ({
+            ...prev,
+            'order-tracking': {
+              orders: newOrders,
+              page: nextPage,
+              hasMore: pagination?.hasMore || false,
+              totalCount: pagination?.total || 0,
+            }
+          }));
+          
+          // Mark tab as loaded
+          setLoadedTabs(prev => new Set(prev).add('order-tracking'));
+        } else {
+          // Append orders for infinite scroll
+          setTrackingOrders(prev => {
+            const updatedOrders = [...prev, ...newOrders];
+            
+            // Update cache with appended orders
+            if (pagination) {
+              const currentLoaded = updatedOrders.length;
+              
+              setTabDataCache(prevCache => ({
+                ...prevCache,
+                'order-tracking': {
+                  orders: updatedOrders,
+                  page: nextPage,
+                  hasMore: pagination.hasMore || false,
+                  totalCount: pagination.total || 0,
+                }
+              }));
+              
+              setTrackingOrdersHasMore(pagination.hasMore || false);
+              setTrackingOrdersTotalCount(pagination.total || 0);
+              
+              // Update loading progress
+              setLoadingProgress(prevProgress => ({
+                ...prevProgress,
+                'order-tracking': {
+                  loaded: currentLoaded,
+                  total: pagination.total || 0,
+                  isLoading: false
+                }
+              }));
+              
+              setTrackingOrdersPage(nextPage);
+            }
+            
+            return updatedOrders;
+          });
         }
-        if (response.data.summary?.total_quantity !== undefined) {
-          setTrackingOrdersTotalQuantity(response.data.summary.total_quantity);
+        
+        
+        // Update summary data (for backward compatibility)
+        if (response.data.summary) {
+          if (response.data.summary.total_orders !== undefined) {
+            setTrackingOrdersTotalCount(response.data.summary.total_orders);
+          }
+          if (response.data.summary.total_quantity !== undefined) {
+            setTrackingOrdersTotalQuantity(response.data.summary.total_quantity);
+          }
         }
+      } else {
+        if (resetPagination) {
+          setTrackingOrders([]);
+        }
+        setTrackingOrdersError("No tracking orders found");
       }
     } catch (err: any) {
       setTrackingOrdersError(err.message || "Failed to fetch order tracking orders");
-      setTrackingOrders([]);
+      if (resetPagination) {
+        setTrackingOrders([]);
+      }
     } finally {
       setTrackingOrdersLoading(false);
+      setIsLoadingMoreTracking(false);
     }
   };
 
+  // Load dashboard stats on mount (runs in parallel with tab data loading)
   useEffect(() => {
-    fetchOrders();
-    fetchGroupedOrders();
-    fetchHandoverOrders();
-    fetchOrderTrackingOrders();
-  }, []);
+    if (user?.role === "vendor") {
+      // Fetch dashboard stats - runs in parallel with orders loading for faster initial load
+      console.log("🚀 Starting dashboard stats fetch (parallel load)...");
+      fetchDashboardStats();
+    }
+  }, [user]);
+
+  // Lazy loading: Load active tab data (runs in parallel with dashboard stats)
+  useEffect(() => {
+    if (user?.role !== "vendor") return;
+    
+    // PARALLEL LOADING: Load tab data immediately, don't wait for dashboard stats
+    // Both dashboard stats and orders will load in parallel for faster initial load
+    console.log("🚀 Starting tab data load (in parallel with dashboard stats)...");
+    
+    // Check if tab is already loaded (cached)
+    const isTabLoaded = loadedTabs.has(activeTab);
+    const cachedData = tabDataCache[activeTab as keyof typeof tabDataCache];
+    
+    if (!isTabLoaded || !cachedData) {
+      // Tab not loaded yet - fetch data
+      setLoadingProgress(prev => ({
+        ...prev,
+        [activeTab]: { loaded: 0, total: 0, isLoading: true }
+      }));
+      
+      // Load tab data based on active tab
+      switch(activeTab) {
+        case "all-orders":
+          fetchOrders(true);
+          break;
+        case "my-orders":
+          fetchGroupedOrders(true);
+          break;
+        case "handover":
+          fetchHandoverOrders(true);
+          break;
+        case "order-tracking":
+          fetchOrderTrackingOrders(true);
+          break;
+      }
+      
+      // Mark tab as loaded (will be set after data loads)
+      // Don't set it here - wait for fetch to complete
+    } else {
+      // Tab is cached - restore data immediately (synchronously before any async operations)
+      console.log(`🔄 Restoring cached data for tab: ${activeTab}`);
+      
+      // Restore cache synchronously to prevent any "0" flash
+      switch(activeTab) {
+        case "all-orders":
+          const allOrdersCache = cachedData as typeof tabDataCache['all-orders'];
+          if (allOrdersCache) {
+            setOrders(allOrdersCache.orders);
+            setAllOrdersPage(allOrdersCache.page);
+            setAllOrdersHasMore(allOrdersCache.hasMore);
+            setAllOrdersTotalCount(allOrdersCache.totalCount);
+            setAllOrdersTotalQuantity(allOrdersCache.totalQuantity);
+            setOrdersLoading(false);
+            setOrdersError("");
+          }
+          break;
+        case "my-orders":
+          const myOrdersCache = cachedData as typeof tabDataCache['my-orders'];
+          if (myOrdersCache) {
+            setGroupedOrders(myOrdersCache.groupedOrders);
+            setAllGroupedOrders(myOrdersCache.allGroupedOrders);
+            setGroupedOrdersPage(myOrdersCache.page);
+            setGroupedOrdersHasMore(myOrdersCache.hasMore);
+            setGroupedOrdersTotalCount(myOrdersCache.totalCount);
+            setGroupedOrdersTotalQuantity(myOrdersCache.totalQuantity);
+            setGroupedOrdersLoading(false);
+            setGroupedOrdersError("");
+          }
+          break;
+        case "handover":
+          const handoverCache = cachedData as typeof tabDataCache['handover'];
+          if (handoverCache) {
+            setHandoverOrders(handoverCache.orders);
+            setHandoverOrdersPage(handoverCache.page);
+            setHandoverOrdersHasMore(handoverCache.hasMore);
+            setHandoverOrdersTotalCount(handoverCache.totalCount);
+            setHandoverOrdersTotalQuantity(handoverCache.totalQuantity);
+            setHandoverOrdersLoading(false);
+            setHandoverOrdersError("");
+          }
+          break;
+        case "order-tracking":
+          const trackingCache = cachedData as typeof tabDataCache['order-tracking'];
+          if (trackingCache) {
+            setTrackingOrders(trackingCache.orders);
+            setTrackingOrdersPage(trackingCache.page);
+            setTrackingOrdersHasMore(trackingCache.hasMore);
+            setTrackingOrdersTotalCount(trackingCache.totalCount);
+            setTrackingOrdersLoading(false);
+            setTrackingOrdersError("");
+          }
+          break;
+      }
+      
+      // Then refresh in background to check for new orders
+      const refreshTab = async () => {
+        try {
+          switch(activeTab) {
+            case "all-orders":
+              // Fetch page 1 to check for new orders
+              const ordersResponse = await apiClient.getOrders(1, 50, 'unclaimed');
+              if (ordersResponse.success && ordersResponse.data) {
+                const newOrders = ordersResponse.data.orders || [];
+                const currentCache = tabDataCache['all-orders'];
+                if (currentCache) {
+                  // Compare with cache to detect new orders
+                  const existingIds = new Set(currentCache.orders.map(o => o.unique_id));
+                  const newOrderIds = newOrders.filter(o => !existingIds.has(o.unique_id));
+                  
+                  if (newOrderIds.length > 0 || ordersResponse.data.pagination) {
+                    // Update cache with fresh data (silent update - no loading states)
+                    const updatedCache = {
+                      orders: newOrders,
+                      page: 1,
+                      hasMore: ordersResponse.data.pagination?.hasMore || false,
+                      totalCount: ordersResponse.data.pagination?.total || 0,
+                      totalQuantity: ordersResponse.data.pagination?.totalQuantity || 0,
+                    };
+                    setTabDataCache(prev => ({ ...prev, 'all-orders': updatedCache }));
+                    
+                    // Update active state ONLY if this tab is still active (silent update)
+                    // This happens in background, so no "0" flash
+                    if (activeTab === 'all-orders') {
+                      // Update state silently - cache already has the data so UI won't flash
+                      setOrders(prev => {
+                        // Only update if we have new data, otherwise keep existing
+                        if (updatedCache.orders.length > 0) {
+                          return updatedCache.orders;
+                        }
+                        return prev;
+                      });
+                      setAllOrdersPage(updatedCache.page);
+                      setAllOrdersHasMore(updatedCache.hasMore);
+                      setAllOrdersTotalCount(updatedCache.totalCount);
+                      setAllOrdersTotalQuantity(updatedCache.totalQuantity);
+                      
+                      // Only show toast for new orders (not for every refresh)
+                      if (newOrderIds.length > 0) {
+                        toast({
+                          title: "New Orders",
+                          description: `${newOrderIds.length} new orders found`,
+                        });
+                      }
+                    }
+                  }
+                }
+              }
+              break;
+            case "my-orders":
+              // Refresh grouped orders and update cache
+              const groupedResponse = await apiClient.getGroupedOrders(1, 50);
+              if (groupedResponse.success && groupedResponse.data) {
+                const newGrouped = groupedResponse.data.groupedOrders || [];
+                const updatedCache = {
+                  groupedOrders: newGrouped,
+                  allGroupedOrders: newGrouped, // Update allGroupedOrders too
+                  page: 2,
+                  hasMore: groupedResponse.data.pagination?.hasMore || false,
+                  totalCount: groupedResponse.data.pagination?.total || 0,
+                  totalQuantity: groupedResponse.data.totalQuantity || 0,
+                };
+                setTabDataCache(prev => ({ ...prev, 'my-orders': updatedCache }));
+                if (activeTab === 'my-orders') {
+                  setGroupedOrders(updatedCache.groupedOrders);
+                  setAllGroupedOrders(updatedCache.allGroupedOrders);
+                  setGroupedOrdersPage(updatedCache.page);
+                  setGroupedOrdersHasMore(updatedCache.hasMore);
+                  setGroupedOrdersTotalCount(updatedCache.totalCount);
+                  setGroupedOrdersTotalQuantity(updatedCache.totalQuantity);
+                }
+              }
+              break;
+            case "handover":
+              // Refresh handover orders and update cache
+              const handoverResponse = await apiClient.getHandoverOrders(1, 50);
+              if (handoverResponse.success && handoverResponse.data) {
+                const newHandover = handoverResponse.data.handoverOrders || [];
+                const updatedCache = {
+                  orders: newHandover,
+                  page: 2,
+                  hasMore: handoverResponse.data.pagination?.has_next || false,
+                  totalCount: handoverResponse.data.summary?.total_orders || 0,
+                  totalQuantity: handoverResponse.data.summary?.total_quantity || 0,
+                };
+                setTabDataCache(prev => ({ ...prev, 'handover': updatedCache }));
+                if (activeTab === 'handover') {
+                  setHandoverOrders(updatedCache.orders);
+                  setHandoverOrdersPage(updatedCache.page);
+                  setHandoverOrdersHasMore(updatedCache.hasMore);
+                  setHandoverOrdersTotalCount(updatedCache.totalCount);
+                  setHandoverOrdersTotalQuantity(updatedCache.totalQuantity);
+                }
+              }
+              break;
+            case "order-tracking":
+              // Refresh tracking orders and update cache
+              const trackingResponse = await apiClient.getOrderTrackingOrders(1, 50);
+              if (trackingResponse.success && trackingResponse.data) {
+                const newTracking = trackingResponse.data.trackingOrders || [];
+                const updatedCache = {
+                  orders: newTracking,
+                  page: 2,
+                  hasMore: trackingResponse.data.pagination?.hasMore || false,
+                  totalCount: trackingResponse.data.pagination?.total || 0,
+                };
+                setTabDataCache(prev => ({ ...prev, 'order-tracking': updatedCache }));
+                if (activeTab === 'order-tracking') {
+                  setTrackingOrders(updatedCache.orders);
+                  setTrackingOrdersPage(updatedCache.page);
+                  setTrackingOrdersHasMore(updatedCache.hasMore);
+                  setTrackingOrdersTotalCount(updatedCache.totalCount);
+                }
+              }
+              break;
+          }
+        } catch (error) {
+          console.error('Error refreshing tab:', error);
+        }
+      };
+      
+      // Refresh in background (don't block UI)
+      refreshTab();
+    }
+  }, [activeTab, user]); // Removed dashboardStats and dashboardStatsLoading dependencies for parallel loading
+
+  // Fetch orders when filters are applied on All Orders tab
+  useEffect(() => {
+    if (activeTab !== "all-orders") {
+      return;
+    }
+
+    if (!dashboardStats) {
+      // Wait for dashboard stats to load first
+      return;
+    }
+
+    const tabFilter = tabFilters["all-orders"];
+    const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
+    const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
+    const hasFilters = hasSearchFilter || hasDateFilter;
+
+    if (hasFilters && !ordersLoading) {
+      // Fetch all matching orders from backend when filters are applied
+      console.log('🔍 Filters applied on All Orders - fetching filtered orders from backend');
+      fetchOrders(true, {
+        search: tabFilter.searchTerm.trim() || undefined,
+        dateFrom: tabFilter.dateFrom,
+        dateTo: tabFilter.dateTo
+      });
+    } else if (!hasFilters) {
+      // When filters are cleared, reset to first page of normal pagination
+      // Reset orders and page, then let normal lazy loading fetch first page
+      console.log('🔍 Filters cleared on All Orders - resetting to normal pagination');
+      setOrders([]);
+      setAllOrdersPage(1);
+      setAllOrdersHasMore(true);
+      // Fetch first page (will be handled by lazy loading useEffect if tab is active)
+      if (activeTab === "all-orders") {
+        fetchOrders(true);
+      }
+    }
+  }, [activeTab, tabFilters["all-orders"].searchTerm, tabFilters["all-orders"].dateFrom, tabFilters["all-orders"].dateTo, dashboardStats]);
 
   // Fetch all orders when filters are applied on My Orders tab
   useEffect(() => {
@@ -745,11 +1445,18 @@ export function VendorDashboard() {
             console.log('  - Old timestamp:', currentLastUpdated);
             console.log('  - New timestamp:', newLastUpdated);
             
-            // Refresh orders
-            const ordersResponse = await apiClient.getOrders();
-            if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
-              setOrders(ordersResponse.data.orders);
-              console.log('✅ FRONTEND: Orders refreshed due to external update');
+            // Refresh orders (only if dashboard stats are loaded - don't load before cards show)
+            if (dashboardStats) {
+              const ordersResponse = await apiClient.getOrders(1, 50, 'unclaimed');
+              if (ordersResponse.success && ordersResponse.data) {
+                const ordersData = ordersResponse.data.orders || [];
+                if (Array.isArray(ordersData)) {
+                  setOrders(ordersData);
+                  console.log('✅ FRONTEND: Orders refreshed due to external update');
+                }
+              }
+            } else {
+              console.log('⏳ Skipping order refresh - waiting for dashboard stats to load first');
             }
             
             // Update both state and ref
@@ -873,6 +1580,15 @@ export function VendorDashboard() {
           console.log('✅ FRONTEND: Orders and grouped orders refreshed successfully');
         } catch (refreshError) {
           console.log('⚠️ FRONTEND: Failed to refresh orders, but claim was successful');
+        }
+        
+        // Refresh dashboard stats to update card and tab counts
+        console.log('🔄 FRONTEND: Refreshing dashboard stats to update card counts...');
+        try {
+          await fetchDashboardStats();
+          console.log('✅ FRONTEND: Dashboard stats refreshed successfully');
+        } catch (statsError) {
+          console.log('⚠️ FRONTEND: Failed to refresh dashboard stats, but claim was successful');
         }
         
       } else {
@@ -1113,9 +1829,18 @@ export function VendorDashboard() {
         
         // Highlight Handover tab to show the change
         highlightTab("handover");
-        
+
         fetchGroupedOrders();
         fetchHandoverOrders();
+        
+        // Refresh dashboard stats to update card and tab counts
+        console.log('🔄 FRONTEND: Refreshing dashboard stats after bulk marking orders as ready...');
+        try {
+          await fetchDashboardStats();
+          console.log('✅ FRONTEND: Dashboard stats refreshed successfully');
+        } catch (statsError) {
+          console.log('⚠️ FRONTEND: Failed to refresh dashboard stats, but bulk mark ready was successful');
+        }
       } else {
         toast({
           title: "Error",
@@ -1320,7 +2045,16 @@ export function VendorDashboard() {
       return getFilteredGroupedOrdersForTab(tab);
     }
     
+    // Use cached data if available to prevent "0" flash when switching tabs
     let baseOrders = orders;
+    if (tab === "all-orders" && tabDataCache['all-orders']) {
+      // Use cached orders to avoid showing "0" during cache restoration
+      const cachedOrders = tabDataCache['all-orders'].orders;
+      if (cachedOrders.length > 0) {
+        baseOrders = cachedOrders;
+      }
+    }
+    
     const tabFilter = tabFilters[tab as keyof typeof tabFilters];
     
     // Get current vendor's warehouseId
@@ -1328,8 +2062,8 @@ export function VendorDashboard() {
     
     switch (tab) {
       case "all-orders":
-        // Show only unclaimed orders
-        baseOrders = orders.filter(order => order.status === 'unclaimed');
+        // Show only unclaimed orders (filter cached or current orders)
+        baseOrders = baseOrders.filter(order => order.status === 'unclaimed');
         break;
       case "handover":
         // Show orders ready for handover by current vendor with is_manifest = 1
@@ -2444,6 +3178,15 @@ export function VendorDashboard() {
           console.log('⚠️ FRONTEND: Failed to refresh grouped orders, but bulk claim was successful');
         }
         
+        // Refresh dashboard stats to update card and tab counts
+        console.log('🔄 FRONTEND: Refreshing dashboard stats to update card counts...');
+        try {
+          await fetchDashboardStats();
+          console.log('✅ FRONTEND: Dashboard stats refreshed successfully');
+        } catch (statsError) {
+          console.log('⚠️ FRONTEND: Failed to refresh dashboard stats, but bulk claim was successful');
+        }
+        
         // Highlight My Orders tab to show the change
         highlightTab("my-orders");
         
@@ -2473,19 +3216,52 @@ export function VendorDashboard() {
   }
 
   const scrollToTop = () => {
-    if (scrollableContentRef.current) {
-      scrollableContentRef.current.scrollTo({
-        top: 0,
-        behavior: 'smooth'
-      });
-    }
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
   };
 
   // Infinite scroll handler for all tabs
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const element = e.currentTarget;
+  const handleScroll = useCallback(() => {
+    // Use window scrolling instead of container scrolling
     const scrolledToBottom = 
-      element.scrollHeight - element.scrollTop <= element.clientHeight + 200;
+      window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200;
+    
+    // Handle All Orders tab
+    if (activeTab === 'all-orders') {
+      // Check if filters are applied - if so, don't trigger infinite scroll (filtering is client-side)
+      const tabFilter = tabFilters["all-orders"];
+      const hasFilters = tabFilter && (
+        (tabFilter.searchTerm && tabFilter.searchTerm.trim() !== '') ||
+        tabFilter.dateFrom ||
+        tabFilter.dateTo
+      );
+      
+      // Only trigger infinite scroll if no filters are applied and we have more to load
+      if (!hasFilters && scrolledToBottom && allOrdersHasMore && !ordersLoading && !isLoadingMoreAllOrders) {
+        console.log('📜 Infinite scroll triggered - loading more All Orders...');
+        console.log('📜 Scroll conditions:', {
+          scrolledToBottom,
+          allOrdersHasMore,
+          ordersLoading,
+          isLoadingMoreAllOrders,
+          currentPage: allOrdersPage
+        });
+        setLoadingProgress(prev => ({
+          ...prev,
+          'all-orders': { ...prev['all-orders'], isLoading: true }
+        }));
+        fetchOrders(false); // false = don't reset pagination
+      } else if (scrolledToBottom && !hasFilters) {
+        console.log('📜 Scroll reached bottom but conditions not met:', {
+          allOrdersHasMore,
+          ordersLoading,
+          isLoadingMoreAllOrders,
+          hasFilters
+        });
+      }
+    }
     
     // Handle My Orders tab
     if (activeTab === 'my-orders' && scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
@@ -2499,8 +3275,24 @@ export function VendorDashboard() {
       fetchHandoverOrders(false); // false = don't reset pagination
     }
     
-    // Order Tracking tab loads all orders at once, no infinite scroll needed
-  };
+    // Handle Order Tracking tab
+    if (activeTab === 'order-tracking' && scrolledToBottom && trackingOrdersHasMore && !trackingOrdersLoading && !isLoadingMoreTracking) {
+      console.log('📜 Infinite scroll triggered - loading more Order Tracking orders...');
+      setLoadingProgress(prev => ({
+        ...prev,
+        'order-tracking': { ...prev['order-tracking'], isLoading: true }
+      }));
+      fetchOrderTrackingOrders(false); // false = don't reset pagination
+    }
+  }, [activeTab, allOrdersHasMore, ordersLoading, isLoadingMoreAllOrders, allOrdersPage, groupedOrdersHasMore, groupedOrdersLoading, isLoadingMore, handoverOrdersHasMore, handoverOrdersLoading, isLoadingMoreHandover, trackingOrdersHasMore, trackingOrdersLoading, isLoadingMoreTracking, tabFilters, fetchOrders, fetchGroupedOrders, fetchHandoverOrders, fetchOrderTrackingOrders, setLoadingProgress]);
+
+  // Attach window scroll listener for infinite scroll
+  useEffect(() => {
+    window.addEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [handleScroll]);
 
   // Helper function to trigger tab highlight animation
   const highlightTab = (tabName: string) => {
@@ -2522,57 +3314,23 @@ export function VendorDashboard() {
     if (dashboardStats) {
       switch (tabName) {
         case "all-orders":
-          return dashboardStats.allOrders.totalQuantity;
+          return dashboardStats.allOrders?.totalQuantity || 0;
         case "my-orders":
-          return dashboardStats.myOrders.totalQuantity;
+          return dashboardStats.myOrders?.totalQuantity || 0;
         case "handover":
-          return dashboardStats.handover.totalQuantity;
+          return dashboardStats.handover?.totalQuantity || 0;
         case "order-tracking":
-          return dashboardStats.orderTracking.totalQuantity;
+          return dashboardStats.orderTracking?.totalQuantity || 0;
         default:
           return 0;
       }
     }
 
-    // Fallback to client-side calculation if stats not loaded yet
-    if (tabName === "my-orders") {
-      // For My Orders card, use the absolute total (no filtering applied)
-      console.log('🔍 CARD DEBUG: Using absolute total for card (no filters)');
-      console.log('🔍 CARD DEBUG: groupedOrdersTotalQuantity:', groupedOrdersTotalQuantity);
-      console.log('🔍 CARD DEBUG: groupedOrders.length:', groupedOrders.length);
-      
-      // If API total is 0 or seems incorrect, calculate from all visible orders
-      if ((groupedOrdersTotalQuantity === 0 || groupedOrdersTotalQuantity < groupedOrders.length) && groupedOrders.length > 0) {
-        const calculatedTotal = groupedOrders.reduce((sum, order) => {
-          return sum + (order.total_quantity || 0);
-        }, 0);
-        console.log('🔍 CARD DEBUG: Calculated absolute total from all orders:', calculatedTotal);
-        return calculatedTotal;
-      }
-      
-      return groupedOrdersTotalQuantity;
-    } else if (tabName === "handover") {
-      // For Handover card, use the API total quantity
-      return handoverOrdersTotalQuantity;
-    } else if (tabName === "order-tracking") {
-      // For Order Tracking card, use the API total quantity
-      return trackingOrdersTotalQuantity;
-    } else {
-      // For All Orders card, show absolute total of unclaimed orders (no additional filters)
-      const unclaimedOrders = orders.filter(order => order.status === 'unclaimed');
-      const uniqueUnclaimedOrders = ensureUniqueOrders(unclaimedOrders, 'unique_id');
-      console.log('🔍 ALL ORDERS CARD DEBUG:');
-      console.log('  - Total orders:', orders.length);
-      console.log('  - Unclaimed orders (before deduplication):', unclaimedOrders.length);
-      console.log('  - Unclaimed orders (after deduplication):', uniqueUnclaimedOrders.length);
-      console.log('  - Duplicates removed:', unclaimedOrders.length - uniqueUnclaimedOrders.length);
-      console.log('  - Card total quantity:', uniqueUnclaimedOrders.reduce((sum, order) => {
-        return sum + (order.quantity || 0);
-      }, 0));
-      return uniqueUnclaimedOrders.reduce((sum, order) => {
-        return sum + (order.quantity || 0);
-      }, 0);
-    }
+    // If dashboard stats not loaded yet, return 0 to prevent showing incorrect partial counts
+    // This prevents cards from showing "50" initially before dashboard stats load
+    // Cards will show 0 briefly, then update to correct value when stats load
+    // IMPORTANT: Don't calculate from partial orders array - wait for dashboard stats
+    return 0;
   };
 
   // Helper functions to calculate quantity sums for each tab (WITH filters - for tab headers)
@@ -2683,6 +3441,70 @@ export function VendorDashboard() {
         }, 0);
       }
     }
+  };
+
+  // Helper function to get total quantity (sum of product quantities) for tab headers
+  // For "all-orders" and "my-orders": Shows totalQuantity (matches card)
+  // For other tabs: Shows totalCount (number of orders)
+  // When filters are applied, show filtered quantity/count; otherwise show total from dashboard stats
+  const getTotalCountForTab = (tabName: string) => {
+    // Check if filters are applied for this tab
+    const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
+    const hasFilters = tabFilter && (
+      (tabFilter.searchTerm && tabFilter.searchTerm.trim() !== '') ||
+      tabFilter.dateFrom ||
+      tabFilter.dateTo
+    );
+    
+    // For "all-orders" and "my-orders", show totalQuantity (sum of quantities) to match cards
+    if (tabName === "all-orders") {
+      if (hasFilters) {
+        // Filters applied - calculate quantity from filtered orders
+        const filteredOrders = getFilteredOrdersForTab(tabName);
+        return filteredOrders.reduce((sum, order) => {
+          return sum + (parseInt(order.quantity) || 0);
+        }, 0);
+      } else {
+        // No filters - use dashboard stats totalQuantity (matches card)
+        return dashboardStats?.allOrders?.totalQuantity || 0;
+      }
+    }
+    
+    if (tabName === "my-orders") {
+      if (hasFilters) {
+        // Filters applied - use getQuantitySumForTab which handles filtered calculation
+        return getQuantitySumForTab("my-orders");
+      } else {
+        // No filters - use dashboard stats totalQuantity (matches card)
+        return dashboardStats?.myOrders?.totalQuantity || 0;
+      }
+    }
+    
+    // For other tabs (handover, order-tracking), show totalCount (number of orders)
+    if (hasFilters) {
+      // Filters applied - return filtered count
+      if (tabName === "handover") {
+        return getFilteredHandoverOrders().length;
+      } else if (tabName === "order-tracking") {
+        return getFilteredTrackingOrders().length;
+      }
+      return getFilteredOrdersForTab(tabName).length;
+    }
+    
+    // Otherwise, use pre-calculated dashboard stats (total count)
+    if (dashboardStats) {
+      switch (tabName) {
+        case "handover":
+          return dashboardStats.handover?.totalCount || 0;
+        case "order-tracking":
+          return dashboardStats.orderTracking?.totalCount || 0;
+        default:
+          return 0;
+      }
+    }
+    
+    // If dashboard stats not loaded yet, return 0 (don't show incorrect count from loaded data)
+    return 0;
   };
 
   // Helper function to get quantity sum for selected orders with labels downloaded
@@ -2909,7 +3731,15 @@ export function VendorDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-blue-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>All Orders</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {getTotalQuantitySumForTab("all-orders")}
+                    {!dashboardStats ? (
+                      dashboardStatsLoading ? (
+                        <Loader2 className={`inline animate-spin ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                      ) : (
+                        0
+                      )
+                    ) : (
+                      dashboardStats.allOrders?.totalQuantity || 0
+                    )}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -2928,7 +3758,15 @@ export function VendorDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-green-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>My Orders</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {getTotalQuantitySumForTab("my-orders")}
+                    {!dashboardStats ? (
+                      dashboardStatsLoading ? (
+                        <Loader2 className={`inline animate-spin ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                      ) : (
+                        0
+                      )
+                    ) : (
+                      getTotalQuantitySumForTab("my-orders")
+                    )}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -2947,7 +3785,15 @@ export function VendorDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-orange-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Handover</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {getTotalQuantitySumForTab("handover")}
+                    {!dashboardStats ? (
+                      dashboardStatsLoading ? (
+                        <Loader2 className={`inline animate-spin ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                      ) : (
+                        0
+                      )
+                    ) : (
+                      getTotalQuantitySumForTab("handover")
+                    )}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -2967,7 +3813,15 @@ export function VendorDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-purple-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Order Tracking</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {getTotalQuantitySumForTab("order-tracking")}
+                    {!dashboardStats ? (
+                      dashboardStatsLoading ? (
+                        <Loader2 className={`inline animate-spin ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                      ) : (
+                        0
+                      )
+                    ) : (
+                      getTotalQuantitySumForTab("order-tracking")
+                    )}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -3022,7 +3876,7 @@ export function VendorDashboard() {
               <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
                 <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    All ({getQuantitySumForTab("all-orders")})
+                    All ({getTotalCountForTab("all-orders")})
                   </TabsTrigger>
                   <TabsTrigger 
                     value="my-orders" 
@@ -3032,7 +3886,7 @@ export function VendorDashboard() {
                         : ''
                     }`}
                   >
-                    My Orders ({getQuantitySumForTab("my-orders")})
+                    My Orders ({getTotalCountForTab("my-orders")})
                   </TabsTrigger>
                   <TabsTrigger 
                     value="handover" 
@@ -3042,7 +3896,7 @@ export function VendorDashboard() {
                         : ''
                     }`}
                   >
-                    Handover ({getQuantitySumForTab("handover")})
+                    Handover ({getTotalCountForTab("handover")})
                   </TabsTrigger>
                   {/* Order Tracking Tab - Desktop Only (Mobile users use the tracking icon in header) */}
                   {!isMobile && (
@@ -3054,7 +3908,7 @@ export function VendorDashboard() {
                           : ''
                       }`}
                     >
-                      Order Tracking ({getQuantitySumForTab("order-tracking")})
+                      Order Tracking ({getTotalCountForTab("order-tracking")})
                     </TabsTrigger>
                   )}
                 </TabsList>
@@ -3383,7 +4237,7 @@ export function VendorDashboard() {
               <div 
                 ref={scrollableContentRef}
                 onScroll={handleScroll}
-                className={`${isMobile ? `max-h-[calc(100vh-280px)] ${activeTab === 'my-orders' ? 'pb-32' : activeTab === 'order-tracking' ? 'pb-1' : 'pb-20'}` : 'max-h-[600px]'} overflow-y-auto relative`}
+                className={`${isMobile ? `${activeTab === 'my-orders' ? 'pb-32' : activeTab === 'order-tracking' ? 'pb-1' : 'pb-20'}` : ''} relative`}
               >
                 <TabsContent value="all-orders" className="mt-0">
                   {/* Mobile Card Layout */}
@@ -3454,10 +4308,23 @@ export function VendorDashboard() {
                           </div>
                         </Card>
                       ))}
+                      {/* Progress Indicator and Loading Spinner - Mobile */}
+                      {(loadingProgress['all-orders']?.total > 0 || allOrdersTotalCount > 0) && (
+                        <div className="text-sm text-gray-500 text-center py-3 mt-2">
+                          {isLoadingMoreAllOrders ? (
+                            <>
+                              <Loader2 className="inline animate-spin mr-2 h-4 w-4" />
+                              Loading more orders...
+                            </>
+                          ) : (
+                            `Showing ${getFilteredOrdersForTab("all-orders").length} of ${allOrdersTotalCount || tabDataCache['all-orders']?.totalCount || dashboardStats?.allOrders?.totalCount || loadingProgress['all-orders']?.total || 0}`
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                    <div className="rounded-md border overflow-y-auto max-h-[600px]">
+                    <div className="rounded-md border">
                       <Table>
                         <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                           <TableRow>
@@ -3547,6 +4414,19 @@ export function VendorDashboard() {
                         ))}
                       </TableBody>
                     </Table>
+                    {/* Progress Indicator and Loading Spinner - Desktop */}
+                    {(loadingProgress['all-orders']?.total > 0 || allOrdersTotalCount > 0) && (
+                      <div className="text-sm text-gray-500 text-center py-3 border-t bg-gray-50">
+                        {isLoadingMoreAllOrders ? (
+                          <>
+                            <Loader2 className="inline animate-spin mr-2 h-4 w-4" />
+                            Loading more orders...
+                          </>
+                          ) : (
+                            `Showing ${getFilteredOrdersForTab("all-orders").length} of ${allOrdersTotalCount || tabDataCache['all-orders']?.totalCount || dashboardStats?.allOrders?.totalCount || loadingProgress['all-orders']?.total || 0}`
+                          )}
+                      </div>
+                    )}
                   </div>
                   )}
                 </TabsContent>
@@ -3698,7 +4578,7 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                    <div className="rounded-md border overflow-y-auto max-h-[600px]" onScroll={handleScroll}>
+                    <div className="rounded-md border" onScroll={handleScroll}>
                       <Table>
                         <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                           <TableRow>
@@ -4044,7 +4924,7 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                  <div className="rounded-md border overflow-y-auto max-h-[600px]" onScroll={handleScroll}>
+                  <div className="rounded-md border">
                     <Table>
                       <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
@@ -4446,6 +5326,19 @@ export function VendorDashboard() {
               
               {/* Order Tracking Tab Content - Shows orders that have been in handover for 24+ hours */}
               <TabsContent value="order-tracking" className="mt-0">
+                {/* Progress Indicator */}
+                {loadingProgress['order-tracking'] && (
+                  <div className="text-sm text-gray-500 text-center py-2 mb-2">
+                    {loadingProgress['order-tracking'].isLoading ? (
+                      <>
+                        <Loader2 className="inline animate-spin mr-2 h-4 w-4" />
+                        Loading {Math.min(loadingProgress['order-tracking'].loaded + 50, loadingProgress['order-tracking'].total)} of {loadingProgress['order-tracking'].total}...
+                      </>
+                    ) : loadingProgress['order-tracking'].loaded < loadingProgress['order-tracking'].total ? (
+                      `Showing ${loadingProgress['order-tracking'].loaded} of ${loadingProgress['order-tracking'].total}`
+                    ) : null}
+                  </div>
+                )}
                 {trackingOrdersLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <div className="text-center">

@@ -344,8 +344,18 @@ class ApiClient {
 
 
   // Orders API for vendor panel
-  async getOrders(): Promise<ApiResponse> {
-    return this.makeRequest('/orders');
+  async getOrders(page: number = 1, limit: number = 50, status: string = 'unclaimed', search?: string, dateFrom?: string, dateTo?: string): Promise<ApiResponse> {
+    let url = `/orders?page=${page}&limit=${limit}&status=${status}`;
+    if (search) {
+      url += `&search=${encodeURIComponent(search)}`;
+    }
+    if (dateFrom) {
+      url += `&dateFrom=${encodeURIComponent(dateFrom)}`;
+    }
+    if (dateTo) {
+      url += `&dateTo=${encodeURIComponent(dateTo)}`;
+    }
+    return this.makeRequest(url);
   }
   async getOrdersLastUpdated(): Promise<ApiResponse> {
     return this.makeRequest('/orders/last-updated')
@@ -563,8 +573,10 @@ class ApiClient {
     })
   }
 
-  async getOrderTrackingOrders(): Promise<ApiResponse> {
+  async getOrderTrackingOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: getOrderTrackingOrders called');
+    console.log('  - page:', page);
+    console.log('  - limit:', limit);
     
     // Use vendor token for order tracking endpoint
     const vendorToken = localStorage.getItem('vendorToken')
@@ -579,8 +591,9 @@ class ApiClient {
     console.log('📤 API CLIENT: Making request to /orders/order-tracking');
     console.log('  - Method: GET');
     console.log('  - Headers: Authorization');
+    console.log('  - Query params: page=' + page + ', limit=' + limit);
 
-    return this.makeRequest(`/orders/order-tracking`, {
+    return this.makeRequest(`/orders/order-tracking?page=${page}&limit=${limit}`, {
       method: 'GET',
       headers: {
         'Authorization': vendorToken
