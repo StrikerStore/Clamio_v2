@@ -994,7 +994,10 @@ export function AdminDashboard() {
         }, 0);
         
         const unclaimedQuantity = ordersData
-          .filter((order: any) => (order.status || '').toString().toLowerCase() === 'unclaimed')
+          .filter((order: any) => 
+            (order.status || '').toString().toLowerCase() === 'unclaimed' && 
+            (order.store_status || 'active') === 'active' // Only count unclaimed orders from active stores
+          )
           .reduce((sum: number, order: any) => {
             const qty = parseInt(order.quantity) || 1;
             return sum + qty;
@@ -2715,8 +2718,13 @@ export function AdminDashboard() {
                           getFilteredOrdersForTab("orders").map((order) => (
                             <TableRow 
                               key={order.unique_id}
-                              className="cursor-pointer hover:bg-gray-50 [&>td]:py-2"
+                              className={`[&>td]:py-2 ${
+                                order.store_status === 'inactive' 
+                                  ? 'opacity-50 grayscale pointer-events-none select-none' 
+                                  : 'cursor-pointer hover:bg-gray-50'
+                              }`}
                               onClick={() => {
+                                if (order.store_status === 'inactive') return; // Prevent click for inactive stores
                                 if (selectedOrders.includes(order.unique_id)) {
                                   setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
                                 } else {
@@ -2728,7 +2736,9 @@ export function AdminDashboard() {
                               <input
                                 type="checkbox"
                                   checked={selectedOrders.includes(order.unique_id)}
+                                disabled={order.store_status === 'inactive'}
                                 onChange={(e) => {
+                                  if (order.store_status === 'inactive') return; // Prevent selection for inactive stores
                                   if (e.target.checked) {
                                       setSelectedOrders([...selectedOrders, order.unique_id])
                                   } else {
@@ -2786,16 +2796,20 @@ export function AdminDashboard() {
                                       variant="default"
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        if (order.store_status === 'inactive') return; // Prevent assign for inactive stores
                                         openAssignModal(order);
                                       }}
-                                      disabled={assignLoading[order.unique_id]}
+                                      disabled={assignLoading[order.unique_id] || order.store_status === 'inactive'}
                                       className="text-xs h-7 px-2"
+                                      title={order.store_status === 'inactive' ? 'Cannot assign order from inactive store' : ''}
                                     >
                                       {assignLoading[order.unique_id] ? (
                                         <>
                                           <div className="animate-spin rounded-full h-2.5 w-2.5 border-b-2 border-white mr-1"></div>
                                           Assigning...
                                         </>
+                                      ) : order.store_status === 'inactive' ? (
+                                        'Inactive Store'
                                       ) : (
                                         'Assign'
                                       )}
@@ -2842,7 +2856,11 @@ export function AdminDashboard() {
                           getFilteredOrdersForTab("orders").map((order: any) => (
                             <Card 
                               key={order.unique_id} 
-                              className="p-2.5 sm:p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors border-l-4"
+                              className={`p-2.5 sm:p-3 transition-colors border-l-4 ${
+                                order.store_status === 'inactive'
+                                  ? 'opacity-50 grayscale pointer-events-none select-none'
+                                  : 'cursor-pointer hover:bg-gray-50 active:bg-gray-100'
+                              }`}
                               style={{ 
                                 borderLeftColor: 
                                   order.status === 'unclaimed' ? '#f59e0b' : 
@@ -2869,6 +2887,7 @@ export function AdminDashboard() {
                                   '#6b7280'
                               }}
                               onClick={() => {
+                                if (order.store_status === 'inactive') return; // Prevent click for inactive stores
                                 if (selectedOrders.includes(order.unique_id)) {
                                   setSelectedOrders(selectedOrders.filter((id) => id !== order.unique_id))
                                 } else {
@@ -2883,7 +2902,9 @@ export function AdminDashboard() {
                                   <input
                                     type="checkbox"
                                     checked={selectedOrders.includes(order.unique_id)}
+                                    disabled={order.store_status === 'inactive'}
                                     onChange={(e) => {
+                                      if (order.store_status === 'inactive') return; // Prevent selection for inactive stores
                                       if (e.target.checked) {
                                         setSelectedOrders([...selectedOrders, order.unique_id])
                                       } else {
