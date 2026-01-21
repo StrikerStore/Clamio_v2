@@ -61,7 +61,7 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
+  ExternalLink, 
   Menu,
   X,
   Store,
@@ -69,7 +69,7 @@ import {
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { apiClient } from "@/lib/api"
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useCallback } from "react"
 import { useDeviceType } from "@/hooks/use-mobile"
 import { InventoryAggregation } from "@/components/admin/inventory/inventory-aggregation"
 import { NotificationDialog } from "./notification-dialog"
@@ -193,6 +193,7 @@ export function AdminDashboard() {
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
   const [selectedVendorFilters, setSelectedVendorFilters] = useState<string[]>([])
   const [selectedStoreFilters, setSelectedStoreFilters] = useState<string[]>([])
+  const [showInactiveStoreOrders, setShowInactiveStoreOrders] = useState(false) // Toggle to show/hide inactive store orders (default: hide)
   const [selectedVendors, setSelectedVendors] = useState<string[]>([])
   const [selectedCarriers, setSelectedCarriers] = useState<string[]>([])
   const [showVendorModal, setShowVendorModal] = useState(false)
@@ -492,11 +493,11 @@ export function AdminDashboard() {
     return Array.from(uniqueVendors).sort();
   }
 
-  const getFilteredOrdersForTab = (tab: string) => {
-    const baseOrders = orders
-
-    // Apply search, status, date, vendor, and store filters
-    return baseOrders.filter((order) => {
+  // Compute filtered orders directly with useMemo instead of useCallback
+  const filteredOrders = useMemo(() => {
+    console.log('🔍 FILTERING ORDERS with showInactiveStoreOrders =', showInactiveStoreOrders)
+    
+    const result = orders.filter((order) => {
       const matchesSearch =
         order.order_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -529,9 +530,48 @@ export function AdminDashboard() {
         }
       }
       
+      // Store status filter
+      const orderStoreStatus = order.store_status?.toString().toLowerCase().trim() || 'active'
+      
+      // If checkbox is UNCHECKED (showInactiveStoreOrders = false), HIDE inactive orders
+      // If checkbox is CHECKED (showInactiveStoreOrders = true), SHOW all orders
+      if (!showInactiveStoreOrders && orderStoreStatus !== 'active') {
+        return false; // Explicitly filter out inactive store orders
+      }
+      
       return matchesSearch && matchesStatus && matchesDate && matchesVendor && matchesStore
     })
-  }
+    
+    console.log(`📊 Filtered ${result.length} orders out of ${orders.length} total`)
+    return result
+  }, [orders, searchTerm, statusFilter, selectedVendorFilters, selectedStoreFilters, dateFrom, dateTo, showInactiveStoreOrders])
+
+  // Wrapper function for compatibility with existing code
+  const getFilteredOrdersForTab = useCallback((tab: string) => {
+    return filteredOrders
+  }, [filteredOrders])
+
+  // Debug: Log when checkbox state changes
+  useEffect(() => {
+    console.log('✅ showInactiveStoreOrders state is now:', showInactiveStoreOrders)
+  }, [showInactiveStoreOrders])
+
+  // Calculate stats from filtered orders
+  const filteredOrdersStats = useMemo(() => {
+    const totalOrders = filteredOrders.length
+    const claimedOrders = filteredOrders.filter((o: any) => 
+      o.status?.toString().toLowerCase() === 'claimed'
+    ).length
+    const unclaimedOrders = filteredOrders.filter((o: any) => 
+      o.status?.toString().toLowerCase() === 'unclaimed'
+    ).length
+    
+    return {
+      totalOrders,
+      claimedOrders,
+      unclaimedOrders
+    }
+  }, [filteredOrders])
 
   const getFilteredOrdersQuantity = (tab: string) => {
     const filteredOrders = getFilteredOrdersForTab(tab);
@@ -1675,7 +1715,7 @@ export function AdminDashboard() {
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-blue-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Total Orders</p>
-                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>{ordersStats.totalOrders}</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>{filteredOrdersStats.totalOrders}</p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
                   <Package className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
@@ -1699,7 +1739,7 @@ export function AdminDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-green-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Claimed</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {ordersStats.claimedOrders}
+                    {filteredOrdersStats.claimedOrders}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -1723,7 +1763,7 @@ export function AdminDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-orange-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Unclaimed</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {ordersStats.unclaimedOrders}
+                    {filteredOrdersStats.unclaimedOrders}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -2225,6 +2265,23 @@ export function AdminDashboard() {
                                   </Popover>
                                 </div>
 
+                                {/* Show/Hide Inactive Store Orders */}
+                                <div className="border-t pt-3">
+                                  <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={showInactiveStoreOrders}
+                                      onChange={(e) => {
+                                        console.log('📱 Mobile checkbox clicked:', e.target.checked)
+                                        setShowInactiveStoreOrders(e.target.checked)
+                                        console.log('📱 State updated to:', e.target.checked)
+                                      }}
+                                      className="w-4 h-4"
+                                    />
+                                    <span className="text-xs">Show orders from inactive stores</span>
+                                  </label>
+                                </div>
+
                                 {/* Date Range */}
                                 <div>
                                   <Label className="text-xs font-medium mb-2 block">Date Range</Label>
@@ -2429,6 +2486,23 @@ export function AdminDashboard() {
                                       <span className="text-sm">{store.store_name}</span>
                                     </label>
                                   ))}
+                                </div>
+                                
+                                {/* Show/Hide Inactive Store Orders */}
+                                <div className="border-t mt-2 pt-2">
+                                  <label className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={showInactiveStoreOrders}
+                                      onChange={(e) => {
+                                        console.log('💻 Desktop checkbox clicked:', e.target.checked)
+                                        setShowInactiveStoreOrders(e.target.checked)
+                                        console.log('💻 State updated to:', e.target.checked)
+                                      }}
+                                      className="w-4 h-4"
+                                    />
+                                    <span className="text-sm">Show orders from inactive stores</span>
+                                  </label>
                                 </div>
                               </div>
                             </PopoverContent>
