@@ -9,7 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Share2, RefreshCw, Filter, X, Upload } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Share2, RefreshCw, Filter, X, Upload, Package } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Product {
@@ -28,7 +35,11 @@ interface RTOEntry {
   Quantity: string;
 }
 
-export function InventoryAggregation() {
+interface InventoryAggregationProps {
+  onProductCountChange?: (count: number) => void;
+}
+
+export function InventoryAggregation({ onProductCountChange }: InventoryAggregationProps = {}) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [rtoData, setRTOData] = useState<RTOEntry[]>([]);
@@ -222,6 +233,13 @@ export function InventoryAggregation() {
     });
   }, [products, typeFilters, seasonFilters, locationFilters, searchFilter, searchExcludeFilter, rtoData]);
 
+  // Update parent component with filtered products count
+  useEffect(() => {
+    if (onProductCountChange) {
+      onProductCountChange(filteredProducts.length);
+    }
+  }, [filteredProducts, onProductCountChange]);
+
   /**
    * Toggle type filter
    */
@@ -354,114 +372,41 @@ export function InventoryAggregation() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Header */}
-      <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
-        Inventory Aggregation
-      </h2>
-
-      {/* Mobile Layout: Metrics + Actions */}
-      <div className="block sm:hidden">
-        <div className="flex gap-3">
-          {/* Left: Total Products Card (half width) */}
-          <div className="w-1/2">
-            <InventoryMetrics 
-              totalProducts={filteredProducts.length} 
-              totalUnfilteredProducts={products.length}
-              hasActiveFilters={hasActiveFilters}
-            />
-          </div>
-          
-          {/* Right: Action Buttons (half width, stacked) */}
-          <div className="w-1/2 flex flex-col gap-2">
-            <Button
-              variant="outline"
-              onClick={fetchInventory}
-              disabled={loading}
-              size="sm"
-              className="h-1/2 flex items-center justify-center"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              <span className="text-xs">Inventory</span>
-            </Button>
-            <div className="h-1/2">
-              <RTOUploadDialog onRTODataUploaded={handleRTODataUploaded} />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Desktop Layout: Original */}
-      <div className="hidden sm:block">
-        {/* Header with Actions */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={fetchInventory}
-              disabled={loading}
-              size="sm"
-            >
-              <RefreshCw className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Refresh</span>
-            </Button>
-            <div data-rto-upload-trigger>
-              <RTOUploadDialog onRTODataUploaded={handleRTODataUploaded} />
-            </div>
-            <Button
-              onClick={shareAllToWhatsApp}
-              disabled={filteredProducts.length === 0}
-              className="bg-green-600 hover:bg-green-700 text-white text-sm sm:text-base"
-              size="sm"
-            >
-              <Share2 className="w-4 h-4 mr-2" />
-              Share All {hasActiveFilters && `(${filteredProducts.length})`}
-            </Button>
-          </div>
-        </div>
-
-        {/* Metrics */}
-        <InventoryMetrics 
-          totalProducts={filteredProducts.length} 
-          totalUnfilteredProducts={products.length}
-          hasActiveFilters={hasActiveFilters}
-        />
-      </div>
-
+    <div>
       {/* Mobile Layout: Filters + Share All */}
       <div className="block sm:hidden">
-        {/* Filters Section - Full Width */}
-        <div className="bg-white border border-gray-200 rounded-lg p-3 mb-3">
-          {/* Filter Header (Accordion on Mobile) */}
-          <div 
-            className="flex items-center justify-between mb-3 cursor-pointer"
+        {/* Filters Button */}
+        <div className="mb-2">
+          <Button
+            variant="outline"
             onClick={() => setShowFilters(!showFilters)}
+            className="w-full h-10 flex items-center justify-center border-gray-300"
           >
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-gray-600" />
-              <h3 className="text-sm font-semibold text-gray-900">Filters</h3>
-            </div>
-            <div className="flex gap-2">
+            <Filter className="w-3.5 h-3.5 mr-1.5" />
+            <span className="text-xs">Filters</span>
+            <X className={`w-3.5 h-3.5 ml-1.5 text-gray-400 transition-transform duration-200 ${showFilters ? 'rotate-45' : ''}`} />
+          </Button>
+        </div>
+
+        {/* Collapsible Filter Controls */}
+        <div className={`${showFilters ? "block mb-2" : "hidden"}`}>
+          <div className="bg-white p-3 border border-gray-300 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900">Filter Options</h3>
               {hasActiveFilters && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    clearFilters();
-                  }}
+                  onClick={clearFilters}
                   className="text-xs"
                 >
                   <X className="w-3 h-3 mr-1" />
                   Clear All
                 </Button>
               )}
-              <X className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${showFilters ? 'rotate-45' : ''}`} />
             </div>
-          </div>
 
-          {/* Filter Controls */}
-          <div className={`${showFilters ? "block" : "hidden"}`}>
+            {/* Filter Controls */}
             <div className="space-y-3">
               {/* Type Filter (Multi-select) */}
               <div className="space-y-1.5">
@@ -662,241 +607,266 @@ export function InventoryAggregation() {
             </div>
           </div>
         </div>
-
-        {/* Share All Button - Full Width */}
-        <Button
-          onClick={shareAllToWhatsApp}
-          disabled={filteredProducts.length === 0}
-          className="bg-green-600 hover:bg-green-700 text-white w-full h-12 text-sm flex items-center justify-center"
-        >
-          <Share2 className="w-4 h-4 mr-2" />
-          <span>Share All {hasActiveFilters && `(${filteredProducts.length})`}</span>
-        </Button>
       </div>
 
       {/* Desktop Filters Section */}
-      <div className="hidden sm:block bg-white border border-gray-200 rounded-lg p-4">
-        {/* Filter Header (Desktop) */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-gray-600" />
-            <h3 className="text-base font-semibold text-gray-900">Filters</h3>
+      <div className="hidden sm:block bg-white pt-0 pb-1.5 px-3">
+        {/* Filter Controls - Single Row */}
+        <div className="flex items-center gap-3">
+          {/* Search Include Filter */}
+          <div className="flex-1">
+            <div className="relative">
+              <Input
+                id="search-filter-desktop"
+                type="text"
+                placeholder="Name or SKU (comma separated)..."
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+                className="h-9 text-sm pr-8"
+              />
+              {searchFilter && (
+                <button
+                  onClick={() => setSearchFilter("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex gap-2">
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearFilters}
-                className="text-sm"
+
+          {/* Search Exclude Filter */}
+          <div className="flex-1">
+            <div className="relative">
+              <Input
+                id="search-exclude-filter-desktop"
+                type="text"
+                placeholder="Keywords to exclude (comma separated)..."
+                value={searchExcludeFilter}
+                onChange={(e) => setSearchExcludeFilter(e.target.value)}
+                className="h-9 text-sm pr-8"
+              />
+              {searchExcludeFilter && (
+                <button
+                  onClick={() => setSearchExcludeFilter("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Type Filter Dropdown */}
+          <div className="w-48">
+            <div className="relative">
+              <Select
+                value={typeFilters.length === 1 ? typeFilters[0] : typeFilters.length > 1 ? "multiple" : ""}
+                onValueChange={(value) => {
+                  if (value === "all" || value === "") {
+                    setTypeFilters([]);
+                  } else if (value === "player" || value === "fan") {
+                    toggleTypeFilter(value);
+                  }
+                }}
               >
-                <X className="w-4 h-4 mr-1" />
-                Clear All
-              </Button>
-            )}
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="All Types">
+                    {typeFilters.length === 0 && "All Types"}
+                    {typeFilters.length === 1 && typeFilters[0].charAt(0).toUpperCase() + typeFilters[0].slice(1)}
+                    {typeFilters.length > 1 && `${typeFilters.length} selected`}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <div className="px-2 py-1.5 space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="type-player-dropdown"
+                        checked={typeFilters.includes("player")}
+                        onCheckedChange={() => toggleTypeFilter("player")}
+                      />
+                      <label
+                        htmlFor="type-player-dropdown"
+                        className="text-sm font-medium leading-none cursor-pointer"
+                      >
+                        Player
+                      </label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="type-fan-dropdown"
+                        checked={typeFilters.includes("fan")}
+                        onCheckedChange={() => toggleTypeFilter("fan")}
+                      />
+                      <label
+                        htmlFor="type-fan-dropdown"
+                        className="text-sm font-medium leading-none cursor-pointer"
+                      >
+                        Fan
+                      </label>
+                    </div>
+                  </div>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+
+          {/* Season Filter Dropdown */}
+          <div className="w-48">
+            <div className="relative">
+              <Select
+                value={seasonFilters.length === 1 ? seasonFilters[0] : seasonFilters.length > 1 ? "multiple" : ""}
+                onValueChange={(value) => {
+                  if (value === "all" || value === "") {
+                    setSeasonFilters([]);
+                  }
+                }}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="All Seasons">
+                    {seasonFilters.length === 0 && "All Seasons"}
+                    {seasonFilters.length === 1 && seasonFilters[0]}
+                    {seasonFilters.length > 1 && `${seasonFilters.length} selected`}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Seasons</SelectItem>
+                  {availableSeasons.length > 0 && (
+                    <div className="px-2 py-1.5 space-y-2 max-h-60 overflow-y-auto">
+                      {availableSeasons.map((season) => (
+                        <div key={season} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`season-${season}-dropdown`}
+                            checked={seasonFilters.includes(season)}
+                            onCheckedChange={() => toggleSeasonFilter(season)}
+                          />
+                          <label
+                            htmlFor={`season-${season}-dropdown`}
+                            className="text-sm font-medium leading-none cursor-pointer"
+                          >
+                            {season}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Clear All Button */}
+          {hasActiveFilters && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearFilters}
+              className="h-9"
+            >
+              <X className="w-4 h-4 mr-1" />
+              Clear All
+            </Button>
+          )}
         </div>
 
-        {/* Filter Controls */}
-        <div className="block">
-          <div className={`grid grid-cols-1 gap-4 ${availableLocations.length > 0 ? 'grid-cols-4' : 'grid-cols-3'}`}>
-            {/* Type Filter (Multi-select) */}
-            <div className="space-y-2">
-              <Label className="text-sm">Type (Multi-select)</Label>
-              <div className="border border-gray-200 rounded-md p-3">
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="type-player-desktop"
-                      checked={typeFilters.includes("player")}
-                      onCheckedChange={() => toggleTypeFilter("player")}
-                    />
-                    <label
-                      htmlFor="type-player-desktop"
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                    >
-                      Player
-                    </label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="type-fan-desktop"
-                      checked={typeFilters.includes("fan")}
-                      onCheckedChange={() => toggleTypeFilter("fan")}
-                    />
-                    <label
-                      htmlFor="type-fan-desktop"
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                    >
-                      Fan
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Season Filter (Multi-select) */}
-            <div className="space-y-2">
-              <Label className="text-sm">Season (Multi-select)</Label>
-              <div className="border border-gray-200 rounded-md p-3 max-h-32 overflow-y-auto">
-                {availableSeasons.length === 0 ? (
-                  <p className="text-sm text-gray-500">No seasons found</p>
-                ) : (
-                  <div className="space-y-2">
-                    {availableSeasons.map((season) => (
-                      <div key={season} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`season-${season}-desktop`}
-                          checked={seasonFilters.includes(season)}
-                          onCheckedChange={() => toggleSeasonFilter(season)}
-                        />
-                        <label
-                          htmlFor={`season-${season}-desktop`}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                        >
-                          {season}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Location Filter (Multi-select) - Only show if RTO data exists */}
-            {availableLocations.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-sm">Location (Multi-select)</Label>
-                <div className="border border-gray-200 rounded-md p-3 max-h-32 overflow-y-auto">
-                  <div className="space-y-2">
-                    {availableLocations.map((location) => (
-                      <div key={location} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`location-${location}-desktop`}
-                          checked={locationFilters.includes(location)}
-                          onCheckedChange={() => toggleLocationFilter(location)}
-                        />
-                        <label
-                          htmlFor={`location-${location}-desktop`}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                        >
-                          {location}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+        {/* Active Filters Display */}
+        {hasActiveFilters && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <span className="text-sm text-gray-600">Active filters:</span>
+            {typeFilters.map((type) => (
+              <Badge key={type} variant="secondary" className="text-sm">
+                Type: {type.charAt(0).toUpperCase() + type.slice(1)}
+                <button
+                  onClick={() => toggleTypeFilter(type)}
+                  className="ml-1 hover:text-gray-900"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            ))}
+            {seasonFilters.map((season) => (
+              <Badge key={season} variant="secondary" className="text-sm">
+                Season: {season}
+                <button
+                  onClick={() => toggleSeasonFilter(season)}
+                  className="ml-1 hover:text-gray-900"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            ))}
+            {locationFilters.map((location) => (
+              <Badge key={location} variant="secondary" className="text-sm">
+                Location: {location}
+                <button
+                  onClick={() => toggleLocationFilter(location)}
+                  className="ml-1 hover:text-gray-900"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            ))}
+            {searchFilter.trim() && (
+              <Badge variant="secondary" className="text-sm">
+                Include: &quot;{searchFilter}&quot;
+                <button
+                  onClick={() => setSearchFilter("")}
+                  className="ml-1 hover:text-gray-900"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
             )}
-
-            {/* Search Filter */}
-            <div className="space-y-2">
-              <Label htmlFor="search-filter-desktop" className="text-sm">Search (includes)</Label>
-              <div className="relative">
-                <Input
-                  id="search-filter-desktop"
-                  type="text"
-                  placeholder="Name or SKU (comma separated)..."
-                  value={searchFilter}
-                  onChange={(e) => setSearchFilter(e.target.value)}
-                  className="h-10 text-sm pr-8"
-                />
-                {searchFilter && (
-                  <button
-                    onClick={() => setSearchFilter("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Search Exclude Filter */}
-            <div className="space-y-2">
-              <Label htmlFor="search-exclude-filter-desktop" className="text-sm">Search (exclude)</Label>
-              <div className="relative">
-                <Input
-                  id="search-exclude-filter-desktop"
-                  type="text"
-                  placeholder="Keywords to exclude (comma separated)..."
-                  value={searchExcludeFilter}
-                  onChange={(e) => setSearchExcludeFilter(e.target.value)}
-                  className="h-10 text-sm pr-8"
-                />
-                {searchExcludeFilter && (
-                  <button
-                    onClick={() => setSearchExcludeFilter("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </div>
+            {searchExcludeFilter.trim() && (
+              <Badge variant="secondary" className="text-sm">
+                Exclude: &quot;{searchExcludeFilter}&quot;
+                <button
+                  onClick={() => setSearchExcludeFilter("")}
+                  className="ml-1 hover:text-gray-900"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            )}
           </div>
+        )}
+      </div>
 
-          {/* Active Filters Display */}
-          {hasActiveFilters && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              <span className="text-sm text-gray-600">Active filters:</span>
-              {typeFilters.map((type) => (
-                <Badge key={type} variant="secondary" className="text-sm">
-                  Type: {type.charAt(0).toUpperCase() + type.slice(1)}
-                  <button
-                    onClick={() => toggleTypeFilter(type)}
-                    className="ml-1 hover:text-gray-900"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </Badge>
-              ))}
-              {seasonFilters.map((season) => (
-                <Badge key={season} variant="secondary" className="text-sm">
-                  Season: {season}
-                  <button
-                    onClick={() => toggleSeasonFilter(season)}
-                    className="ml-1 hover:text-gray-900"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </Badge>
-              ))}
-              {locationFilters.map((location) => (
-                <Badge key={location} variant="secondary" className="text-sm">
-                  Location: {location}
-                  <button
-                    onClick={() => toggleLocationFilter(location)}
-                    className="ml-1 hover:text-gray-900"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </Badge>
-              ))}
-              {searchFilter.trim() && (
-                <Badge variant="secondary" className="text-sm">
-                  Include: &quot;{searchFilter}&quot;
-                  <button
-                    onClick={() => setSearchFilter("")}
-                    className="ml-1 hover:text-gray-900"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </Badge>
-              )}
-              {searchExcludeFilter.trim() && (
-                <Badge variant="secondary" className="text-sm">
-                  Exclude: &quot;{searchExcludeFilter}&quot;
-                  <button
-                    onClick={() => setSearchExcludeFilter("")}
-                    className="ml-1 hover:text-gray-900"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </Badge>
-              )}
+      {/* Desktop: Metrics and Actions */}
+      <div className="hidden sm:block mt-2">
+        <div className="flex items-center justify-between mb-3">
+          {/* Metrics */}
+          <InventoryMetrics 
+            totalProducts={filteredProducts.length} 
+            totalUnfilteredProducts={products.length}
+            hasActiveFilters={hasActiveFilters}
+          />
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={fetchInventory}
+              disabled={loading}
+              size="sm"
+            >
+              <RefreshCw className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+            <div data-rto-upload-trigger>
+              <RTOUploadDialog onRTODataUploaded={handleRTODataUploaded} />
             </div>
-          )}
+            <Button
+              onClick={shareAllToWhatsApp}
+              disabled={filteredProducts.length === 0}
+              variant="outline"
+              size="sm"
+            >
+              <Share2 className="w-4 h-4 mr-2" />
+              Share All {hasActiveFilters && `(${filteredProducts.length})`}
+            </Button>
+          </div>
         </div>
       </div>
 

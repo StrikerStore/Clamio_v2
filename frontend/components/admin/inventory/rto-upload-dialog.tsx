@@ -121,9 +121,9 @@ export function RTOUploadDialog({ onRTODataUploaded }: RTOUploadDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="flex-1 sm:flex-none" data-rto-upload-trigger>
-          <Upload className="w-4 h-4 mr-2" />
-          <span className="text-xs sm:hidden">RTO</span>
+        <Button variant="outline" className="w-full h-10 text-xs flex items-center justify-center sm:w-auto sm:h-auto sm:text-sm" data-rto-upload-trigger>
+          <Upload className="w-3.5 h-3.5 mr-1.5 sm:w-4 sm:h-4 sm:mr-2" />
+          <span className="sm:hidden">RTO</span>
           <span className="hidden sm:inline">Upload RTO</span>
         </Button>
       </DialogTrigger>

@@ -318,7 +318,7 @@ export function ProductInventoryCard({
         {/* Action Button */}
         <Button
           onClick={shareToWhatsApp}
-          className="w-full bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm h-9 sm:h-10"
+          className="w-full bg-gray-900 hover:bg-black text-white text-xs sm:text-sm h-9 sm:h-10"
         >
           <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
           Share to WhatsApp

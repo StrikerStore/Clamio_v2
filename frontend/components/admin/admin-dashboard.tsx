@@ -65,6 +65,8 @@ import {
   Menu,
   X,
   Store,
+  Loader2,
+  Share2,
 } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { useToast } from "@/hooks/use-toast"
@@ -244,6 +246,23 @@ export function AdminDashboard() {
     claimedOrders: 0,
     unclaimedOrders: 0
   })
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [hasMore, setHasMore] = useState(true)
+  const [totalCount, setTotalCount] = useState(0)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  
+  // Dashboard stats state (for cards)
+  const [dashboardStats, setDashboardStats] = useState<{
+    totalOrders: number
+    totalQuantity: number
+    claimedOrders: number
+    unclaimedOrders: number
+    hasFilters: boolean
+  } | null>(null)
+  const [dashboardStatsLoading, setDashboardStatsLoading] = useState(false)
+  
   // Grouped view (mobile) state
   const buildGroupedOrders = (list: any[]) => {
     const groups: Record<string, any> = {}
@@ -323,6 +342,13 @@ export function AdminDashboard() {
   // Vendor assignment state
   const [vendors, setVendors] = useState<any[]>([])
   const [vendorsLoading, setVendorsLoading] = useState(false)
+  const [vendorsLoaded, setVendorsLoaded] = useState(false) // Track if full vendor data has been loaded
+  const [vendorStats, setVendorStats] = useState<{
+    totalVendors?: number,
+    activeVendors?: number
+  }>({})
+  const [vendorStatsLoading, setVendorStatsLoading] = useState(false)
+  const [inventoryProductCount, setInventoryProductCount] = useState<number>(0)
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [selectedOrderForAssignment, setSelectedOrderForAssignment] = useState<any>(null)
   const [selectedVendorId, setSelectedVendorId] = useState<string>("")
@@ -572,6 +598,27 @@ export function AdminDashboard() {
       unclaimedOrders
     }
   }, [filteredOrders])
+
+  // Check if any filters are active
+  const hasActiveFilters = useMemo(() => {
+    return !!(
+      searchTerm || 
+      statusFilter !== 'all' || 
+      selectedVendorFilters.length > 0 || 
+      selectedStoreFilters.length > 0 || 
+      dateFrom || 
+      dateTo
+    )
+  }, [searchTerm, statusFilter, selectedVendorFilters, selectedStoreFilters, dateFrom, dateTo])
+
+  // Always use backend stats (now includes filtered counts when filters are applied)
+  const displayStats = dashboardStats
+
+  // Count unique loaded orders (not rows - one order can have multiple products/rows)
+  const loadedOrdersCount = useMemo(() => {
+    const uniqueIds = new Set(orders.map(order => order.unique_id));
+    return uniqueIds.size;
+  }, [orders])
 
   const getFilteredOrdersQuantity = (tab: string) => {
     const filteredOrders = getFilteredOrdersForTab(tab);
@@ -990,9 +1037,61 @@ export function AdminDashboard() {
     }
   };
 
-  // Fetch orders for admin panel
-  const fetchOrders = async (syncFromShipway = false) => {
+  // Fetch dashboard stats (for cards)
+  const fetchDashboardStats = async (filters?: {
+    search?: string,
+    dateFrom?: string,
+    dateTo?: string,
+    status?: string,
+    vendor?: string,
+    store?: string,
+    showInactiveStores?: boolean
+  }) => {
+    setDashboardStatsLoading(true);
+    try {
+      console.log('📊 Fetching admin dashboard stats...');
+      const response = await apiClient.getAdminDashboardStats(filters);
+      if (response.success && response.data) {
+        console.log('✅ Dashboard stats received:', response.data);
+        setDashboardStats(response.data);
+        // Also update legacy ordersStats for backward compatibility
+        setOrdersStats({
+          totalOrders: response.data.totalQuantity || 0,
+          claimedOrders: response.data.claimedOrders || 0,
+          unclaimedOrders: response.data.unclaimedOrders || 0
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error);
+    } finally {
+      setDashboardStatsLoading(false);
+    }
+  };
+
+  // Fetch orders for admin panel with progressive loading
+  const fetchOrders = async (
+    resetPagination: boolean = true, 
+    syncFromShipway: boolean = false,
+    filters?: {
+      search?: string,
+      dateFrom?: string,
+      dateTo?: string,
+      status?: string,
+      vendor?: string,
+      store?: string,
+      showInactiveStores?: boolean
+    }
+  ) => {
+    // PARALLEL LOADING: Orders can load independently of dashboard stats
+    // Cards will show stats when available, orders will show when available
+    
+    if (resetPagination) {
     setOrdersLoading(true);
+      setCurrentPage(1);
+    } else {
+      setIsLoadingMore(true);
+    }
+    
     try {
       // If syncFromShipway is true, sync orders from Shipway first
       if (syncFromShipway) {
@@ -1017,44 +1116,80 @@ export function AdminDashboard() {
             description: syncError instanceof Error ? syncError.message : "Failed to sync orders from Shipway",
             variant: "destructive",
           });
-          // Continue to fetch orders even if sync fails
         }
       }
-
-      const response = await apiClient.getAdminOrders();
       
-      if (response.success) {
-        const ordersData = response.data.orders;
-        setOrders(ordersData);
+      // Calculate page to fetch based on unique orders loaded (not rows)
+      const pageToFetch = resetPagination ? 1 : Math.floor(loadedOrdersCount / 50) + 1;
+      
+      // OPTIMIZATION: Progressive loading based on scenario
+      // - Initial load (no filters): 20 orders → 50 orders
+      // - Filtered load: 10 orders → 50 orders (faster response for filters)
+      // - Load more (pagination): 50 orders
+      const isInitialLoad = resetPagination && !filters;
+      const isFilteredLoad = resetPagination && filters;
+      let initialLimit: number;
+      
+      if (isInitialLoad) {
+        initialLimit = 20; // Initial load: 20 orders for quick display
+      } else if (isFilteredLoad) {
+        initialLimit = 10; // Filtered load: 10 orders for instant response
+      } else {
+        initialLimit = 50; // Pagination: 50 orders per page
+      }
+      
+      console.log('📄 Fetching admin orders:', { page: pageToFetch, limit: initialLimit, filters });
+      
+      const response = await apiClient.getAdminOrders(pageToFetch, initialLimit, filters);
+      
+      if (response.success && response.data) {
+        const ordersData = response.data.orders || [];
+        const pagination = response.data.pagination;
         
-        // Calculate stats by summing quantities
-        const totalQuantity = ordersData.reduce((sum: number, order: any) => {
-          const qty = parseInt(order.quantity) || 1;
-          return sum + qty;
-        }, 0);
-        
-        const unclaimedQuantity = ordersData
-          .filter((order: any) => 
-            (order.status || '').toString().toLowerCase() === 'unclaimed' && 
-            (order.store_status || 'active') === 'active' // Only count unclaimed orders from active stores
-          )
-          .reduce((sum: number, order: any) => {
-            const qty = parseInt(order.quantity) || 1;
-            return sum + qty;
-          }, 0);
-        
-        const claimedQuantity = ordersData
-          .filter((order: any) => (order.status || '').toString().toLowerCase() !== 'unclaimed')
-          .reduce((sum: number, order: any) => {
-            const qty = parseInt(order.quantity) || 1;
-            return sum + qty;
-          }, 0);
-        
-        setOrdersStats({
-          totalOrders: totalQuantity,
-          claimedOrders: claimedQuantity,
-          unclaimedOrders: unclaimedQuantity
-        });
+        if (resetPagination) {
+          // Display first batch immediately
+          setOrders(ordersData);
+          setOrdersLoading(false); // Stop loading state after first batch
+          
+          // Update pagination metadata
+          if (pagination) {
+            setHasMore(pagination.hasMore || false);
+            setTotalCount(pagination.total || 0);
+            setCurrentPage(2); // Next page will be 2
+          }
+          
+          // For initial/filtered load, fetch full page (50 orders) in background
+          if ((isInitialLoad || isFilteredLoad) && ordersData.length < 50 && pagination && pagination.total > ordersData.length) {
+            console.log('🚀 Fetching remaining orders in background (completing first page to 50)...');
+            apiClient.getAdminOrders(1, 50, filters).then((fullResponse) => {
+              if (fullResponse.success && fullResponse.data) {
+                const fullOrdersData = fullResponse.data.orders || [];
+                if (fullOrdersData.length > ordersData.length) {
+                  console.log(`✅ Background load complete: Updated to ${fullOrdersData.length} orders (from ${ordersData.length})`);
+                  setOrders(fullOrdersData);
+                  if (fullResponse.data.pagination) {
+                    setHasMore(fullResponse.data.pagination.hasMore || false);
+                    setTotalCount(fullResponse.data.pagination.total || 0);
+                  }
+                }
+              }
+            }).catch((error) => {
+              console.error('Error loading remaining orders in background:', error);
+              // Don't show error to user - first batch is already displayed
+            });
+          }
+        } else {
+          // Infinite scroll - append orders
+          setOrders(prev => [...prev, ...ordersData]);
+          setIsLoadingMore(false);
+          
+          // Update pagination
+          if (pagination) {
+            setHasMore(pagination.hasMore || false);
+            setTotalCount(pagination.total || 0);
+            setCurrentPage(prev => prev + 1);
+          }
+        }
       } else {
         toast({
           title: "Error",
@@ -1063,6 +1198,7 @@ export function AdminDashboard() {
         });
       }
     } catch (error) {
+      console.error('Error fetching orders:', error);
       toast({
         title: "Error",
         description: "Failed to fetch orders",
@@ -1070,6 +1206,7 @@ export function AdminDashboard() {
       });
     } finally {
       setOrdersLoading(false);
+      setIsLoadingMore(false);
     }
   };
 
@@ -1122,11 +1259,16 @@ export function AdminDashboard() {
     }
   };
 
-  // Auto-load orders when component mounts (only once on initial load)
+  // Auto-load orders and stats when component mounts (PARALLEL LOADING)
   useEffect(() => {
-    fetchOrders();
-    fetchVendors();
+    // Load dashboard stats and orders in parallel for faster initial load
+    console.log('🚀 Starting parallel load: dashboard stats + orders + vendor stats...');
+    // On initial load, only show active store orders (matching default frontend state)
+    fetchDashboardStats({ showInactiveStores: false }); // Load stats for cards - active stores only
+    fetchOrders(true, false, { showInactiveStores: false }); // Load first 20 orders - active stores only
+    fetchVendorStats(); // Load vendor counts only (lightweight)
     fetchStores(); // Fetch stores first for carrier filtering
+    // Note: Full vendor data (fetchVendors) is lazy-loaded when Vendors tab is opened
   }, []);
 
   // Fetch carriers after stores are loaded and a store is selected
@@ -1135,6 +1277,91 @@ export function AdminDashboard() {
       fetchCarriers();
     }
   }, [stores, selectedStoreFilter]);
+
+  // Refetch stats and orders when showInactiveStoreOrders toggle changes
+  useEffect(() => {
+    // Skip on initial mount (handled by the initial load useEffect)
+    if (orders.length > 0) {
+      console.log('🔄 showInactiveStoreOrders changed, refetching stats and orders...');
+      fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders });
+      fetchOrders(true, false, { showInactiveStores: showInactiveStoreOrders });
+    }
+  }, [showInactiveStoreOrders]);
+
+  // Lazy load vendors when Vendors tab is opened (OPTIMIZATION: Only load full data when needed)
+  useEffect(() => {
+    if (activeTab === 'vendors' && !vendorsLoaded && !vendorsLoading) {
+      console.log('🔄 Vendors tab opened - lazy loading vendor data...');
+      fetchVendors();
+    }
+  }, [activeTab, vendorsLoaded, vendorsLoading]);
+
+  // Apply filters with backend fetch (OPTIMIZATION: Backend filtering for accurate counts)
+  useEffect(() => {
+    // Skip on initial mount (handled by initial load useEffect)
+    if (orders.length === 0) return;
+
+    // Debounce search input to avoid too many API calls
+    const timeoutId = setTimeout(() => {
+      if (hasActiveFilters) {
+        console.log('🔍 Filters changed, fetching from backend with filters...');
+        
+        // Build filter object for backend
+        const backendFilters: any = {
+          showInactiveStores: showInactiveStoreOrders
+        };
+        
+        if (searchTerm) backendFilters.search = searchTerm;
+        if (statusFilter && statusFilter !== 'all') backendFilters.status = statusFilter;
+        if (dateFrom) backendFilters.dateFrom = dateFrom.toISOString().split('T')[0];
+        if (dateTo) backendFilters.dateTo = dateTo.toISOString().split('T')[0];
+        // Note: vendor and store filters are applied on frontend for now
+        // Can be moved to backend if needed
+        
+        // Fetch filtered stats and orders from backend
+        fetchDashboardStats(backendFilters);
+        fetchOrders(true, false, backendFilters);
+      } else {
+        // No filters active - reset to initial state
+        console.log('🔄 Filters cleared, resetting to initial state...');
+        fetchDashboardStats({ showInactiveStores: false });
+        fetchOrders(true, false, { showInactiveStores: false });
+      }
+    }, 500); // 500ms debounce for search
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders, hasActiveFilters]);
+
+  // Infinite scroll handler
+  const handleScroll = useCallback(() => {
+    // Use window scrolling
+    const scrolledToBottom = 
+      window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200;
+    
+    // Only trigger if on orders tab, scrolled to bottom, has more data, and not currently loading
+    if (activeTab === 'orders' && scrolledToBottom && hasMore && !ordersLoading && !isLoadingMore) {
+      console.log('📜 Infinite scroll triggered - loading more admin orders...');
+      
+      // Build current filter state for pagination
+      const currentFilters: any = {
+        showInactiveStores: showInactiveStoreOrders
+      };
+      if (searchTerm) currentFilters.search = searchTerm;
+      if (statusFilter && statusFilter !== 'all') currentFilters.status = statusFilter;
+      if (dateFrom) currentFilters.dateFrom = dateFrom.toISOString().split('T')[0];
+      if (dateTo) currentFilters.dateTo = dateTo.toISOString().split('T')[0];
+      
+      fetchOrders(false, false, currentFilters);
+    }
+  }, [activeTab, hasMore, ordersLoading, isLoadingMore, currentPage, showInactiveStoreOrders, searchTerm, statusFilter, dateFrom, dateTo]);
+
+  // Attach window scroll listener for infinite scroll
+  useEffect(() => {
+    window.addEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [handleScroll]);
 
   // Note: Removed automatic order refresh on:
   // - Window visibility change (was causing frequent refreshes)
@@ -1151,13 +1378,44 @@ export function AdminDashboard() {
     }
   }, [stores]);
 
-  // Fetch vendors for assignment dropdown
+  // Fetch vendor statistics (lightweight - counts only)
+  const fetchVendorStats = async () => {
+    setVendorStatsLoading(true);
+    try {
+      console.log('📊 Fetching vendor stats...');
+      const response = await apiClient.getVendorStats();
+      if (response.success && response.data) {
+        console.log('✅ Vendor stats received:', response.data);
+        setVendorStats(response.data);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to fetch vendor statistics",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching vendor stats:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch vendor statistics",
+        variant: "destructive",
+      });
+    } finally {
+      setVendorStatsLoading(false);
+    }
+  };
+
+  // Fetch vendors for assignment dropdown and vendors tab (full data)
   const fetchVendors = async () => {
     setVendorsLoading(true);
     try {
+      console.log('📋 Fetching full vendor data...');
       const response = await apiClient.getAdminVendors();
       if (response.success) {
         setVendors(response.data.vendors);
+        setVendorsLoaded(true); // Mark as loaded
+        console.log(`✅ Loaded ${response.data.vendors.length} vendors`);
       } else {
         toast({
           title: "Error",
@@ -1715,7 +1973,17 @@ export function AdminDashboard() {
               <div className="flex items-center justify-between gap-1">
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-blue-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Total Orders</p>
-                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>{filteredOrdersStats.totalOrders}</p>
+                  <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
+                    {!dashboardStats ? (
+                      dashboardStatsLoading ? (
+                        <Loader2 className={`inline animate-spin ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                      ) : (
+                        0
+                      )
+                    ) : (
+                      displayStats?.totalQuantity || 0
+                    )}
+                  </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
                   <Package className={`${isMobile ? 'w-4 h-4 sm:w-5 sm:h-5' : 'w-6 h-6'}`} />
@@ -1739,7 +2007,15 @@ export function AdminDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-green-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Claimed</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {filteredOrdersStats.claimedOrders}
+                    {!dashboardStats ? (
+                      dashboardStatsLoading ? (
+                        <Loader2 className={`inline animate-spin ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                      ) : (
+                        0
+                      )
+                    ) : (
+                      displayStats?.claimedOrders || 0
+                    )}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -1763,7 +2039,15 @@ export function AdminDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-orange-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Unclaimed</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {filteredOrdersStats.unclaimedOrders}
+                    {!dashboardStats ? (
+                      dashboardStatsLoading ? (
+                        <Loader2 className={`inline animate-spin ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                      ) : (
+                        0
+                      )
+                    ) : (
+                      displayStats?.unclaimedOrders || 0
+                    )}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -1788,7 +2072,11 @@ export function AdminDashboard() {
                 <div className="min-w-0 flex-1">
                   <p className={`font-medium text-purple-100 opacity-90 truncate ${isMobile ? 'text-[10px] sm:text-xs' : 'text-sm'}`}>Vendors</p>
                   <p className={`font-bold mt-0.5 sm:mt-1 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>
-                    {vendors.filter((v) => (v.status || '').toString().trim().toLowerCase() === 'active').length}
+                    {vendorStatsLoading ? (
+                      <Loader2 className={`inline animate-spin ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                    ) : (
+                      vendorStats.activeVendors || 0
+                    )}
                   </p>
                 </div>
                 <div className={`bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 ${isMobile ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-12 h-12'}`}>
@@ -1807,10 +2095,19 @@ export function AdminDashboard() {
               <div className="min-w-0 flex-1">
                 <CardTitle className={`${isMobile ? 'text-lg sm:text-xl' : 'text-2xl'} ${isMobile ? 'leading-tight' : ''}`}>
                   {isMobile ? (
-                    <>
-                      Admin<br />
-                      Management
-                    </>
+                    activeTab === 'inventory' ? (
+                      <div>
+                        <div>Aggregate Orders</div>
+                        <div className="text-xs font-normal mt-0.5 opacity-60">
+                          Total Products - {inventoryProductCount}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        Admin<br />
+                        Management
+                      </>
+                    )
                   ) : (
                     'Admin Management'
                   )}
@@ -1841,13 +2138,13 @@ export function AdminDashboard() {
           <CardContent className="p-2 sm:p-4 md:p-6">
             <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
               {/* Fixed Controls Section */}
-              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-3 sm:pb-4 border-b mb-3 sm:mb-4`}>
+              <div className={`sticky ${isMobile ? 'top-16' : 'top-20'} bg-white z-40 pb-0`}>
                 <TabsList className={`grid w-full ${isMobile ? 'grid-cols-3' : 'grid-cols-4'} ${isMobile ? 'h-auto mb-3 sm:mb-4' : 'mb-6'}`}>
                   <TabsTrigger value="orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    Orders ({getFilteredOrdersQuantity("orders")})
+                    Orders ({displayStats?.totalQuantity || totalCount || 0})
                   </TabsTrigger>
                   <TabsTrigger value="vendors" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
-                    Vendors ({vendors.length})
+                    Vendors ({vendorStats.totalVendors || vendors.length || 0})
                   </TabsTrigger>
                   <TabsTrigger value="carrier" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     Carrier ({getFilteredCarriers().length})
@@ -2789,9 +3086,9 @@ export function AdminDashboard() {
                              </TableCell>
                            </TableRow>
                         ) : getFilteredOrdersForTab("orders").length > 0 ? (
-                          getFilteredOrdersForTab("orders").map((order) => (
+                          getFilteredOrdersForTab("orders").map((order, index) => (
                             <TableRow 
-                              key={order.unique_id}
+                              key={`${order.unique_id}-${index}`}
                               className={`[&>td]:py-2 ${
                                 order.store_status === 'inactive' 
                                   ? 'opacity-50 grayscale pointer-events-none select-none' 
@@ -2923,13 +3220,13 @@ export function AdminDashboard() {
                       </TableBody>
                       </Table>
                     ) : (
-                      <div className="space-y-2.5 sm:space-y-3 pb-24">
+                      <div className="space-y-2.5 sm:space-y-3">
                         {ordersLoading ? (
                           <Card className="p-4 text-center">Loading orders...</Card>
                         ) : (
-                          getFilteredOrdersForTab("orders").map((order: any) => (
+                          getFilteredOrdersForTab("orders").map((order: any, index) => (
                             <Card 
-                              key={order.unique_id} 
+                              key={`${order.unique_id}-${index}`} 
                               className={`p-2.5 sm:p-3 transition-colors border-l-4 ${
                                 order.store_status === 'inactive'
                                   ? 'opacity-50 grayscale pointer-events-none select-none'
@@ -3070,11 +3367,41 @@ export function AdminDashboard() {
                       </div>
                     )}
                   </div>
+                  
+                  {/* Loading More Orders Indicator */}
+                  {isLoadingMore && (
+                    <div className={`flex items-center justify-center py-6 space-x-2 ${isMobile ? 'pb-24' : ''}`}>
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      <span className="text-sm text-gray-600">Loading more orders...</span>
+                    </div>
+                  )}
+                  
+                  {/* Loaded Orders Status */}
+                  {!ordersLoading && orders.length > 0 && totalCount > 0 && (
+                    <div className={`flex items-center justify-center py-4 border-t ${isMobile ? 'pb-24' : ''}`}>
+                      <div className="text-sm text-gray-600">
+                        <span className="font-medium text-gray-900">Loaded {loadedOrdersCount}</span>
+                        <span> out of </span>
+                        <span className="font-medium text-gray-900">{totalCount}</span>
+                        <span> orders</span>
+                        {loadedOrdersCount < totalCount && (
+                          <span className="ml-2 text-gray-500">(Scroll for more)</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="vendors" className="mt-0">
                   <div className={`rounded-md border ${!isMobile ? 'overflow-y-auto max-h-[600px]' : ''}`}>
-                    {!isMobile ? (
+                    {vendorsLoading && vendors.length === 0 ? (
+                      <Card className="p-4 text-center">
+                        <div className="flex items-center justify-center space-x-2">
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                          <span>Loading vendors...</span>
+                        </div>
+                      </Card>
+                    ) : !isMobile ? (
                       <Table>
                       <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                         <TableRow>
@@ -3616,7 +3943,7 @@ export function AdminDashboard() {
 
                 {/* Inventory Tab */}
                 <TabsContent value="inventory" className="mt-0">
-                  <InventoryAggregation />
+                  <InventoryAggregation onProductCountChange={setInventoryProductCount} />
                 </TabsContent>
 
                 {/* Settlement Management Tab - Hidden for now (tab trigger is commented out, content kept for future use) */}
@@ -4591,6 +4918,47 @@ export function AdminDashboard() {
                     >
                       <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2 flex-shrink-0" />
                       <span className="truncate">Priority</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Bottom Inventory Actions for Mobile Inventory */}
+              {isMobile && activeTab === "inventory" && (
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    {/* Move to Top Button */}
+                    <Button
+                      onClick={scrollToTop}
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                    >
+                      <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    </Button>
+                    
+                    {/* Share All Button - Green */}
+                    <Button 
+                      className="flex-1 h-10 sm:h-12 px-1.5 sm:px-3 text-[10px] xs:text-xs sm:text-sm font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0 whitespace-nowrap"
+                    >
+                      <Share2 className="w-3 h-3 xs:w-3.5 xs:h-3.5 sm:w-4 sm:h-4 mr-0.5 xs:mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="overflow-hidden text-ellipsis">Share All</span>
+                    </Button>
+
+                    {/* Inventory Button - Blue */}
+                    <Button 
+                      className="flex-1 h-10 sm:h-12 px-1.5 sm:px-3 text-[10px] xs:text-xs sm:text-sm font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 whitespace-nowrap"
+                    >
+                      <RefreshCw className="w-3 h-3 xs:w-3.5 xs:h-3.5 sm:w-4 sm:h-4 mr-0.5 xs:mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="overflow-hidden text-ellipsis">Inventory</span>
+                    </Button>
+
+                    {/* RTO Button - Purple */}
+                    <Button 
+                      className="flex-1 h-10 sm:h-12 px-1.5 sm:px-3 text-[10px] xs:text-xs sm:text-sm font-medium bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 border-0 shadow-lg min-w-0 whitespace-nowrap"
+                    >
+                      <Upload className="w-3 h-3 xs:w-3.5 xs:h-3.5 sm:w-4 sm:h-4 mr-0.5 xs:mr-1 sm:mr-2 flex-shrink-0" />
+                      <span className="overflow-hidden text-ellipsis">RTO</span>
                     </Button>
                   </div>
                 </div>

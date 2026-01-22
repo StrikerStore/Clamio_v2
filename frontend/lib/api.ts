@@ -391,8 +391,64 @@ class ApiClient {
   }
 
   // Admin orders API
-  async getAdminOrders(): Promise<ApiResponse> {
-    return this.makeRequest('/orders/admin/all');
+  async getAdminOrders(
+    page: number = 1, 
+    limit: number = 50, 
+    filters?: {
+      search?: string,
+      dateFrom?: string,
+      dateTo?: string,
+      status?: string,
+      vendor?: string,
+      store?: string,
+      showInactiveStores?: boolean
+    }
+  ): Promise<ApiResponse> {
+    // Build query params
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString()
+    });
+    
+    // Add filters if provided
+    if (filters) {
+      if (filters.search) params.append('search', filters.search);
+      if (filters.dateFrom) params.append('dateFrom', filters.dateFrom);
+      if (filters.dateTo) params.append('dateTo', filters.dateTo);
+      if (filters.status && filters.status !== 'all') params.append('status', filters.status);
+      if (filters.vendor) params.append('vendor', filters.vendor);
+      if (filters.store) params.append('store', filters.store);
+      if (filters.showInactiveStores) params.append('showInactiveStores', 'true');
+    }
+    
+    return this.makeRequest(`/orders/admin/all?${params.toString()}`);
+  }
+
+  async getAdminDashboardStats(filters?: {
+    search?: string,
+    dateFrom?: string,
+    dateTo?: string,
+    status?: string,
+    vendor?: string,
+    store?: string,
+    showInactiveStores?: boolean
+  }): Promise<ApiResponse> {
+    // Build query params
+    const params = new URLSearchParams();
+    
+    // Add filters if provided
+    if (filters) {
+      if (filters.search) params.append('search', filters.search);
+      if (filters.dateFrom) params.append('dateFrom', filters.dateFrom);
+      if (filters.dateTo) params.append('dateTo', filters.dateTo);
+      if (filters.status && filters.status !== 'all') params.append('status', filters.status);
+      if (filters.vendor) params.append('vendor', filters.vendor);
+      if (filters.store) params.append('store', filters.store);
+      if (filters.showInactiveStores) params.append('showInactiveStores', 'true');
+    }
+    
+    const queryString = params.toString();
+    return this.makeRequest(`/orders/admin/dashboard-stats${queryString ? '?' + queryString : ''}`);
   }
 
   async refreshAdminOrders(): Promise<ApiResponse> {
@@ -404,6 +460,11 @@ class ApiClient {
   async getAdminVendors(): Promise<ApiResponse> {
     // Prefer enriched vendors report for admin auditing table
     return this.makeRequest('/users/vendors-report');
+  }
+
+  async getVendorStats(): Promise<ApiResponse> {
+    // Lightweight endpoint for vendor counts only (for dashboard cards)
+    return this.makeRequest('/users/vendors-stats');
   }
 
   async assignOrderToVendor(unique_id: string, vendor_warehouse_id: string): Promise<ApiResponse> {
