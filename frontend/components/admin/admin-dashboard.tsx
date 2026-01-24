@@ -503,7 +503,7 @@ export function AdminDashboard() {
 
     // Handle undefined or null status
     if (!status) {
-      return <Badge variant="outline" className="bg-gray-100 text-gray-800 text-xs truncate">UNKNOWN</Badge>
+      return <Badge variant="outline" className="bg-gray-100 text-gray-800 text-xs whitespace-normal break-words">UNKNOWN</Badge>
     }
 
     // Normalize status to lowercase for lookup (handles "ACTIVE", "active", etc.)
@@ -512,7 +512,7 @@ export function AdminDashboard() {
     const statusKey = normalizedStatus as keyof typeof colors
 
     return (
-      <Badge variant="outline" className={`${colors[statusKey] || "bg-gray-100 text-gray-800"} text-xs truncate max-w-full px-1.5 py-0.5`}>
+      <Badge variant="outline" className={`${colors[statusKey] || "bg-gray-100 text-gray-800"} text-xs whitespace-normal break-words max-w-full px-1.5 py-0.5`}>
         {displayNames[statusKey] || status.replace("_", " ").toUpperCase()}
       </Badge>
     )
@@ -3782,10 +3782,10 @@ export function AdminDashboard() {
                           <TableHead className="text-xs">Order ID</TableHead>
                           <TableHead className="text-xs">Customer</TableHead>
                           <TableHead className="text-xs">Store</TableHead>
-                          <TableHead className="text-xs">Vendor</TableHead>
                           <TableHead className="text-xs">Product</TableHead>
                           <TableHead className="text-xs">Value</TableHead>
                           <TableHead className="text-xs">Status</TableHead>
+                          <TableHead className="text-xs">AWB</TableHead>
                           <TableHead className="text-xs">Created</TableHead>
                           <TableHead className="text-xs">Actions</TableHead>
                         </TableRow>
@@ -3848,17 +3848,17 @@ export function AdminDashboard() {
                               />
                             </TableCell>
                             <TableCell className="font-medium text-xs">{order.order_id}</TableCell>
-                            <TableCell className="text-xs">{order.customer_name}</TableCell>
+                            <TableCell className="text-xs">{order.customer_name ? order.customer_name.split(' ')[0] : 'N/A'}</TableCell>
                             <TableCell className="text-xs">
                               <div className="flex flex-col">
                                 <span className="font-medium">{order.store_name || 'N/A'}</span>
                                 <span className="text-[10px] text-gray-500">{order.account_code || ''}</span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-xs">{order.vendor_name}</TableCell>
                             <TableCell className="text-xs">{order.product_name}</TableCell>
                             <TableCell className="text-xs whitespace-nowrap">₹{order.value}</TableCell>
                             <TableCell className="text-xs">{getStatusBadge(order.status)}</TableCell>
+                            <TableCell className="text-xs font-mono text-purple-600">{order.awb || order.airway_bill || order.airwaybill || 'N/A'}</TableCell>
                             <TableCell className="text-xs">
                               {order.created_at ? (
                                 <div className="flex flex-col">
@@ -3914,7 +3914,7 @@ export function AdminDashboard() {
                                           Unassigning...
                                         </>
                                       ) : (
-                                        'Unassign'
+                                        order.vendor_name || 'Unassign'
                                       )}
                                     </Button>
                                   )}

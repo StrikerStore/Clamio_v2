@@ -1976,7 +1976,7 @@ router.get('/admin/all', authenticateBasicAuth, requireAdminOrSuperadmin, async 
     const processedOrders = paginatedOrders.map(order => ({
       unique_id: order.unique_id,
       order_id: order.order_id,
-      customer_name: order.customer_name || order.customer || 'N/A',
+      customer_name: order.customer_name_from_info || order.customer_name || order.customer || 'N/A',
       vendor_name: order.vendor_name || (order.claimed_by ? order.claimed_by : 'Unclaimed'),
       product_name: order.product_name || order.product || 'N/A',
       product_code: order.product_code || order.sku || 'N/A',

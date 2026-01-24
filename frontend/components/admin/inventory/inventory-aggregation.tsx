@@ -929,6 +929,6 @@ export const InventoryAggregation = forwardRef<InventoryAggregationRef, Inventor
       )}
     </div>
   );
-  }
+}
 );
 

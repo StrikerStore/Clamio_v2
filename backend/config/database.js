@@ -3781,7 +3781,16 @@ class Database {
             WHEN l.current_shipment_status IS NOT NULL AND l.current_shipment_status != '' 
             THEN l.current_shipment_status 
             ELSE c.status 
-          END as status
+          END as status,
+          CASE
+            WHEN ci.billing_firstname IS NOT NULL AND ci.billing_firstname != '' 
+            THEN TRIM(CONCAT(COALESCE(ci.billing_firstname, ''), ' ', COALESCE(ci.billing_lastname, '')))
+            WHEN ci.shipping_firstname IS NOT NULL AND ci.shipping_firstname != ''
+            THEN TRIM(CONCAT(COALESCE(ci.shipping_firstname, ''), ' ', COALESCE(ci.shipping_lastname, '')))
+            WHEN o.customer_name IS NOT NULL AND o.customer_name != ''
+            THEN o.customer_name
+            ELSE NULL
+          END as customer_name_from_info
         FROM orders o
         LEFT JOIN products p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -3793,6 +3802,7 @@ class Database {
         LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
         LEFT JOIN store_info s ON o.account_code = s.account_code
         LEFT JOIN users u ON c.claimed_by = u.warehouseId
+        LEFT JOIN customer_info ci ON o.order_id = ci.order_id AND o.account_code = ci.account_code
         WHERE ${whereConditions}
         ORDER BY o.order_date DESC, o.order_id, o.product_name
         LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}`;
