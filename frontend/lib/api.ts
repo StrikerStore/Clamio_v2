@@ -398,9 +398,9 @@ class ApiClient {
       search?: string,
       dateFrom?: string,
       dateTo?: string,
-      status?: string,
-      vendor?: string,
-      store?: string,
+      status?: string | string[],
+      vendor?: string | string[],
+      store?: string | string[],
       showInactiveStores?: boolean
     }
   ): Promise<ApiResponse> {
@@ -415,9 +415,30 @@ class ApiClient {
       if (filters.search) params.append('search', filters.search);
       if (filters.dateFrom) params.append('dateFrom', filters.dateFrom);
       if (filters.dateTo) params.append('dateTo', filters.dateTo);
-      if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-      if (filters.vendor) params.append('vendor', filters.vendor);
-      if (filters.store) params.append('store', filters.store);
+      // Handle status as array or string
+      if (filters.status) {
+        if (Array.isArray(filters.status) && filters.status.length > 0) {
+          filters.status.forEach(s => params.append('status', s));
+        } else if (typeof filters.status === 'string' && filters.status !== 'all') {
+          params.append('status', filters.status);
+        }
+      }
+      // Handle vendor as array or string
+      if (filters.vendor) {
+        if (Array.isArray(filters.vendor) && filters.vendor.length > 0) {
+          filters.vendor.forEach(v => params.append('vendor', v));
+        } else if (typeof filters.vendor === 'string') {
+          params.append('vendor', filters.vendor);
+        }
+      }
+      // Handle store as array or string
+      if (filters.store) {
+        if (Array.isArray(filters.store) && filters.store.length > 0) {
+          filters.store.forEach(s => params.append('store', s));
+        } else if (typeof filters.store === 'string') {
+          params.append('store', filters.store);
+        }
+      }
       if (filters.showInactiveStores) params.append('showInactiveStores', 'true');
     }
     
@@ -428,9 +449,9 @@ class ApiClient {
     search?: string,
     dateFrom?: string,
     dateTo?: string,
-    status?: string,
-    vendor?: string,
-    store?: string,
+    status?: string | string[],
+    vendor?: string | string[],
+    store?: string | string[],
     showInactiveStores?: boolean
   }): Promise<ApiResponse> {
     // Build query params
@@ -441,9 +462,30 @@ class ApiClient {
       if (filters.search) params.append('search', filters.search);
       if (filters.dateFrom) params.append('dateFrom', filters.dateFrom);
       if (filters.dateTo) params.append('dateTo', filters.dateTo);
-      if (filters.status && filters.status !== 'all') params.append('status', filters.status);
-      if (filters.vendor) params.append('vendor', filters.vendor);
-      if (filters.store) params.append('store', filters.store);
+      // Handle status as array or string
+      if (filters.status) {
+        if (Array.isArray(filters.status) && filters.status.length > 0) {
+          filters.status.forEach(s => params.append('status', s));
+        } else if (typeof filters.status === 'string' && filters.status !== 'all') {
+          params.append('status', filters.status);
+        }
+      }
+      // Handle vendor as array or string
+      if (filters.vendor) {
+        if (Array.isArray(filters.vendor) && filters.vendor.length > 0) {
+          filters.vendor.forEach(v => params.append('vendor', v));
+        } else if (typeof filters.vendor === 'string') {
+          params.append('vendor', filters.vendor);
+        }
+      }
+      // Handle store as array or string
+      if (filters.store) {
+        if (Array.isArray(filters.store) && filters.store.length > 0) {
+          filters.store.forEach(s => params.append('store', s));
+        } else if (typeof filters.store === 'string') {
+          params.append('store', filters.store);
+        }
+      }
       if (filters.showInactiveStores) params.append('showInactiveStores', 'true');
     }
     

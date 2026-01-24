@@ -73,7 +73,7 @@ import { useToast } from "@/hooks/use-toast"
 import { apiClient } from "@/lib/api"
 import { useEffect, useMemo, useRef, useCallback } from "react"
 import { useDeviceType } from "@/hooks/use-mobile"
-import { InventoryAggregation } from "@/components/admin/inventory/inventory-aggregation"
+import { InventoryAggregation, InventoryAggregationRef } from "@/components/admin/inventory/inventory-aggregation"
 import { NotificationDialog } from "./notification-dialog"
 
 // Mock data for admin dashboard
@@ -189,7 +189,7 @@ export function AdminDashboard() {
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState("orders")
   const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState<string[]>([])
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined)
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined)
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
@@ -200,6 +200,7 @@ export function AdminDashboard() {
   const [selectedCarriers, setSelectedCarriers] = useState<string[]>([])
   const [showVendorModal, setShowVendorModal] = useState(false)
   const [showCarrierModal, setShowCarrierModal] = useState(false)
+  const [vendorFilterPopoverOpen, setVendorFilterPopoverOpen] = useState(false)
   const [showSettlementModal, setShowSettlementModal] = useState(false)
   const [selectedSettlement, setSelectedSettlement] = useState<any>(null)
   const [settlementAction, setSettlementAction] = useState<"approve" | "reject" | null>(null)
@@ -349,6 +350,53 @@ export function AdminDashboard() {
   }>({})
   const [vendorStatsLoading, setVendorStatsLoading] = useState(false)
   const [inventoryProductCount, setInventoryProductCount] = useState<number>(0)
+  const lastVendorRefreshRef = useRef<number>(0) // Track last vendor refresh time
+  const inventoryAggregationRef = useRef<InventoryAggregationRef>(null)
+  
+  // Cache system for all tabs
+  type CacheEntry = {
+    data: any
+    pagination?: any
+    timestamp: number
+  }
+  
+  const ordersCacheRef = useRef<Map<string, CacheEntry>>(new Map())
+  const settlementsCacheRef = useRef<Map<string, CacheEntry>>(new Map())
+  const notificationsCacheRef = useRef<Map<string, CacheEntry>>(new Map())
+  const dashboardStatsCacheRef = useRef<Map<string, CacheEntry>>(new Map())
+  
+  // Helper function to generate cache key from filters
+  const generateCacheKey = (tab: string, filters: any, page?: number): string => {
+    const filterStr = JSON.stringify({
+      ...filters,
+      page: page || 1,
+      tab
+    })
+    return `${tab}_${btoa(filterStr).replace(/[^a-zA-Z0-9]/g, '')}`
+  }
+  
+  // Helper function to get cached data
+  const getCachedData = (cacheRef: React.MutableRefObject<Map<string, CacheEntry>>, key: string): CacheEntry | null => {
+    const entry = cacheRef.current.get(key)
+    if (entry) {
+      // Cache is valid for 5 minutes
+      const cacheAge = Date.now() - entry.timestamp
+      if (cacheAge < 5 * 60 * 1000) {
+        return entry
+      }
+    }
+    return null
+  }
+  
+  // Helper function to set cached data
+  const setCachedData = (cacheRef: React.MutableRefObject<Map<string, CacheEntry>>, key: string, data: any, pagination?: any) => {
+    cacheRef.current.set(key, {
+      data,
+      pagination,
+      timestamp: Date.now()
+    })
+  }
+  
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [selectedOrderForAssignment, setSelectedOrderForAssignment] = useState<any>(null)
   const [selectedVendorId, setSelectedVendorId] = useState<string>("")
@@ -519,28 +567,23 @@ export function AdminDashboard() {
     return Array.from(uniqueVendors).sort();
   }
 
-  // Compute filtered orders directly with useMemo instead of useCallback
+  // Compute filtered orders - vendor and store filtering is now done on backend
+  // Frontend filtering only for immediate UI updates (search, status, date) before backend responds
   const filteredOrders = useMemo(() => {
-    console.log('🔍 FILTERING ORDERS with showInactiveStoreOrders =', showInactiveStoreOrders)
-    
+    // Since vendor and store are now filtered on backend, orders array is already filtered
+    // Only apply frontend filters for immediate UI responsiveness (search, status, date)
     const result = orders.filter((order) => {
+      // Search filter (for immediate UI update, backend also filters)
       const matchesSearch =
         order.order_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.vendor_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.product_name?.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = statusFilter === "all" || order.status === statusFilter
       
-      // Vendor filter - multiple selection
-      const matchesVendor = selectedVendorFilters.length === 0 || 
-        selectedVendorFilters.includes(order.vendor_name) ||
-        (selectedVendorFilters.includes('Unclaimed') && (!order.vendor_name || order.vendor_name === 'Unclaimed'))
+      // Status filter (for immediate UI update, backend also filters)
+      const matchesStatus = statusFilter.length === 0 || statusFilter.includes(order.status)
       
-      // Store filter - multiple selection
-      const matchesStore = selectedStoreFilters.length === 0 || 
-        selectedStoreFilters.includes(order.account_code)
-      
-      // Date filtering
+      // Date filtering (for immediate UI update, backend also filters)
       let matchesDate = true;
       if (order.created_at) {
         const orderDate = new Date(order.created_at);
@@ -556,21 +599,19 @@ export function AdminDashboard() {
         }
       }
       
-      // Store status filter
+      // Store status filter (handled by showInactiveStoreOrders on backend)
       const orderStoreStatus = order.store_status?.toString().toLowerCase().trim() || 'active'
-      
-      // If checkbox is UNCHECKED (showInactiveStoreOrders = false), HIDE inactive orders
-      // If checkbox is CHECKED (showInactiveStoreOrders = true), SHOW all orders
       if (!showInactiveStoreOrders && orderStoreStatus !== 'active') {
         return false; // Explicitly filter out inactive store orders
       }
       
-      return matchesSearch && matchesStatus && matchesDate && matchesVendor && matchesStore
+      // Vendor and store filters are now handled on backend, so orders array is already filtered
+      return matchesSearch && matchesStatus && matchesDate
     })
     
-    console.log(`📊 Filtered ${result.length} orders out of ${orders.length} total`)
+    console.log(`📊 Filtered ${result.length} orders out of ${orders.length} total (vendor/store filtered on backend)`)
     return result
-  }, [orders, searchTerm, statusFilter, selectedVendorFilters, selectedStoreFilters, dateFrom, dateTo, showInactiveStoreOrders])
+  }, [orders, searchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders])
 
   // Wrapper function for compatibility with existing code
   const getFilteredOrdersForTab = useCallback((tab: string) => {
@@ -603,7 +644,7 @@ export function AdminDashboard() {
   const hasActiveFilters = useMemo(() => {
     return !!(
       searchTerm || 
-      statusFilter !== 'all' || 
+      statusFilter.length > 0 || 
       selectedVendorFilters.length > 0 || 
       selectedStoreFilters.length > 0 || 
       dateFrom || 
@@ -633,7 +674,7 @@ export function AdminDashboard() {
       const matchesSearch =
         vendor.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         vendor.email?.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = statusFilter === "all" || vendor.status === statusFilter
+      const matchesStatus = statusFilter.length === 0 || statusFilter.includes(vendor.status)
       return matchesSearch && matchesStatus
     })
   }
@@ -649,8 +690,7 @@ export function AdminDashboard() {
         carrier.carrier_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         carrier.carrier_id?.toLowerCase().includes(searchTerm.toLowerCase())
       const carrierStatus = (carrier.status || '').toString().trim().toLowerCase()
-      const filterStatus = (statusFilter || '').toString().trim().toLowerCase()
-      const matchesStatus = filterStatus === "all" || carrierStatus === filterStatus
+      const matchesStatus = statusFilter.length === 0 || statusFilter.some(s => s.toLowerCase() === carrierStatus)
       
       // Store filter - MUST match selected store (required, no "all" option)
       const matchesStore = carrier.account_code === selectedStoreFilter
@@ -673,7 +713,7 @@ export function AdminDashboard() {
       const matchesSearch =
         settlement.vendor.toLowerCase().includes(searchTerm.toLowerCase()) ||
         settlement.id.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = statusFilter === "all" || settlement.status === statusFilter
+      const matchesStatus = statusFilter.length === 0 || statusFilter.includes(settlement.status)
       return matchesSearch && matchesStatus
     })
   }
@@ -861,8 +901,42 @@ export function AdminDashboard() {
   }
 
   // Settlement Management Functions
-  const fetchSettlements = async () => {
-    setSettlementsLoading(true);
+  const fetchSettlements = async (silentRefresh: boolean = false) => {
+    // Generate cache key
+    const cacheKey = generateCacheKey('settlements', settlementFilters, settlementPage);
+    
+    // Check cache first
+    const cached = getCachedData(settlementsCacheRef, cacheKey);
+    if (cached && !silentRefresh) {
+      console.log('📦 Using cached settlements data');
+      // Show cached data immediately
+      setAllSettlements(cached.data);
+      if (cached.pagination) {
+        setSettlementPagination(cached.pagination);
+      }
+      setSettlementsLoading(false);
+      
+      // Refresh in background silently
+      setTimeout(async () => {
+        try {
+          await fetchSettlementsFromAPI(true);
+        } catch (error) {
+          console.error('Background refresh error:', error);
+        }
+      }, 100);
+      return;
+    }
+    
+    // No cache or silent refresh - fetch from API
+    await fetchSettlementsFromAPI(silentRefresh);
+  };
+  
+  // Internal function to fetch settlements from API
+  const fetchSettlementsFromAPI = async (silentRefresh: boolean = false) => {
+    if (!silentRefresh) {
+      setSettlementsLoading(true);
+    }
+    
     try {
       const response = await apiClient.getAllSettlements({
         page: settlementPage,
@@ -870,17 +944,33 @@ export function AdminDashboard() {
         ...settlementFilters
       });
       if (response.success) {
-        setAllSettlements(response.data.settlements);
-        setSettlementPagination(response.data.pagination);
+        const settlementsData = response.data.settlements;
+        const pagination = response.data.pagination;
+        
+        // Cache the data
+        const cacheKey = generateCacheKey('settlements', settlementFilters, settlementPage);
+        setCachedData(settlementsCacheRef, cacheKey, settlementsData, pagination);
+        
+        // Update state
+        setAllSettlements(settlementsData);
+        setSettlementPagination(pagination);
+        
+        if (silentRefresh) {
+          console.log('✅ Silently refreshed settlements cache');
+        }
       }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch settlements",
-        variant: "destructive",
-      });
+      if (!silentRefresh) {
+        toast({
+          title: "Error",
+          description: "Failed to fetch settlements",
+          variant: "destructive",
+        });
+      }
     } finally {
-      setSettlementsLoading(false);
+      if (!silentRefresh) {
+        setSettlementsLoading(false);
+      }
     }
   };
 
@@ -1046,13 +1136,68 @@ export function AdminDashboard() {
     vendor?: string,
     store?: string,
     showInactiveStores?: boolean
-  }) => {
-    setDashboardStatsLoading(true);
+  }, silentRefresh: boolean = false, bypassCache: boolean = false) => {
+    // Generate cache key
+    const cacheKey = generateCacheKey('dashboardStats', filters || {});
+    
+    // Check cache first (unless bypassing cache)
+    if (!bypassCache) {
+      const cached = getCachedData(dashboardStatsCacheRef, cacheKey);
+      if (cached && !silentRefresh) {
+        console.log('📦 Using cached dashboard stats');
+        // Show cached data immediately
+        setDashboardStats(cached.data);
+        setOrdersStats({
+          totalOrders: cached.data.totalQuantity || 0,
+          claimedOrders: cached.data.claimedOrders || 0,
+          unclaimedOrders: cached.data.unclaimedOrders || 0
+        });
+        setDashboardStatsLoading(false);
+        
+        // Refresh in background silently
+        setTimeout(async () => {
+          try {
+            await fetchDashboardStatsFromAPI(filters, true);
+          } catch (error) {
+            console.error('Background refresh error:', error);
+          }
+        }, 100);
+        return;
+      }
+    }
+    
+    // No cache, bypassing cache, or silent refresh - fetch from API
+    await fetchDashboardStatsFromAPI(filters, silentRefresh);
+  };
+  
+  // Internal function to fetch dashboard stats from API
+  const fetchDashboardStatsFromAPI = async (
+    filters?: {
+      search?: string,
+      dateFrom?: string,
+      dateTo?: string,
+      status?: string,
+      vendor?: string,
+      store?: string,
+      showInactiveStores?: boolean
+    },
+    silentRefresh: boolean = false
+  ) => {
+    if (!silentRefresh) {
+      setDashboardStatsLoading(true);
+    }
+    
     try {
-      console.log('📊 Fetching admin dashboard stats...');
+      console.log('📊 Fetching admin dashboard stats...', { silentRefresh });
       const response = await apiClient.getAdminDashboardStats(filters);
       if (response.success && response.data) {
         console.log('✅ Dashboard stats received:', response.data);
+        
+        // Cache the data
+        const cacheKey = generateCacheKey('dashboardStats', filters || {});
+        setCachedData(dashboardStatsCacheRef, cacheKey, response.data);
+        
+        // Update state
         setDashboardStats(response.data);
         // Also update legacy ordersStats for backward compatibility
         setOrdersStats({
@@ -1060,15 +1205,21 @@ export function AdminDashboard() {
           claimedOrders: response.data.claimedOrders || 0,
           unclaimedOrders: response.data.unclaimedOrders || 0
         });
+        
+        if (silentRefresh) {
+          console.log('✅ Silently refreshed dashboard stats cache');
+        }
       }
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
     } finally {
-      setDashboardStatsLoading(false);
+      if (!silentRefresh) {
+        setDashboardStatsLoading(false);
+      }
     }
   };
 
-  // Fetch orders for admin panel with progressive loading
+  // Fetch orders for admin panel with caching
   const fetchOrders = async (
     resetPagination: boolean = true, 
     syncFromShipway: boolean = false,
@@ -1082,14 +1233,62 @@ export function AdminDashboard() {
       showInactiveStores?: boolean
     }
   ) => {
-    // PARALLEL LOADING: Orders can load independently of dashboard stats
-    // Cards will show stats when available, orders will show when available
+    // Generate cache key
+    const pageToFetch = resetPagination ? 1 : Math.floor(loadedOrdersCount / 50) + 1;
+    const cacheKey = generateCacheKey('orders', filters || {}, pageToFetch);
     
+    // Check cache first (only for reset pagination, not for infinite scroll)
     if (resetPagination) {
-    setOrdersLoading(true);
-      setCurrentPage(1);
-    } else {
-      setIsLoadingMore(true);
+      const cached = getCachedData(ordersCacheRef, cacheKey);
+      if (cached) {
+        console.log('📦 Using cached orders data');
+        // Show cached data immediately
+        setOrders(cached.data);
+        if (cached.pagination) {
+          setHasMore(cached.pagination.hasMore || false);
+          setTotalCount(cached.pagination.total || 0);
+          setCurrentPage(2);
+        }
+        setOrdersLoading(false);
+        
+        // Refresh in background silently (with or without Shipway sync)
+        setTimeout(async () => {
+          try {
+            await fetchOrdersFromAPI(resetPagination, syncFromShipway, filters, true);
+          } catch (error) {
+            console.error('Background refresh error:', error);
+          }
+        }, 100);
+        return;
+      }
+    }
+    
+    // No cache or infinite scroll - fetch from API
+    await fetchOrdersFromAPI(resetPagination, syncFromShipway, filters, false);
+  };
+  
+  // Internal function to fetch orders from API
+  const fetchOrdersFromAPI = async (
+    resetPagination: boolean = true,
+    syncFromShipway: boolean = false,
+    filters?: {
+      search?: string,
+      dateFrom?: string,
+      dateTo?: string,
+      status?: string,
+      vendor?: string,
+      store?: string,
+      showInactiveStores?: boolean
+    },
+    silentRefresh: boolean = false
+  ) => {
+    if (!silentRefresh) {
+      if (resetPagination) {
+        setOrdersLoading(true);
+        setCurrentPage(1);
+      } else {
+        setIsLoadingMore(true);
+      }
     }
     
     try {
@@ -1097,25 +1296,33 @@ export function AdminDashboard() {
       if (syncFromShipway) {
         try {
           const syncResponse = await apiClient.refreshAdminOrders();
-          if (syncResponse.success) {
-            toast({
-              title: "Orders Synced",
-              description: syncResponse.message || "Orders have been synced from Shipway successfully",
-            });
+          if (!silentRefresh) {
+            // Only show toast if not a silent background refresh
+            if (syncResponse.success) {
+              toast({
+                title: "Orders Synced",
+                description: syncResponse.message || "Orders have been synced from Shipway successfully",
+              });
+            } else {
+              toast({
+                title: "Sync Warning",
+                description: syncResponse.message || "Orders sync completed with warnings",
+                variant: "default",
+              });
+            }
           } else {
-            toast({
-              title: "Sync Warning",
-              description: syncResponse.message || "Orders sync completed with warnings",
-              variant: "default",
-            });
+            // Silent refresh - just log to console
+            console.log('✅ Silently synced orders from Shipway');
           }
         } catch (syncError) {
           console.error('Error syncing orders:', syncError);
-          toast({
-            title: "Sync Error",
-            description: syncError instanceof Error ? syncError.message : "Failed to sync orders from Shipway",
-            variant: "destructive",
-          });
+          if (!silentRefresh) {
+            toast({
+              title: "Sync Error",
+              description: syncError instanceof Error ? syncError.message : "Failed to sync orders from Shipway",
+              variant: "destructive",
+            });
+          }
         }
       }
       
@@ -1138,7 +1345,7 @@ export function AdminDashboard() {
         initialLimit = 50; // Pagination: 50 orders per page
       }
       
-      console.log('📄 Fetching admin orders:', { page: pageToFetch, limit: initialLimit, filters });
+      console.log('📄 Fetching admin orders:', { page: pageToFetch, limit: initialLimit, filters, silentRefresh });
       
       const response = await apiClient.getAdminOrders(pageToFetch, initialLimit, filters);
       
@@ -1146,10 +1353,20 @@ export function AdminDashboard() {
         const ordersData = response.data.orders || [];
         const pagination = response.data.pagination;
         
+        // Cache the data
+        const cacheKey = generateCacheKey('orders', filters || {}, pageToFetch);
+        setCachedData(ordersCacheRef, cacheKey, ordersData, pagination);
+        
         if (resetPagination) {
-          // Display first batch immediately
-          setOrders(ordersData);
-          setOrdersLoading(false); // Stop loading state after first batch
+          // Display data immediately (or update silently if background refresh)
+          if (!silentRefresh) {
+            setOrders(ordersData);
+            setOrdersLoading(false);
+          } else {
+            // Silent background refresh - update cache and state
+            setOrders(ordersData);
+            console.log('✅ Silently refreshed orders cache');
+          }
           
           // Update pagination metadata
           if (pagination) {
@@ -1167,6 +1384,9 @@ export function AdminDashboard() {
                 if (fullOrdersData.length > ordersData.length) {
                   console.log(`✅ Background load complete: Updated to ${fullOrdersData.length} orders (from ${ordersData.length})`);
                   setOrders(fullOrdersData);
+                  // Update cache with full data
+                  const fullCacheKey = generateCacheKey('orders', filters || {}, 1);
+                  setCachedData(ordersCacheRef, fullCacheKey, fullOrdersData, fullResponse.data.pagination);
                   if (fullResponse.data.pagination) {
                     setHasMore(fullResponse.data.pagination.hasMore || false);
                     setTotalCount(fullResponse.data.pagination.total || 0);
@@ -1191,22 +1411,28 @@ export function AdminDashboard() {
           }
         }
       } else {
-        toast({
-          title: "Error",
-          description: response.message || "Failed to fetch orders",
-          variant: "destructive",
-        });
+        if (!silentRefresh) {
+          toast({
+            title: "Error",
+            description: response.message || "Failed to fetch orders",
+            variant: "destructive",
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching orders:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch orders",
-        variant: "destructive",
-      });
+      if (!silentRefresh) {
+        toast({
+          title: "Error",
+          description: "Failed to fetch orders",
+          variant: "destructive",
+        });
+      }
     } finally {
-      setOrdersLoading(false);
-      setIsLoadingMore(false);
+      if (!silentRefresh) {
+        setOrdersLoading(false);
+        setIsLoadingMore(false);
+      }
     }
   };
 
@@ -1221,7 +1447,7 @@ export function AdminDashboard() {
     setActiveTab(value);
     // Reset status filter to "all" when switching to orders tab
     if (value === 'orders') {
-      setStatusFilter('all');
+      setStatusFilter([]);
       setDateFrom(undefined);
       setDateTo(undefined);
     }
@@ -1283,7 +1509,8 @@ export function AdminDashboard() {
     // Skip on initial mount (handled by the initial load useEffect)
     if (orders.length > 0) {
       console.log('🔄 showInactiveStoreOrders changed, refetching stats and orders...');
-      fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders });
+      // Bypass cache to get fresh stats when toggling inactive stores filter
+      fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders }, false, true);
       fetchOrders(true, false, { showInactiveStores: showInactiveStoreOrders });
     }
   }, [showInactiveStoreOrders]);
@@ -1295,6 +1522,46 @@ export function AdminDashboard() {
       fetchVendors();
     }
   }, [activeTab, vendorsLoaded, vendorsLoading]);
+
+  // Load vendors when Bulk Assign modal is opened
+  useEffect(() => {
+    if (showBulkAssignModal && !vendorsLoaded && !vendorsLoading) {
+      console.log('📋 Bulk Assign dialog opened - loading vendors for dropdown...');
+      fetchVendors();
+    }
+  }, [showBulkAssignModal, vendorsLoaded, vendorsLoading]);
+
+  // Load vendors when vendor filter popover opens
+  useEffect(() => {
+    if (vendorFilterPopoverOpen) {
+      if (!vendorsLoaded && !vendorsLoading) {
+        // First time - load vendors
+        console.log('📦 Vendor filter dropdown opened - loading vendors...');
+        fetchVendors();
+      } else if (vendorsLoaded && vendors.length > 0) {
+        // Vendors are cached - show cached data immediately and refresh in background
+        console.log('📦 Vendor filter dropdown opened - using cached vendors, refreshing in background...');
+        // Silently refresh in background without showing loading state
+        apiClient.getAdminVendors().then(response => {
+          if (response.success) {
+            setVendors(response.data.vendors);
+            lastVendorRefreshRef.current = Date.now();
+            console.log(`✅ Silently refreshed ${response.data.vendors.length} vendors`);
+          }
+        }).catch(error => {
+          console.error('Error silently refreshing vendors:', error);
+        });
+      }
+    }
+  }, [vendorFilterPopoverOpen, vendorsLoaded, vendorsLoading, vendors.length]);
+
+  // Load vendors when vendor filters are applied (needed for name to warehouse ID mapping)
+  useEffect(() => {
+    if (selectedVendorFilters.length > 0 && !vendorsLoaded && !vendorsLoading) {
+      console.log('📦 Vendor filters applied - loading vendors for mapping...');
+      fetchVendors();
+    }
+  }, [selectedVendorFilters.length, vendorsLoaded, vendorsLoading]);
 
   // Apply filters with backend fetch (OPTIMIZATION: Backend filtering for accurate counts)
   useEffect(() => {
@@ -1312,25 +1579,63 @@ export function AdminDashboard() {
         };
         
         if (searchTerm) backendFilters.search = searchTerm;
-        if (statusFilter && statusFilter !== 'all') backendFilters.status = statusFilter;
+        if (statusFilter.length > 0) backendFilters.status = statusFilter; // Send array of statuses
         if (dateFrom) backendFilters.dateFrom = dateFrom.toISOString().split('T')[0];
         if (dateTo) backendFilters.dateTo = dateTo.toISOString().split('T')[0];
-        // Note: vendor and store filters are applied on frontend for now
-        // Can be moved to backend if needed
+        
+        // Convert vendor names to warehouse IDs for backend
+        if (selectedVendorFilters.length > 0) {
+          const vendorWarehouseIds: string[] = [];
+          
+          // Map vendor names to warehouse IDs
+          selectedVendorFilters.forEach(vendorName => {
+            if (vendorName === 'Unclaimed') {
+              // Handle unclaimed separately - backend will check for null/empty claimed_by
+              vendorWarehouseIds.push('__UNCLAIMED__');
+            } else {
+              // Try to find vendor in vendors array
+              const vendor = vendors.find(v => v.name === vendorName);
+              if (vendor && (vendor.warehouseId || vendor.warehouse_id)) {
+                vendorWarehouseIds.push(vendor.warehouseId || vendor.warehouse_id);
+              } else {
+                // Fallback: Try to get warehouse ID from orders (if vendors not loaded yet)
+                // Find an order with this vendor name and get its claimed_by (warehouse ID)
+                const orderWithVendor = orders.find(o => o.vendor_name === vendorName);
+                if (orderWithVendor && (orderWithVendor as any).claimed_by) {
+                  vendorWarehouseIds.push((orderWithVendor as any).claimed_by);
+                } else {
+                  console.warn(`⚠️ Could not find warehouse ID for vendor: ${vendorName}`);
+                }
+              }
+            }
+          });
+          
+          if (vendorWarehouseIds.length > 0) {
+            backendFilters.vendor = vendorWarehouseIds;
+            console.log('📦 Vendor filter applied:', { vendorNames: selectedVendorFilters, warehouseIds: vendorWarehouseIds });
+          } else {
+            console.warn('⚠️ No valid warehouse IDs found for selected vendors');
+          }
+        }
+        
+        // Store filters - already in account_code format
+        if (selectedStoreFilters.length > 0) {
+          backendFilters.store = selectedStoreFilters;
+        }
         
         // Fetch filtered stats and orders from backend
         fetchDashboardStats(backendFilters);
         fetchOrders(true, false, backendFilters);
       } else {
-        // No filters active - reset to initial state
+        // No filters active - but still respect showInactiveStoreOrders toggle
         console.log('🔄 Filters cleared, resetting to initial state...');
-        fetchDashboardStats({ showInactiveStores: false });
-        fetchOrders(true, false, { showInactiveStores: false });
+        fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders });
+        fetchOrders(true, false, { showInactiveStores: showInactiveStoreOrders });
       }
     }, 500); // 500ms debounce for search
 
     return () => clearTimeout(timeoutId);
-  }, [searchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders, hasActiveFilters]);
+  }, [searchTerm, statusFilter, dateFrom, dateTo, showInactiveStoreOrders, hasActiveFilters, selectedVendorFilters, selectedStoreFilters]);
 
   // Infinite scroll handler
   const handleScroll = useCallback(() => {
@@ -1347,13 +1652,35 @@ export function AdminDashboard() {
         showInactiveStores: showInactiveStoreOrders
       };
       if (searchTerm) currentFilters.search = searchTerm;
-      if (statusFilter && statusFilter !== 'all') currentFilters.status = statusFilter;
+      if (statusFilter.length > 0) currentFilters.status = statusFilter; // Send array of statuses
       if (dateFrom) currentFilters.dateFrom = dateFrom.toISOString().split('T')[0];
       if (dateTo) currentFilters.dateTo = dateTo.toISOString().split('T')[0];
       
+      // Include vendor and store filters for pagination
+      if (selectedVendorFilters.length > 0) {
+        const vendorWarehouseIds: string[] = [];
+        selectedVendorFilters.forEach(vendorName => {
+          if (vendorName === 'Unclaimed') {
+            vendorWarehouseIds.push('__UNCLAIMED__');
+          } else {
+            const vendor = vendors.find(v => v.name === vendorName);
+            if (vendor && (vendor.warehouseId || vendor.warehouse_id)) {
+              vendorWarehouseIds.push(vendor.warehouseId || vendor.warehouse_id);
+            }
+          }
+        });
+        if (vendorWarehouseIds.length > 0) {
+          currentFilters.vendor = vendorWarehouseIds;
+        }
+      }
+      
+      if (selectedStoreFilters.length > 0) {
+        currentFilters.store = selectedStoreFilters;
+      }
+      
       fetchOrders(false, false, currentFilters);
     }
-  }, [activeTab, hasMore, ordersLoading, isLoadingMore, currentPage, showInactiveStoreOrders, searchTerm, statusFilter, dateFrom, dateTo]);
+  }, [activeTab, hasMore, ordersLoading, isLoadingMore, currentPage, showInactiveStoreOrders, searchTerm, statusFilter, dateFrom, dateTo, selectedVendorFilters, selectedStoreFilters, vendors]);
 
   // Attach window scroll listener for infinite scroll
   useEffect(() => {
@@ -1415,6 +1742,7 @@ export function AdminDashboard() {
       if (response.success) {
         setVendors(response.data.vendors);
         setVendorsLoaded(true); // Mark as loaded
+        lastVendorRefreshRef.current = Date.now(); // Update last refresh time
         console.log(`✅ Loaded ${response.data.vendors.length} vendors`);
       } else {
         toast({
@@ -1486,57 +1814,106 @@ export function AdminDashboard() {
     }
   };
 
-  // Fetch notifications from database with filters
-  const fetchNotifications = async () => {
-    try {
+  // Fetch notifications from database with filters and caching
+  const fetchNotifications = async (silentRefresh: boolean = false) => {
+    // Build query params based on filters
+    const params: any = {
+      page: notificationPage,
+      limit: 20
+    };
+    
+    if (notificationFilters.status !== 'all') {
+      params.status = notificationFilters.status;
+    }
+    if (notificationFilters.type !== 'all') {
+      params.type = notificationFilters.type;
+    }
+    if (notificationFilters.severity !== 'all') {
+      params.severity = notificationFilters.severity;
+    }
+    if (notificationFilters.vendor !== 'all') {
+      params.vendor_id = notificationFilters.vendor;
+    }
+    if (notificationFilters.search) {
+      params.search = notificationFilters.search;
+    }
+    if (notificationFilters.dateFrom) {
+      params.start_date = notificationFilters.dateFrom.toISOString();
+    }
+    if (notificationFilters.dateTo) {
+      params.end_date = notificationFilters.dateTo.toISOString();
+    }
+    
+    // Generate cache key
+    const cacheKey = generateCacheKey('notifications', params, notificationPage);
+    
+    // Check cache first
+    const cached = getCachedData(notificationsCacheRef, cacheKey);
+    if (cached && !silentRefresh) {
+      console.log('📦 Using cached notifications data');
+      // Show cached data immediately
+      setNotifications(cached.data);
+      if (cached.pagination) {
+        setNotificationPagination(cached.pagination);
+      }
+      setNotificationsLoading(false);
+      
+      // Refresh in background silently
+      setTimeout(async () => {
+        try {
+          await fetchNotificationsFromAPI(params, true);
+        } catch (error) {
+          console.error('Background refresh error:', error);
+        }
+      }, 100);
+      return;
+    }
+    
+    // No cache or silent refresh - fetch from API
+    await fetchNotificationsFromAPI(params, silentRefresh);
+  };
+  
+  // Internal function to fetch notifications from API
+  const fetchNotificationsFromAPI = async (params: any, silentRefresh: boolean = false) => {
+    if (!silentRefresh) {
       setNotificationsLoading(true);
-      
-      // Build query params based on filters
-      const params: any = {
-        page: notificationPage,
-        limit: 20
-      };
-      
-      if (notificationFilters.status !== 'all') {
-        params.status = notificationFilters.status;
-      }
-      if (notificationFilters.type !== 'all') {
-        params.type = notificationFilters.type;
-      }
-      if (notificationFilters.severity !== 'all') {
-        params.severity = notificationFilters.severity;
-      }
-      if (notificationFilters.vendor !== 'all') {
-        params.vendor_id = notificationFilters.vendor;
-      }
-      if (notificationFilters.search) {
-        params.search = notificationFilters.search;
-      }
-      if (notificationFilters.dateFrom) {
-        params.start_date = notificationFilters.dateFrom.toISOString();
-      }
-      if (notificationFilters.dateTo) {
-        params.end_date = notificationFilters.dateTo.toISOString();
-      }
-      
+    }
+    
+    try {
       const response = await apiClient.getNotifications(params);
       
       if (response.success && response.data) {
-        setNotifications(response.data.notifications || []);
-        setNotificationPagination({
+        const notificationsData = response.data.notifications || [];
+        const pagination = {
           totalPages: response.data.pagination?.pages || 1,
           totalItems: response.data.pagination?.total || 0
-        });
+        };
+        
+        // Cache the data
+        const cacheKey = generateCacheKey('notifications', params, notificationPage);
+        setCachedData(notificationsCacheRef, cacheKey, notificationsData, pagination);
+        
+        // Update state
+        setNotifications(notificationsData);
+        setNotificationPagination(pagination);
+        
+        if (silentRefresh) {
+          console.log('✅ Silently refreshed notifications cache');
+        }
       }
     } catch (error) {
       console.error('Error fetching notifications:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch notifications",
-        variant: "destructive"
-      });
+      if (!silentRefresh) {
+        toast({
+          title: "Error",
+          description: "Failed to fetch notifications",
+          variant: "destructive"
+        });
+      }
     } finally {
-      setNotificationsLoading(false);
+      if (!silentRefresh) {
+        setNotificationsLoading(false);
+      }
     }
   };
 
@@ -1646,8 +2023,9 @@ export function AdminDashboard() {
           setSelectedVendorId("");
         }
         
-        // Refresh orders list to get latest data from server
+        // Refresh orders list and dashboard stats to get latest data from server
         await fetchOrders();
+        await fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders });
       } else {
         // Revert optimistic update on failure
         setOrders(prevOrders => prevOrders.map(o => 
@@ -1703,8 +2081,9 @@ export function AdminDashboard() {
           title: "Order Unassigned",
           description: response.message,
         });
-        // Refresh orders list to get latest data from server
+        // Refresh orders list and dashboard stats to get latest data from server
         await fetchOrders();
+        await fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders });
       } else {
         // Revert optimistic update on failure
         setOrders(prevOrders => prevOrders.map(o => 
@@ -1741,6 +2120,11 @@ export function AdminDashboard() {
     setSelectedOrderForAssignment(order);
     setSelectedVendorId("");
     setShowAssignModal(true);
+    // Ensure vendors are loaded for the dropdown
+    if (!vendorsLoaded && !vendorsLoading) {
+      console.log('📋 Assign dialog opened - loading vendors for dropdown...');
+      fetchVendors();
+    }
   };
 
   // Download carriers CSV
@@ -1965,7 +2349,7 @@ export function AdminDashboard() {
             onClick={() => {
               if (isMobile) {
                 setActiveTab('orders');
-                setStatusFilter('all');
+                setStatusFilter([]);
               }
             }}
           >
@@ -1998,7 +2382,7 @@ export function AdminDashboard() {
             onClick={() => {
               if (isMobile) {
                 setActiveTab('orders');
-                setStatusFilter('claimed');
+                setStatusFilter(['claimed']);
               }
             }}
           >
@@ -2030,7 +2414,7 @@ export function AdminDashboard() {
             onClick={() => {
               if (isMobile) {
                 setActiveTab('orders');
-                setStatusFilter('unclaimed');
+                setStatusFilter(['unclaimed']);
               }
             }}
           >
@@ -2063,7 +2447,7 @@ export function AdminDashboard() {
             onClick={() => {
               if (isMobile) {
                 setActiveTab('vendors');
-                setStatusFilter('active');
+                setStatusFilter(['active']);
               }
             }}
           >
@@ -2115,7 +2499,7 @@ export function AdminDashboard() {
                 {!isMobile && <CardDescription className="text-sm sm:text-base truncate">Manage orders, vendors, and carriers</CardDescription>}
               </div>
               <Button
-                onClick={() => fetchOrders(true)}
+                onClick={() => fetchOrders(true, true)}
                 disabled={ordersLoading}
                 variant="outline"
                 className={`${isMobile ? 'h-8 sm:h-10 text-sm sm:text-base px-2 sm:px-4' : 'h-10'} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700 flex-shrink-0`}
@@ -2201,13 +2585,13 @@ export function AdminDashboard() {
                             <div className="space-y-4">
                               <div className="flex items-center justify-between">
                                 <h4 className="font-semibold text-sm">Filters</h4>
-                                {(statusFilter !== "all" || selectedStoreFilter) && (
+                                {(statusFilter.length > 0 || selectedStoreFilter) && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     className="h-6 px-2 text-xs"
                                     onClick={() => {
-                                      setStatusFilter("all");
+                                      setStatusFilter([]);
                                       if (stores.length > 0) {
                                         setSelectedStoreFilter(stores[0].account_code);
                                       }
@@ -2221,17 +2605,122 @@ export function AdminDashboard() {
                               {/* Status Filter */}
                               <div>
                                 <Label className="text-xs font-medium mb-2 block">Status</Label>
-                                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                  <SelectTrigger className="w-full h-9">
-                                    <SelectValue placeholder="All Status" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="all">All Status</SelectItem>
-                                    <SelectItem value="active">Active</SelectItem>
-                                    <SelectItem value="pending">Pending</SelectItem>
-                                    <SelectItem value="inactive">Inactive</SelectItem>
-                                  </SelectContent>
-                                </Select>
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button variant="outline" className="w-full h-9 justify-between text-left font-normal">
+                                      <span className="truncate">
+                                        {statusFilter.length === 0 
+                                          ? "All Status" 
+                                          : statusFilter.length === 1 
+                                          ? statusFilter[0].replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                                          : `${statusFilter.length} Statuses`}
+                                      </span>
+                                      <ChevronDown className="w-4 h-4 opacity-50" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-56 p-0" align="start">
+                                    <div className="p-2">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <Label className="text-xs font-medium">Select Statuses</Label>
+                                        {statusFilter.length > 0 && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 px-2 text-xs"
+                                            onClick={() => setStatusFilter([])}
+                                          >
+                                            Clear
+                                          </Button>
+                                        )}
+                                      </div>
+                                      <div className="max-h-48 overflow-y-auto space-y-1">
+                                        <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={statusFilter.length === 0}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                setStatusFilter([])
+                                              }
+                                            }}
+                                            className="w-4 h-4"
+                                          />
+                                          <span className="text-xs">All Status</span>
+                                        </label>
+                                        {activeTab === "orders" && getUniqueStatuses().map((status) => (
+                                          <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={statusFilter.includes(status)}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setStatusFilter([...statusFilter, status])
+                                                } else {
+                                                  const newFilters = statusFilter.filter(s => s !== status)
+                                                  setStatusFilter(newFilters)
+                                                }
+                                              }}
+                                              className="w-4 h-4"
+                                            />
+                                            <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                                          </label>
+                                        ))}
+                                        {activeTab !== "orders" && (
+                                          <>
+                                            <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={statusFilter.includes('active')}
+                                                onChange={(e) => {
+                                                  if (e.target.checked) {
+                                                    setStatusFilter([...statusFilter, 'active'])
+                                                  } else {
+                                                    const newFilters = statusFilter.filter(s => s !== 'active')
+                                                    setStatusFilter(newFilters)
+                                                  }
+                                                }}
+                                                className="w-4 h-4"
+                                              />
+                                              <span className="text-xs">Active</span>
+                                            </label>
+                                            <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={statusFilter.includes('pending')}
+                                                onChange={(e) => {
+                                                  if (e.target.checked) {
+                                                    setStatusFilter([...statusFilter, 'pending'])
+                                                  } else {
+                                                    const newFilters = statusFilter.filter(s => s !== 'pending')
+                                                    setStatusFilter(newFilters)
+                                                  }
+                                                }}
+                                                className="w-4 h-4"
+                                              />
+                                              <span className="text-xs">Pending</span>
+                                            </label>
+                                            <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={statusFilter.includes('inactive')}
+                                                onChange={(e) => {
+                                                  if (e.target.checked) {
+                                                    setStatusFilter([...statusFilter, 'inactive'])
+                                                  } else {
+                                                    const newFilters = statusFilter.filter(s => s !== 'inactive')
+                                                    setStatusFilter(newFilters)
+                                                  }
+                                                }}
+                                                className="w-4 h-4"
+                                              />
+                                              <span className="text-xs">Inactive</span>
+                                            </label>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
                               </div>
 
                               {/* Store Filter - Single Select */}
@@ -2295,30 +2784,104 @@ export function AdminDashboard() {
                             <div className="space-y-3">
                               <div className="flex items-center justify-between">
                                 <h4 className="font-semibold text-sm">Status</h4>
-                                {statusFilter !== "all" && (
+                                {statusFilter.length > 0 && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     className="h-6 px-2 text-xs"
                                     onClick={() => {
-                                      setStatusFilter("all");
+                                      setStatusFilter([]);
                                     }}
                                   >
                                     Clear
                                   </Button>
                                 )}
                               </div>
-                              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                <SelectTrigger className="w-full h-9">
-                                  <SelectValue placeholder="All Status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="all">All Status</SelectItem>
-                                  <SelectItem value="active">Active</SelectItem>
-                                  <SelectItem value="pending">Pending</SelectItem>
-                                  <SelectItem value="inactive">Inactive</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <div className="max-h-48 overflow-y-auto space-y-1">
+                                <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={statusFilter.length === 0}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setStatusFilter([])
+                                      }
+                                    }}
+                                    className="w-4 h-4"
+                                  />
+                                  <span className="text-xs">All Status</span>
+                                </label>
+                                {activeTab === "orders" && getUniqueStatuses().map((status) => (
+                                  <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={statusFilter.includes(status)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setStatusFilter([...statusFilter, status])
+                                        } else {
+                                          const newFilters = statusFilter.filter(s => s !== status)
+                                          setStatusFilter(newFilters)
+                                        }
+                                      }}
+                                      className="w-4 h-4"
+                                    />
+                                    <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                                  </label>
+                                ))}
+                                {activeTab === "vendors" && (
+                                  <>
+                                    <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={statusFilter.includes('active')}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setStatusFilter([...statusFilter, 'active'])
+                                          } else {
+                                            const newFilters = statusFilter.filter(s => s !== 'active')
+                                            setStatusFilter(newFilters)
+                                          }
+                                        }}
+                                        className="w-4 h-4"
+                                      />
+                                      <span className="text-xs">Active</span>
+                                    </label>
+                                    <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={statusFilter.includes('pending')}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setStatusFilter([...statusFilter, 'pending'])
+                                          } else {
+                                            const newFilters = statusFilter.filter(s => s !== 'pending')
+                                            setStatusFilter(newFilters)
+                                          }
+                                        }}
+                                        className="w-4 h-4"
+                                      />
+                                      <span className="text-xs">Pending</span>
+                                    </label>
+                                    <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={statusFilter.includes('inactive')}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setStatusFilter([...statusFilter, 'inactive'])
+                                          } else {
+                                            const newFilters = statusFilter.filter(s => s !== 'inactive')
+                                            setStatusFilter(newFilters)
+                                          }
+                                        }}
+                                        className="w-4 h-4"
+                                      />
+                                      <span className="text-xs">Inactive</span>
+                                    </label>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </PopoverContent>
                         </Popover>
@@ -2372,13 +2935,13 @@ export function AdminDashboard() {
                               <div className="space-y-4">
                                 <div className="flex items-center justify-between">
                                   <h4 className="font-semibold text-sm">Filters</h4>
-                                  {(statusFilter !== "all" || selectedVendorFilters.length > 0 || selectedStoreFilters.length > 0 || dateFrom || dateTo) && (
+                                  {(statusFilter.length > 0 || selectedVendorFilters.length > 0 || selectedStoreFilters.length > 0 || dateFrom || dateTo) && (
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       className="h-6 px-2 text-xs"
                                       onClick={() => {
-                                        setStatusFilter("all");
+                                        setStatusFilter([]);
                                         setSelectedVendorFilters([]);
                                         setSelectedStoreFilters([]);
                                         setDateFrom(undefined);
@@ -2393,25 +2956,76 @@ export function AdminDashboard() {
                                 {/* Status Filter */}
                                 <div>
                                   <Label className="text-xs font-medium mb-2 block">Status</Label>
-                                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                    <SelectTrigger className="w-full h-9">
-                                      <SelectValue placeholder="All Status" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="all">All Status</SelectItem>
-                                      {getUniqueStatuses().map((status) => (
-                                        <SelectItem key={status} value={status}>
-                                          {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button variant="outline" className="w-full h-9 justify-between text-left font-normal">
+                                        <span className="truncate">
+                                          {statusFilter.length === 0 
+                                            ? "All Status" 
+                                            : statusFilter.length === 1 
+                                            ? statusFilter[0].replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                                            : `${statusFilter.length} Statuses`}
+                                        </span>
+                                        <ChevronDown className="w-4 h-4 opacity-50" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-56 p-0" align="start">
+                                      <div className="p-2">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <Label className="text-xs font-medium">Select Statuses</Label>
+                                          {statusFilter.length > 0 && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-6 px-2 text-xs"
+                                              onClick={() => setStatusFilter([])}
+                                            >
+                                              Clear
+                                            </Button>
+                                          )}
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto space-y-1">
+                                          <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={statusFilter.length === 0}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setStatusFilter([])
+                                                }
+                                              }}
+                                              className="w-4 h-4"
+                                            />
+                                            <span className="text-xs">All Status</span>
+                                          </label>
+                                          {getUniqueStatuses().map((status) => (
+                                            <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={statusFilter.includes(status)}
+                                                onChange={(e) => {
+                                                  if (e.target.checked) {
+                                                    setStatusFilter([...statusFilter, status])
+                                                  } else {
+                                                    const newFilters = statusFilter.filter(s => s !== status)
+                                                    setStatusFilter(newFilters)
+                                                  }
+                                                }}
+                                                className="w-4 h-4"
+                                              />
+                                              <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                                            </label>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
                                 </div>
 
                                 {/* Vendor Filter */}
                                 <div>
                                   <Label className="text-xs font-medium mb-2 block">Vendors</Label>
-                                  <Popover>
+                                  <Popover open={vendorFilterPopoverOpen} onOpenChange={setVendorFilterPopoverOpen}>
                                     <PopoverTrigger asChild>
                                       <Button variant="outline" className="w-full h-9 justify-between text-left font-normal">
                                         <span className="truncate">
@@ -2440,53 +3054,66 @@ export function AdminDashboard() {
                                           )}
                                         </div>
                                         <div className="max-h-48 overflow-y-auto space-y-1">
-                                          <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                            <input
-                                              type="checkbox"
-                                              checked={selectedVendorFilters.length === 0}
-                                              onChange={(e) => {
-                                                if (e.target.checked) {
-                                                  setSelectedVendorFilters([])
-                                                }
-                                              }}
-                                              className="w-4 h-4"
-                                            />
-                                            <span className="text-xs">All Vendors</span>
-                                          </label>
-                                          <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                            <input
-                                              type="checkbox"
-                                              checked={selectedVendorFilters.includes('Unclaimed')}
-                                              onChange={(e) => {
-                                                if (e.target.checked) {
-                                                  setSelectedVendorFilters([...selectedVendorFilters, 'Unclaimed'])
-                                                } else {
-                                                  const newFilters = selectedVendorFilters.filter(v => v !== 'Unclaimed')
-                                                  setSelectedVendorFilters(newFilters)
-                                                }
-                                              }}
-                                              className="w-4 h-4"
-                                            />
-                                            <span className="text-xs">Unclaimed</span>
-                                          </label>
-                                          {getUniqueVendorNames().map((vendorName) => (
-                                            <label key={vendorName} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                              <input
-                                                type="checkbox"
-                                                checked={selectedVendorFilters.includes(vendorName)}
-                                                onChange={(e) => {
-                                                  if (e.target.checked) {
-                                                    setSelectedVendorFilters([...selectedVendorFilters, vendorName])
-                                                  } else {
-                                                    const newFilters = selectedVendorFilters.filter(v => v !== vendorName)
-                                                    setSelectedVendorFilters(newFilters)
-                                                  }
-                                                }}
-                                                className="w-4 h-4"
-                                              />
-                                              <span className="text-xs">{vendorName}</span>
-                                            </label>
-                                          ))}
+                                          {vendorsLoading && (
+                                            <div className="flex items-center justify-center py-2">
+                                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                                              <span className="text-xs ml-2 text-gray-500">Loading vendors...</span>
+                                            </div>
+                                          )}
+                                          {!vendorsLoading && (
+                                            <>
+                                              <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={selectedVendorFilters.length === 0}
+                                                  onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                      setSelectedVendorFilters([])
+                                                    }
+                                                  }}
+                                                  className="w-4 h-4"
+                                                />
+                                                <span className="text-xs">All Vendors</span>
+                                              </label>
+                                              <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={selectedVendorFilters.includes('Unclaimed')}
+                                                  onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                      setSelectedVendorFilters([...selectedVendorFilters, 'Unclaimed'])
+                                                    } else {
+                                                      const newFilters = selectedVendorFilters.filter(v => v !== 'Unclaimed')
+                                                      setSelectedVendorFilters(newFilters)
+                                                    }
+                                                  }}
+                                                  className="w-4 h-4"
+                                                />
+                                                <span className="text-xs">Unclaimed</span>
+                                              </label>
+                                              {vendors
+                                                .filter(v => v.status === 'active')
+                                                .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                                                .map((vendor) => (
+                                                  <label key={vendor.id || vendor.warehouseId || vendor.warehouse_id} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={selectedVendorFilters.includes(vendor.name)}
+                                                      onChange={(e) => {
+                                                        if (e.target.checked) {
+                                                          setSelectedVendorFilters([...selectedVendorFilters, vendor.name])
+                                                        } else {
+                                                          const newFilters = selectedVendorFilters.filter(v => v !== vendor.name)
+                                                          setSelectedVendorFilters(newFilters)
+                                                        }
+                                                      }}
+                                                      className="w-4 h-4"
+                                                    />
+                                                    <span className="text-xs">{vendor.name}</span>
+                                                  </label>
+                                                ))}
+                                            </>
+                                          )}
                                         </div>
                                       </div>
                                     </PopoverContent>
@@ -2624,38 +3251,97 @@ export function AdminDashboard() {
 
                         {/* Status Filter for Non-Orders tabs and Desktop (exclude vendors mobile as it's inline) */}
                         {(activeTab !== "orders" || !isMobile) && !(activeTab === "vendors" && isMobile) && (
-                          <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-full sm:w-40">
-                              <Filter className="w-4 h-4 mr-2" />
-                              <SelectValue placeholder="Filter by status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Status</SelectItem>
-                              {activeTab === "orders" && (
-                                <>
-                                  {getUniqueStatuses().map((status) => (
-                                    <SelectItem key={status} value={status}>
-                                      {status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-                                    </SelectItem>
-                                  ))}
-                                </>
-                              )}
-                              {activeTab === "vendors" && (
-                                <>
-                                  <SelectItem value="active">Active</SelectItem>
-                                  <SelectItem value="pending">Pending</SelectItem>
-                                  <SelectItem value="inactive">Inactive</SelectItem>
-                                </>
-                              )}
-                              {activeTab === "carrier" && (
-                                <>
-                                  <SelectItem value="active">Active</SelectItem>
-                                  <SelectItem value="pending">Pending</SelectItem>
-                                  <SelectItem value="inactive">Inactive</SelectItem>
-                                </>
-                              )}
-                            </SelectContent>
-                          </Select>
+                          activeTab === "orders" ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="outline" className="w-full sm:w-40 justify-between text-left font-normal">
+                                  <Filter className="w-4 h-4 mr-2" />
+                                  <span className="truncate">
+                                    {statusFilter.length === 0 
+                                      ? "All Status" 
+                                      : statusFilter.length === 1 
+                                      ? statusFilter[0].replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                                      : `${statusFilter.length} Statuses`}
+                                  </span>
+                                  <ChevronDown className="w-4 h-4 opacity-50 ml-2" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-56 p-0" align="start">
+                                <div className="p-2">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <Label className="text-xs font-medium">Select Statuses</Label>
+                                    {statusFilter.length > 0 && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 px-2 text-xs"
+                                        onClick={() => setStatusFilter([])}
+                                      >
+                                        Clear
+                                      </Button>
+                                    )}
+                                  </div>
+                                  <div className="max-h-48 overflow-y-auto space-y-1">
+                                    <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={statusFilter.length === 0}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setStatusFilter([])
+                                          }
+                                        }}
+                                        className="w-4 h-4"
+                                      />
+                                      <span className="text-xs">All Status</span>
+                                    </label>
+                                    {getUniqueStatuses().map((status) => (
+                                      <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={statusFilter.includes(status)}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setStatusFilter([...statusFilter, status])
+                                            } else {
+                                              const newFilters = statusFilter.filter(s => s !== status)
+                                              setStatusFilter(newFilters)
+                                            }
+                                          }}
+                                          className="w-4 h-4"
+                                        />
+                                        <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : (
+                            <Select value={statusFilter.length > 0 ? statusFilter[0] : "all"} onValueChange={(value) => setStatusFilter(value === "all" ? [] : [value])}>
+                              <SelectTrigger className="w-full sm:w-40">
+                                <Filter className="w-4 h-4 mr-2" />
+                                <SelectValue placeholder="Filter by status" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Status</SelectItem>
+                                {activeTab === "vendors" && (
+                                  <>
+                                    <SelectItem value="active">Active</SelectItem>
+                                    <SelectItem value="pending">Pending</SelectItem>
+                                    <SelectItem value="inactive">Inactive</SelectItem>
+                                  </>
+                                )}
+                                {activeTab === "carrier" && (
+                                  <>
+                                    <SelectItem value="active">Active</SelectItem>
+                                    <SelectItem value="pending">Pending</SelectItem>
+                                    <SelectItem value="inactive">Inactive</SelectItem>
+                                  </>
+                                )}
+                              </SelectContent>
+                            </Select>
+                          )
                         )}
 
                         {/* Add New Vendor Button - Only for Vendors tab */}
@@ -2668,7 +3354,7 @@ export function AdminDashboard() {
 
                         {/* Vendor Filter - Only for Orders tab (Desktop) */}
                         {activeTab === "orders" && !isMobile && (
-                          <Popover>
+                          <Popover open={vendorFilterPopoverOpen} onOpenChange={setVendorFilterPopoverOpen}>
                             <PopoverTrigger asChild>
                               <Button variant="outline" className="w-full sm:w-40 justify-start text-left font-normal">
                                 <Users className="w-4 h-4 mr-2" />
@@ -2697,38 +3383,64 @@ export function AdminDashboard() {
                                   )}
                                 </div>
                                 <div className="max-h-60 overflow-y-auto space-y-1">
-                                  <label className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedVendorFilters.includes('Unclaimed')}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setSelectedVendorFilters([...selectedVendorFilters, 'Unclaimed'])
-                                        } else {
-                                          setSelectedVendorFilters(selectedVendorFilters.filter(v => v !== 'Unclaimed'))
-                                        }
-                                      }}
-                                      className="w-4 h-4"
-                                    />
-                                    <span className="text-sm">Unclaimed</span>
-                                  </label>
-                                  {getUniqueVendorNames().map((vendorName) => (
-                                    <label key={vendorName} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={selectedVendorFilters.includes(vendorName)}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setSelectedVendorFilters([...selectedVendorFilters, vendorName])
-                                          } else {
-                                            setSelectedVendorFilters(selectedVendorFilters.filter(v => v !== vendorName))
-                                          }
-                                        }}
-                                        className="w-4 h-4"
-                                      />
-                                      <span className="text-sm">{vendorName}</span>
-                                    </label>
-                                  ))}
+                                  {vendorsLoading && (
+                                    <div className="flex items-center justify-center py-2">
+                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                                      <span className="text-xs ml-2 text-gray-500">Loading vendors...</span>
+                                    </div>
+                                  )}
+                                  {!vendorsLoading && (
+                                    <>
+                                      <label className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedVendorFilters.length === 0}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setSelectedVendorFilters([])
+                                            }
+                                          }}
+                                          className="w-4 h-4"
+                                        />
+                                        <span className="text-sm">All Vendors</span>
+                                      </label>
+                                      <label className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedVendorFilters.includes('Unclaimed')}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setSelectedVendorFilters([...selectedVendorFilters, 'Unclaimed'])
+                                            } else {
+                                              setSelectedVendorFilters(selectedVendorFilters.filter(v => v !== 'Unclaimed'))
+                                            }
+                                          }}
+                                          className="w-4 h-4"
+                                        />
+                                        <span className="text-sm">Unclaimed</span>
+                                      </label>
+                                      {vendors
+                                        .filter(v => v.status === 'active')
+                                        .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                                        .map((vendor) => (
+                                          <label key={vendor.id || vendor.warehouseId || vendor.warehouse_id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedVendorFilters.includes(vendor.name)}
+                                              onChange={(e) => {
+                                                if (e.target.checked) {
+                                                  setSelectedVendorFilters([...selectedVendorFilters, vendor.name])
+                                                } else {
+                                                  setSelectedVendorFilters(selectedVendorFilters.filter(v => v !== vendor.name))
+                                                }
+                                              }}
+                                              className="w-4 h-4"
+                                            />
+                                            <span className="text-sm">{vendor.name}</span>
+                                          </label>
+                                        ))}
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             </PopoverContent>
@@ -3943,7 +4655,10 @@ export function AdminDashboard() {
 
                 {/* Inventory Tab */}
                 <TabsContent value="inventory" className="mt-0">
-                  <InventoryAggregation onProductCountChange={setInventoryProductCount} />
+                  <InventoryAggregation 
+                    ref={inventoryAggregationRef}
+                    onProductCountChange={setInventoryProductCount} 
+                  />
                 </TabsContent>
 
                 {/* Settlement Management Tab - Hidden for now (tab trigger is commented out, content kept for future use) */}
@@ -4005,7 +4720,7 @@ export function AdminDashboard() {
                           </div>
                         </div>
                         <div className="flex justify-between items-center mt-4">
-                          <Button onClick={fetchSettlements} disabled={settlementsLoading}>
+                          <Button onClick={() => fetchSettlements()} disabled={settlementsLoading}>
                             <Search className="w-4 h-4 mr-2" />
                             {settlementsLoading ? "Loading..." : "Search"}
                           </Button>
@@ -4939,6 +5654,7 @@ export function AdminDashboard() {
                     
                     {/* Share All Button - Green */}
                     <Button 
+                      onClick={() => inventoryAggregationRef.current?.shareAll()}
                       className="flex-1 h-10 sm:h-12 px-1.5 sm:px-3 text-[10px] xs:text-xs sm:text-sm font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0 whitespace-nowrap"
                     >
                       <Share2 className="w-3 h-3 xs:w-3.5 xs:h-3.5 sm:w-4 sm:h-4 mr-0.5 xs:mr-1 sm:mr-2 flex-shrink-0" />
@@ -4947,6 +5663,7 @@ export function AdminDashboard() {
 
                     {/* Inventory Button - Blue */}
                     <Button 
+                      onClick={() => inventoryAggregationRef.current?.refresh()}
                       className="flex-1 h-10 sm:h-12 px-1.5 sm:px-3 text-[10px] xs:text-xs sm:text-sm font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 whitespace-nowrap"
                     >
                       <RefreshCw className="w-3 h-3 xs:w-3.5 xs:h-3.5 sm:w-4 sm:h-4 mr-0.5 xs:mr-1 sm:mr-2 flex-shrink-0" />
@@ -4955,6 +5672,7 @@ export function AdminDashboard() {
 
                     {/* RTO Button - Purple */}
                     <Button 
+                      onClick={() => inventoryAggregationRef.current?.openRTO()}
                       className="flex-1 h-10 sm:h-12 px-1.5 sm:px-3 text-[10px] xs:text-xs sm:text-sm font-medium bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 border-0 shadow-lg min-w-0 whitespace-nowrap"
                     >
                       <Upload className="w-3 h-3 xs:w-3.5 xs:h-3.5 sm:w-4 sm:h-4 mr-0.5 xs:mr-1 sm:mr-2 flex-shrink-0" />
@@ -5605,6 +6323,7 @@ export function AdminDashboard() {
                     setSelectedBulkVendorId('')
                     setSelectedOrders([])
                     await fetchOrders()
+                    await fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders })
                   } else {
                     toast({ title: 'Error', description: res.message, variant: 'destructive' })
                   }
@@ -5628,6 +6347,7 @@ export function AdminDashboard() {
                       setSelectedBulkVendorId('')
                       setSelectedOrders([])
                       await fetchOrders()
+                      await fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders })
                     } else {
                       toast({ title: 'Error', description: resUn.message, variant: 'destructive' })
                     }
@@ -5641,6 +6361,7 @@ export function AdminDashboard() {
                     setSelectedBulkVendorId('')
                     setSelectedOrders([])
                     await fetchOrders()
+                    await fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders })
                   } else {
                     toast({ title: 'Error', description: res.message, variant: 'destructive' })
                   }

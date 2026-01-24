@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useImperativeHandle, forwardRef } from "react";
 import { ProductInventoryCard } from "./product-inventory-card";
 import { InventoryMetrics } from "./inventory-metrics";
 import { RTOUploadDialog } from "./rto-upload-dialog";
@@ -39,7 +39,14 @@ interface InventoryAggregationProps {
   onProductCountChange?: (count: number) => void;
 }
 
-export function InventoryAggregation({ onProductCountChange }: InventoryAggregationProps = {}) {
+export interface InventoryAggregationRef {
+  shareAll: () => void;
+  refresh: () => void;
+  openRTO: () => void;
+}
+
+export const InventoryAggregation = forwardRef<InventoryAggregationRef, InventoryAggregationProps>(
+  ({ onProductCountChange }, ref) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [rtoData, setRTOData] = useState<RTOEntry[]>([]);
@@ -52,6 +59,7 @@ export function InventoryAggregation({ onProductCountChange }: InventoryAggregat
   const [searchFilter, setSearchFilter] = useState<string>(""); // text search (includes)
   const [searchExcludeFilter, setSearchExcludeFilter] = useState<string>(""); // text search (excludes)
   const [showFilters, setShowFilters] = useState(false);
+  const [showRTODialog, setShowRTODialog] = useState(false);
 
   useEffect(() => {
     fetchInventory();
@@ -362,6 +370,13 @@ export function InventoryAggregation({ onProductCountChange }: InventoryAggregat
         : "Bulk inventory message is ready to send.",
     });
   };
+
+  // Expose functions via ref
+  useImperativeHandle(ref, () => ({
+    shareAll: shareAllToWhatsApp,
+    refresh: fetchInventory,
+    openRTO: () => setShowRTODialog(true),
+  }));
 
   if (loading) {
     return (
@@ -855,7 +870,14 @@ export function InventoryAggregation({ onProductCountChange }: InventoryAggregat
               <span className="hidden sm:inline">Refresh</span>
             </Button>
             <div data-rto-upload-trigger>
-              <RTOUploadDialog onRTODataUploaded={handleRTODataUploaded} />
+              <RTOUploadDialog 
+                onRTODataUploaded={(data) => {
+                  handleRTODataUploaded(data);
+                  setShowRTODialog(false);
+                }}
+                open={showRTODialog}
+                onOpenChange={setShowRTODialog}
+              />
             </div>
             <Button
               onClick={shareAllToWhatsApp}
@@ -907,5 +929,6 @@ export function InventoryAggregation({ onProductCountChange }: InventoryAggregat
       )}
     </div>
   );
-}
+  }
+);
 

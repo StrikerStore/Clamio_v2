@@ -15,10 +15,14 @@ import { useToast } from "@/hooks/use-toast";
 
 interface RTOUploadDialogProps {
   onRTODataUploaded: (rtoData: any[]) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function RTOUploadDialog({ onRTODataUploaded }: RTOUploadDialogProps) {
-  const [open, setOpen] = useState(false);
+export function RTOUploadDialog({ onRTODataUploaded, open: controlledOpen, onOpenChange }: RTOUploadDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = onOpenChange || setInternalOpen;
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const { toast } = useToast();
