@@ -5186,29 +5186,55 @@ class Database {
       }
       const accountCode = orderData[0].account_code;
 
-      // Clear existing tracking data for this order to avoid duplicates (with account_code for store isolation)
-      await this.mysqlConnection.execute(
-        'DELETE FROM order_tracking WHERE order_id = ? AND account_code = ?',
-        [orderId, accountCode]
-      );
-
-      // Insert new tracking events
-      for (const event of trackingEvents) {
-        await this.mysqlConnection.execute(`
-          INSERT INTO order_tracking 
-          (order_id, order_type, shipment_status, timestamp, ndr_reason, account_code)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [
-          orderId,
-          orderType,
-          event.name || 'Unknown',
-          event.time || new Date(),
-          event.ndr_reason || null,
-          accountCode
-        ]);
+      // Get the latest/newest status from tracking events (should be only one now)
+      const latestEvent = trackingEvents[trackingEvents.length - 1];
+      if (!latestEvent || !latestEvent.name) {
+        throw new Error('No valid tracking event found');
       }
+
+      const newStatus = latestEvent.name;
+      const newTimestamp = latestEvent.time || new Date();
+
+      // Check the latest status in order_tracking for this order
+      const [existingTracking] = await this.mysqlConnection.execute(`
+        SELECT id, shipment_status, timestamp, updated_at
+        FROM order_tracking 
+        WHERE order_id = ? AND account_code = ?
+        ORDER BY timestamp DESC, id DESC
+        LIMIT 1
+      `, [orderId, accountCode]);
+
+      if (existingTracking.length > 0) {
+        const latestExistingStatus = existingTracking[0].shipment_status;
+        
+        // If status is the same, just update the updated_at timestamp
+        if (latestExistingStatus === newStatus) {
+          await this.mysqlConnection.execute(`
+            UPDATE order_tracking 
+            SET updated_at = NOW(), timestamp = ?
+            WHERE id = ?
+          `, [newTimestamp, existingTracking[0].id]);
+          
+          console.log(`✅ Updated existing tracking record (same status: ${newStatus}) for order ${orderId}`);
+          return;
+        }
+      }
+
+      // Status is different or no existing record - insert new row
+      await this.mysqlConnection.execute(`
+        INSERT INTO order_tracking 
+        (order_id, order_type, shipment_status, timestamp, ndr_reason, account_code)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [
+        orderId,
+        orderType,
+        newStatus,
+        newTimestamp,
+        latestEvent.ndr_reason || null,
+        accountCode
+      ]);
       
-      console.log(`✅ Stored ${trackingEvents.length} tracking events for order ${orderId}`);
+      console.log(`✅ Stored new tracking event (status: ${newStatus}) for order ${orderId}`);
       
     } catch (error) {
       console.error(`❌ Error storing tracking data for order ${orderId}:`, error);

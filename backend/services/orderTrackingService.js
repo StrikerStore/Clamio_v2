@@ -285,29 +285,35 @@ class OrderTrackingService {
       return status || 'Unknown';
     }
 
-    // Convert to lowercase for case-insensitive comparison
-    const normalized = status.trim().toLowerCase();
+    // Convert to lowercase and replace underscores with spaces for consistent comparison
+    // This handles: "picked_up", "PICKED_UP", "IN_TRANSIT", "in_transit", etc.
+    const normalized = status.trim().toLowerCase().replace(/_/g, ' ');
 
     // First, handle failure statuses that should NOT be mapped to "In Transit"
     // These should be handled separately
-    if (normalized.includes('pickup failed') || normalized.includes('pickup_failed') || 
-        normalized.includes('failed pickup') || normalized.includes('failed_pickup')) {
+    if (normalized.includes('pickup failed') || normalized.includes('failed pickup')) {
       return 'Pickup Failed';
     }
 
-    // Map all pickup variations to "In Transit" (case-insensitive)
-    // Matches: "picked up", "PICKED UP", "Picked Up", "shipment picked up", "pickup done", "picked", etc.
+    // Map all pickup variations to "In Transit" (case-insensitive, handles underscores)
+    // Matches: 
+    // - "picked up", "PICKED UP", "Picked Up" 
+    // - "picked_up", "PICKED_UP", "picked_UP"
+    // - "shipment picked up", "shipment_picked_up"
+    // - "pickup done", "pickup_done"
+    // - "picked", "PICKED"
+    // - "in transit", "IN TRANSIT", "In Transit"
+    // - "in_transit", "IN_TRANSIT", "in_TRANSIT"
     // Note: "pickup failed" is excluded above
     if (
       normalized.includes('picked') ||
       normalized.includes('pickup') ||
-      normalized === 'in transit' ||
-      normalized === 'in_transit'
+      normalized === 'in transit'
     ) {
       return 'In Transit';
     }
 
-    // Normalize "Delivered" variations (case-insensitive)
+    // Normalize "Delivered" variations (case-insensitive, handles underscores)
     if (normalized === 'delivered') {
       return 'Delivered';
     }
@@ -316,23 +322,16 @@ class OrderTrackingService {
     // For other statuses, return as-is (preserve original casing)
     const commonStatuses = {
       'out for delivery': 'Out for Delivery',
-      'out_for_delivery': 'Out for Delivery',
       'rto': 'RTO',
       'cancelled': 'Cancelled',
       'returned': 'Returned',
       'failed delivery': 'Failed Delivery',
-      'failed_delivery': 'Failed Delivery',
       'attempted delivery': 'Attempted Delivery',
-      'attempted_delivery': 'Attempted Delivery',
       'shipment booked': 'Shipment Booked',
-      'shipment_booked': 'Shipment Booked',
       'dispatched': 'Dispatched',
       'in warehouse': 'In Warehouse',
-      'in_warehouse': 'In Warehouse',
       'out for pickup': 'Out for Pickup',
-      'out_for_pickup': 'Out for Pickup',
-      'rto delivered': 'RTO Delivered',
-      'rto_delivered': 'RTO Delivered'
+      'rto delivered': 'RTO Delivered'
     };
 
     if (commonStatuses[normalized]) {
@@ -412,14 +411,57 @@ class OrderTrackingService {
 
       const data = response.data;
 
-      // Validate response structure
-      if (!data || data.success !== "1") {
-        throw new Error(`API error: ${data.message || 'Unknown error'}`);
+      // Handle array response (new API format)
+      let trackingDetails = null;
+      if (Array.isArray(data) && data.length > 0) {
+        // Take first element from array
+        const firstItem = data[0];
+        if (firstItem.tracking_details) {
+          trackingDetails = firstItem.tracking_details;
+        }
+      } else if (data && data.tracking_details) {
+        // Direct object with tracking_details
+        trackingDetails = data.tracking_details;
+      } else if (data && data.success === "1" && data.shipment_status_history) {
+        // Old API format - return as is
+        console.log(`✅ [API] Received tracking data for order ${orderId}: ${data.shipment_status_history?.length || 0} events`);
+        return data;
       }
 
-      console.log(`✅ [API] Received tracking data for order ${orderId}: ${data.shipment_status_history?.length || 0} events`);
-      
-      return data;
+      // Extract shipment_status from new API format
+      if (trackingDetails && trackingDetails.shipment_status) {
+        const currentStatus = trackingDetails.shipment_status;
+        const currentDateTime = new Date().toISOString().slice(0, 19).replace('T', ' '); // Format: YYYY-MM-DD HH:MM:SS
+        
+        // Create our own history with single entry
+        const shipmentStatusHistory = [
+          {
+            name: currentStatus,
+            time: currentDateTime
+          }
+        ];
+
+        console.log(`✅ [API] Received tracking data for order ${orderId}: Extracted status "${currentStatus}" at ${currentDateTime}`);
+        
+        // Return in the expected format
+        return {
+          success: "1",
+          shipment_status_history: shipmentStatusHistory
+        };
+      }
+
+      // If no tracking_details found, check for old format
+      if (!data || data.success !== "1") {
+        throw new Error(`API error: ${data?.message || 'Unknown error'}`);
+      }
+
+      // Fallback to old format if shipment_status_history exists
+      if (data.shipment_status_history) {
+        console.log(`✅ [API] Received tracking data for order ${orderId}: ${data.shipment_status_history?.length || 0} events`);
+        return data;
+      }
+
+      throw new Error('Invalid API response format: No tracking_details or shipment_status_history found');
       
     } catch (error) {
       if (error.response) {
