@@ -16,6 +16,8 @@ interface ApiResponse<T = any> {
   message: string
   data?: T
   errors?: any[]
+  warning?: boolean
+  userMessage?: string
 }
 
 class ApiClient {
@@ -45,8 +47,8 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     const authHeader = this.getAuthHeader()
-    
-    
+
+
     const config: RequestInit = {
       headers: {
         'Content-Type': 'application/json',
@@ -62,13 +64,13 @@ class ApiClient {
         console.log('  Headers:', config.headers);
         if (config.body) console.log('  Body:', config.body);
       }
-      
+
       const response = await fetch(`${API_BASE_URL}${endpoint}`, config)
-      
+
       // Check if response is JSON
       const contentType = response.headers.get('content-type')
       let data: any;
-      
+
       if (!contentType || !contentType.includes('application/json')) {
         // If not JSON, read as text to get the actual error
         const text = await response.text()
@@ -79,7 +81,7 @@ class ApiClient {
           contentType,
           responseText: text.substring(0, 200) // First 200 chars
         })
-        
+
         if (response.status === 404) {
           throw new Error(`API endpoint not found: ${endpoint}. Please ensure the backend server is running and has been restarted to register new endpoints.`)
         } else if (response.status >= 500) {
@@ -88,7 +90,7 @@ class ApiClient {
           throw new Error(`Invalid response format: Expected JSON, got ${contentType || 'unknown'}. Status: ${response.status}`)
         }
       }
-      
+
       try {
         data = await response.json()
       } catch (jsonError) {
@@ -100,7 +102,7 @@ class ApiClient {
       if (!response.ok) {
         // Don't log errors for verification endpoint - it's optional and non-critical
         const isVerificationEndpoint = endpoint.includes('/verify-status');
-        
+
         if (!isVerificationEndpoint) {
           // Log detailed error information for debugging (except for verification)
           console.error('❌ API Error Response:', {
@@ -110,7 +112,7 @@ class ApiClient {
             data: data || 'No data received'
           })
         }
-        
+
         // Log detailed validation errors for debugging
         if (data && data.errors && Array.isArray(data.errors)) {
           if (!isVerificationEndpoint) {
@@ -119,7 +121,7 @@ class ApiClient {
           const errorMessages = data.errors.map((err: any) => `${err.field}: ${err.message}`).join(', ')
           throw new Error(`${data.message || 'Validation error'}: ${errorMessages}`)
         }
-        
+
         // For 404 errors, provide more specific message
         if (response.status === 404) {
           if (isVerificationEndpoint) {
@@ -128,7 +130,7 @@ class ApiClient {
           }
           throw new Error(`API endpoint not found: ${endpoint}. Please ensure the backend server is running and has been restarted to register new endpoints.`)
         }
-        
+
         // For other errors, use the message from the response, or provide a default
         const errorMessage = data?.message || `HTTP error! status: ${response.status} ${response.statusText}`
         throw new Error(errorMessage)
@@ -138,7 +140,7 @@ class ApiClient {
         console.log(`✅ API Response: ${response.status} ${response.statusText}`);
         console.log('  Data:', data);
       }
-      
+
       return data
     } catch (error) {
       if (DEBUG_API) {
@@ -204,7 +206,7 @@ class ApiClient {
 
     const queryString = queryParams.toString()
     const endpoint = queryString ? `/users?${queryString}` : '/users'
-    
+
     return this.makeRequest(endpoint)
   }
 
@@ -226,7 +228,7 @@ class ApiClient {
 
     // Decode the auth header to check user role
     const userInfo = this.getCurrentUserInfo()
-    
+
     if (userInfo?.role === 'superadmin') {
       // Superadmin can create both vendors and admins via the general /users endpoint
       return this.makeRequest('/users', {
@@ -256,7 +258,7 @@ class ApiClient {
     contactNumber: string
   }>): Promise<ApiResponse> {
     const userInfo = this.getCurrentUserInfo()
-    
+
     if (userInfo?.role === 'superadmin') {
       // Superadmin uses the general route which allows updating any user (vendor or admin)
       return this.makeRequest(`/users/${userId}`, {
@@ -276,7 +278,7 @@ class ApiClient {
 
   async deleteUser(userId: string): Promise<ApiResponse> {
     const userInfo = this.getCurrentUserInfo()
-    
+
     if (userInfo?.role === 'superadmin') {
       // Superadmin uses the general route which allows deleting any user (vendor or admin)
       return this.makeRequest(`/users/${userId}`, {
@@ -364,8 +366,8 @@ class ApiClient {
   async refreshOrders(): Promise<ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
-    
-    
+
+
     const config: RequestInit = {
       method: 'POST',
       headers: {
@@ -392,8 +394,8 @@ class ApiClient {
 
   // Admin orders API
   async getAdminOrders(
-    page: number = 1, 
-    limit: number = 50, 
+    page: number = 1,
+    limit: number = 50,
     filters?: {
       search?: string,
       dateFrom?: string,
@@ -409,7 +411,7 @@ class ApiClient {
       page: page.toString(),
       limit: limit.toString()
     });
-    
+
     // Add filters if provided
     if (filters) {
       if (filters.search) params.append('search', filters.search);
@@ -441,7 +443,7 @@ class ApiClient {
       }
       if (filters.showInactiveStores) params.append('showInactiveStores', 'true');
     }
-    
+
     return this.makeRequest(`/orders/admin/all?${params.toString()}`);
   }
 
@@ -456,7 +458,7 @@ class ApiClient {
   }): Promise<ApiResponse> {
     // Build query params
     const params = new URLSearchParams();
-    
+
     // Add filters if provided
     if (filters) {
       if (filters.search) params.append('search', filters.search);
@@ -488,7 +490,7 @@ class ApiClient {
       }
       if (filters.showInactiveStores) params.append('showInactiveStores', 'true');
     }
-    
+
     const queryString = params.toString();
     return this.makeRequest(`/orders/admin/dashboard-stats${queryString ? '?' + queryString : ''}`);
   }
@@ -540,10 +542,10 @@ class ApiClient {
   async claimOrder(unique_id: string): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: claimOrder called');
     console.log('  - unique_id:', unique_id);
-    
+
     // Use vendor token for claim endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-   
+
 
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
@@ -566,12 +568,12 @@ class ApiClient {
   async bulkClaimOrders(unique_ids: string[]): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: bulkClaimOrders called');
     console.log('  - unique_ids:', unique_ids);
-    
+
     // Use vendor token for bulk claim endpoint
     const vendorToken = localStorage.getItem('vendorToken')
     console.log('🔑 API CLIENT: Token check');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
@@ -595,9 +597,9 @@ class ApiClient {
   async verifyOrderStatuses(unique_ids: string[]): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: verifyOrderStatuses called');
     console.log('  - unique_ids:', unique_ids);
-    
+
     const vendorToken = localStorage.getItem('vendorToken')
-    
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       return { success: false, message: 'No vendor token found' };
@@ -623,13 +625,13 @@ class ApiClient {
     console.log('🔵 API CLIENT: getGroupedOrders called');
     console.log('  - page:', page);
     console.log('  - limit:', limit);
-    
+
     // Use vendor token for grouped orders endpoint
     const vendorToken = localStorage.getItem('vendorToken')
     console.log('🔑 API CLIENT: Token check');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
     console.log('  - vendorToken value:', JSON.stringify(vendorToken));
-    
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
@@ -652,12 +654,12 @@ class ApiClient {
     console.log('🔵 API CLIENT: getHandoverOrders called');
     console.log('  - page:', page);
     console.log('  - limit:', limit);
-    
+
     // Use vendor token for handover orders endpoint
     const vendorToken = localStorage.getItem('vendorToken')
     console.log('🔑 API CLIENT: Token check');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
@@ -680,12 +682,12 @@ class ApiClient {
     console.log('🔵 API CLIENT: getOrderTrackingOrders called');
     console.log('  - page:', page);
     console.log('  - limit:', limit);
-    
+
     // Use vendor token for order tracking endpoint
     const vendorToken = localStorage.getItem('vendorToken')
     console.log('🔑 API CLIENT: Token check');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
@@ -706,12 +708,12 @@ class ApiClient {
 
   async getDashboardStats(): Promise<ApiResponse> {
     console.log('📊 API CLIENT: getDashboardStats called');
-    
+
     // Use vendor token for dashboard stats endpoint
     const vendorToken = localStorage.getItem('vendorToken')
     console.log('🔑 API CLIENT: Token check');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
@@ -732,12 +734,12 @@ class ApiClient {
   async reverseOrder(unique_id: string): Promise<ApiResponse> {
     console.log('🔵 API CLIENT: reverseOrder called');
     console.log('  - unique_id:', unique_id);
-    
+
     // Use vendor token for reverse endpoint
     const vendorToken = localStorage.getItem('vendorToken')
     console.log('🔑 API CLIENT: Token check');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
@@ -762,12 +764,12 @@ class ApiClient {
     console.log('🔵 API CLIENT: reverseGroupedOrder called');
     console.log('  - order_id:', order_id);
     console.log('  - unique_ids:', unique_ids);
-    
+
     // Use vendor token for reverse grouped endpoint
     const vendorToken = localStorage.getItem('vendorToken')
     console.log('🔑 API CLIENT: Token check');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    
+
     if (!vendorToken) {
       console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
@@ -789,7 +791,7 @@ class ApiClient {
   }
 
   // Settlement API methods
-  
+
   // Vendor settlement methods
   async getVendorPayments(): Promise<ApiResponse> {
     return this.makeRequest('/settlements/vendor/payments');
@@ -829,7 +831,7 @@ class ApiClient {
 
     const queryString = queryParams.toString();
     const endpoint = queryString ? `/settlements/admin/all?${queryString}` : '/settlements/admin/all';
-    
+
     return this.makeRequest(endpoint);
   }
 
@@ -846,7 +848,7 @@ class ApiClient {
     }
 
     const authHeader = this.getAuthHeader();
-    
+
     const config: RequestInit = {
       method: 'POST',
       headers: {
@@ -879,7 +881,7 @@ class ApiClient {
 
   async exportSettlementsCSV(): Promise<Blob> {
     const authHeader = this.getAuthHeader();
-    
+
     const config: RequestInit = {
       headers: {
         ...(authHeader && { 'Authorization': authHeader }),
@@ -888,7 +890,7 @@ class ApiClient {
 
     try {
       const response = await fetch(`${API_BASE_URL}/settlements/admin/export-csv`, config);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -902,7 +904,7 @@ class ApiClient {
 
   async getPaymentProof(filename: string): Promise<Blob> {
     const authHeader = this.getAuthHeader();
-    
+
     const config: RequestInit = {
       headers: {
         ...(authHeader && { 'Authorization': authHeader }),
@@ -911,7 +913,7 @@ class ApiClient {
 
     try {
       const response = await fetch(`${API_BASE_URL}/settlements/proof/${filename}`, config);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -925,7 +927,7 @@ class ApiClient {
 
   // Carrier management methods
   async getCarriers(accountCode?: string): Promise<ApiResponse> {
-    const url = accountCode 
+    const url = accountCode
       ? `/shipway/carriers/local?account_code=${encodeURIComponent(accountCode)}`
       : '/shipway/carriers/local'
     return this.makeRequest(url)
@@ -964,7 +966,7 @@ class ApiClient {
   async downloadCarriersCSV(): Promise<void> {
     try {
       const authHeader = this.getAuthHeader();
-      
+
       const response = await fetch(`${API_BASE_URL}/shipway/carriers/download`, {
         method: 'GET',
         headers: {
@@ -978,7 +980,7 @@ class ApiClient {
 
       // Get the filename from the response headers
       const contentDisposition = response.headers.get('content-disposition');
-      const filename = contentDisposition 
+      const filename = contentDisposition
         ? contentDisposition.split('filename=')[1]?.replace(/"/g, '') || 'carriers.csv'
         : 'carriers.csv';
 
@@ -1001,7 +1003,7 @@ class ApiClient {
   async uploadCarrierPriorities(file: File): Promise<ApiResponse> {
     try {
       const authHeader = this.getAuthHeader();
-      
+
       const formData = new FormData();
       formData.append('csvFile', file, file.name); // Add filename explicitly
       // Note: account_code should be in CSV file itself for multi-store upload
@@ -1033,9 +1035,9 @@ class ApiClient {
         console.log('🔍 Response text:', text);
         throw new Error(`Unexpected response format: ${text}`);
       }
-      
+
       console.log('🔍 Response data:', data);
-      
+
       if (!response.ok) {
         throw new Error(data.message || `HTTP error! status: ${response.status}`);
       }
@@ -1147,7 +1149,7 @@ class ApiClient {
     });
   }
 
-  async testShipwayConnection(credentials: {
+  async testStoreShipwayConnection(credentials: {
     username: string
     password: string
   }): Promise<ApiResponse> {
@@ -1171,13 +1173,13 @@ class ApiClient {
   async downloadLabel(orderId: string, format: string = 'thermal'): Promise<ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
-    
+
     console.log('🔍 DOWNLOAD LABEL API CLIENT DEBUG:');
     console.log('  - Order ID being sent:', orderId);
     console.log('  - Order ID type:', typeof orderId);
     console.log('  - Format being sent:', format);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
-    
+
     const config: RequestInit = {
       method: 'POST',
       headers: {
@@ -1212,14 +1214,14 @@ class ApiClient {
   async bulkDownloadLabels(orderIds: string[], format: string = 'thermal', generateOnly: boolean = false): Promise<Blob | ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
-    
+
     console.log('🔍 BULK DOWNLOAD LABELS API CLIENT DEBUG:');
     console.log('  - Order IDs being sent:', orderIds);
     console.log('  - Order IDs count:', orderIds.length);
     console.log('  - Format being sent:', format);
     console.log('  - Generate only:', generateOnly);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
-    
+
     const config: RequestInit = {
       method: 'POST',
       headers: {
@@ -1233,7 +1235,7 @@ class ApiClient {
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)
-      
+
       console.log('🔍 BULK DOWNLOAD LABELS API RESPONSE DEBUG:');
       console.log('  - Status:', response.status);
       console.log('  - OK:', response.ok);
@@ -1256,24 +1258,24 @@ class ApiClient {
       const blob = await response.blob()
       console.log('✅ Bulk labels PDF downloaded successfully');
       console.log('  - Blob size:', blob.size, 'bytes');
-      
+
       // Check for warning headers and store them in blob object
       const warningsHeader = response.headers.get('X-Download-Warnings');
       const failedOrdersHeader = response.headers.get('X-Failed-Orders');
-      
+
       if (warningsHeader) {
         console.log('⚠️ Some orders failed during bulk download');
         const warnings = atob(warningsHeader);
         const failedOrders = failedOrdersHeader ? JSON.parse(failedOrdersHeader) : [];
         console.log('  - Warnings:', warnings);
         console.log('  - Failed orders:', failedOrders);
-        
+
         // Store warnings in blob object for later access
         (blob as any)._warnings = warnings;
         (blob as any)._failedOrders = failedOrders;
       }
       console.log('  - Blob type:', blob.type);
-      
+
       return blob
     } catch (error) {
       console.error('Bulk download labels API request failed:', error)
@@ -1284,13 +1286,13 @@ class ApiClient {
   async bulkDownloadLabelsMerge(orderIds: string[], format: string = 'thermal'): Promise<Blob> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
-    
+
     console.log('🔍 BULK DOWNLOAD LABELS MERGE API CLIENT DEBUG:');
     console.log('  - Order IDs being sent:', orderIds);
     console.log('  - Order IDs count:', orderIds.length);
     console.log('  - Format being sent:', format);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
-    
+
     const config: RequestInit = {
       method: 'POST',
       headers: {
@@ -1304,7 +1306,7 @@ class ApiClient {
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels-merge`, config)
-      
+
       console.log('🔍 BULK DOWNLOAD LABELS MERGE API RESPONSE DEBUG:');
       console.log('  - Status:', response.status);
       console.log('  - OK:', response.ok);
@@ -1320,7 +1322,7 @@ class ApiClient {
       console.log('✅ Bulk labels PDF merged and downloaded successfully');
       console.log('  - Blob size:', blob.size, 'bytes');
       console.log('  - Blob type:', blob.type);
-      
+
       return blob
     } catch (error) {
       console.error('Bulk download labels merge API request failed:', error)
@@ -1331,14 +1333,14 @@ class ApiClient {
   async downloadLabelFile(shippingUrl: string): Promise<Blob> {
     console.log('🔍 DOWNLOAD LABEL FILE DEBUG:');
     console.log('  - Shipping URL:', shippingUrl);
-    
+
     // Use backend proxy to avoid CORS issues (same as before migration)
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
-    
+
     console.log('🔍 FRONTEND TOKEN DEBUG:');
     console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
     console.log('  - vendorToken value:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
-    
+
     const config: RequestInit = {
       method: 'POST',
       headers: {
@@ -1355,12 +1357,12 @@ class ApiClient {
     try {
       console.log('🔄 Fetching label file via backend proxy...');
       const response = await fetch(`${API_BASE_URL}/orders/download-pdf`, config)
-      
+
       console.log('🔍 Label file response:');
       console.log('  - Status:', response.status);
       console.log('  - OK:', response.ok);
       console.log('  - Content-Type:', response.headers.get('content-type'));
-      
+
       if (!response.ok) {
         // Try to get the error message from the response
         try {
@@ -1376,7 +1378,7 @@ class ApiClient {
       console.log('✅ Label file downloaded successfully via proxy');
       console.log('  - Blob size:', blob.size, 'bytes');
       console.log('  - Blob type:', blob.type);
-      
+
       return blob
     } catch (error) {
       console.error('❌ Download label file failed:', error)
@@ -1504,6 +1506,14 @@ class ApiClient {
    */
   async getVapidKey(): Promise<ApiResponse> {
     return this.makeRequest('/public/vapid-key')
+  }
+
+  /**
+   * Get shipment status mapping for badge colors and display names
+   * This is a public endpoint that doesn't require authentication
+   */
+  async getShipmentStatusMapping(): Promise<ApiResponse> {
+    return this.makeRequest('/public/shipment-status-mapping')
   }
 
   /**

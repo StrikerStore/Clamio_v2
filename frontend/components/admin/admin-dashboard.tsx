@@ -430,8 +430,65 @@ export function AdminDashboard() {
   const { isMobile, isTablet } = useDeviceType()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
+  // Shipment status mapping from database (for badge colors and display names)
+  const [shipmentStatusMapping, setShipmentStatusMapping] = useState<Array<{
+    raw: string;
+    renamed: string;
+    color: string;
+    is_handover: number;
+  }>>([]);
+
+  // Fetch shipment status mapping from database on mount (public API, no auth needed)
+  useEffect(() => {
+    async function fetchStatusMapping() {
+      try {
+        const response = await apiClient.getShipmentStatusMapping();
+        if (response.success && response.data) {
+          setShipmentStatusMapping(response.data);
+          console.log("✅ Admin: Loaded shipment status mapping:", response.data.length, "entries");
+        }
+      } catch (err) {
+        console.error("Error fetching shipment status mapping:", err);
+      }
+    }
+    fetchStatusMapping();
+  }, []);
+
   const getStatusBadge = (status: string) => {
-    const colors = {
+    // Map database color names to Tailwind classes
+    const colorMap: Record<string, string> = {
+      'blue': 'bg-blue-100 text-blue-800',
+      'orange': 'bg-orange-100 text-orange-800',
+      'yellow': 'bg-yellow-100 text-yellow-800',
+      'green': 'bg-green-100 text-green-800',
+      'red': 'bg-red-100 text-red-800',
+      'maroon': 'bg-[#ffe4e6] text-[#800000]',
+    };
+
+    // Handle undefined or null status
+    if (!status) {
+      return <Badge variant="outline" className="bg-gray-100 text-gray-800 text-xs whitespace-normal break-words">UNKNOWN</Badge>
+    }
+
+    // Normalize status for comparison
+    const normalizedStatus = status.toString().trim().toLowerCase().replace(/_/g, ' ');
+
+    // Try to find in database mapping first
+    const matchedStatus = shipmentStatusMapping.find(item =>
+      item.raw.toLowerCase().replace(/_/g, ' ') === normalizedStatus
+    );
+
+    if (matchedStatus) {
+      const colorClass = colorMap[matchedStatus.color] || 'bg-gray-100 text-gray-800';
+      return (
+        <Badge variant="outline" className={`${colorClass} text-xs whitespace-normal break-words max-w-full px-1.5 py-0.5`}>
+          {matchedStatus.renamed.toUpperCase()}
+        </Badge>
+      );
+    }
+
+    // Fallback: hardcoded mapping for statuses not in database (legacy/non-shipment statuses)
+    const colors: Record<string, string> = {
       unclaimed: "bg-gray-100 text-gray-800",
       in_pack: "bg-blue-100 text-blue-800",
       handover: "bg-yellow-100 text-yellow-800",
@@ -442,67 +499,36 @@ export function AdminDashboard() {
       "out for delivery": "bg-yellow-100 text-yellow-800",
       delivered: "bg-green-100 text-green-800",
       rto: "bg-red-100 text-red-800",
-      // Enhanced Shipway API statuses
-      awb_assigned: "bg-blue-100 text-blue-800",
-      "shipment booked": "bg-blue-100 text-blue-800",
-      shipment_booked: "bg-blue-100 text-blue-800",
-      // Delivery Attempted
-      crov: "bg-yellow-100 text-yellow-800",
-      "delivery attempted": "bg-yellow-100 text-yellow-800",
-      delivery_attempted: "bg-yellow-100 text-yellow-800",
-      // Delivered variants
-      del: "bg-green-100 text-green-800",
-      // In Transit variants
-      int: "bg-orange-100 text-orange-800",
-      reached_at_destination_hub: "bg-orange-100 text-orange-800",
-      // Pickup Failed
-      "pickup failed": "bg-red-100 text-red-800",
-      pickup_failed: "bg-red-100 text-red-800",
-      shpfr3: "bg-red-100 text-red-800",
-      // RTO variants
-      rtd: "bg-green-100 text-green-800",
-      "rto delivered": "bg-green-100 text-green-800",
-      rto_delivered: "bg-green-100 text-green-800",
-      rto_undelivered: "bg-[#ffe4e6] text-[#800000]", // Maroon
-      "rto undelivered": "bg-[#ffe4e6] text-[#800000]",
-      rto_in_transit: "bg-orange-100 text-orange-800",
-      "rto in transit": "bg-orange-100 text-orange-800",
-      rto_initiated: "bg-red-100 text-red-800",
-      "rto initiated": "bg-red-100 text-red-800",
-      rtondr5: "bg-[#ffe4e6] text-[#800000]", // Maroon - RTO Lost
-      rtound: "bg-[#ffe4e6] text-[#800000]", // Maroon - RTO Lost
-      "rto lost": "bg-[#ffe4e6] text-[#800000]",
-      rto_lost: "bg-[#ffe4e6] text-[#800000]",
-      // NDR statuses
-      shndr16: "bg-red-100 text-red-800",
-      "consignee unavailable": "bg-red-100 text-red-800",
-      consignee_unavailable: "bg-red-100 text-red-800",
-      shndr4: "bg-yellow-100 text-yellow-800",
-      "delivery reattempt": "bg-yellow-100 text-yellow-800",
-      delivery_reattempt: "bg-yellow-100 text-yellow-800",
-      shndr6: "bg-red-100 text-red-800",
-      "consignee refused": "bg-red-100 text-red-800",
-      consignee_refused: "bg-red-100 text-red-800",
-      // Undelivered
-      undelivered: "bg-red-100 text-red-800",
-      // Additional shipping status values
-      "picked up": "bg-purple-100 text-purple-800",
-      "in warehouse": "bg-blue-100 text-blue-800",
-      "dispatched": "bg-indigo-100 text-indigo-800",
-      "out for pickup": "bg-yellow-100 text-yellow-800",
-      "attempted delivery": "bg-orange-100 text-orange-800",
-      "returned": "bg-red-100 text-red-800",
-      "cancelled": "bg-gray-100 text-gray-800",
-      "failed delivery": "bg-red-100 text-red-800",
-      // Legacy status values for backward compatibility
       claimed: "bg-blue-100 text-blue-800",
       ready_for_handover: "bg-purple-100 text-purple-800",
-      // Vendor management status values
       active: "bg-green-100 text-green-800",
       pending: "bg-yellow-100 text-yellow-800",
       inactive: "bg-red-100 text-red-800",
       completed: "bg-green-100 text-green-800",
       rejected: "bg-red-100 text-red-800",
+      // Shipway fallbacks
+      awb_assigned: "bg-blue-100 text-blue-800",
+      "shipment booked": "bg-blue-100 text-blue-800",
+      del: "bg-green-100 text-green-800",
+      int: "bg-orange-100 text-orange-800",
+      crov: "bg-yellow-100 text-yellow-800",
+      rtd: "bg-green-100 text-green-800",
+      "pickup failed": "bg-red-100 text-red-800",
+      shpfr3: "bg-red-100 text-red-800",
+      rto_undelivered: "bg-[#ffe4e6] text-[#800000]",
+      "rto undelivered": "bg-[#ffe4e6] text-[#800000]",
+      rtondr5: "bg-[#ffe4e6] text-[#800000]",
+      rtound: "bg-[#ffe4e6] text-[#800000]",
+      shndr16: "bg-red-100 text-red-800",
+      shndr4: "bg-yellow-100 text-yellow-800",
+      shndr6: "bg-red-100 text-red-800",
+      undelivered: "bg-red-100 text-red-800",
+      "picked up": "bg-purple-100 text-purple-800",
+      "in warehouse": "bg-blue-100 text-blue-800",
+      dispatched: "bg-indigo-100 text-indigo-800",
+      "out for pickup": "bg-yellow-100 text-yellow-800",
+      returned: "bg-red-100 text-red-800",
+      cancelled: "bg-gray-100 text-gray-800",
     }
 
     const displayNames: Record<string, string> = {
@@ -516,77 +542,37 @@ export function AdminDashboard() {
       "out for delivery": "OUT FOR DELIVERY",
       delivered: "DELIVERED",
       rto: "RTO",
-      // Enhanced Shipway API statuses
-      awb_assigned: "SHIPMENT BOOKED",
-      "shipment booked": "SHIPMENT BOOKED",
-      shipment_booked: "SHIPMENT BOOKED",
-      // Delivery Attempted
-      crov: "DELIVERY ATTEMPTED",
-      "delivery attempted": "DELIVERY ATTEMPTED",
-      delivery_attempted: "DELIVERY ATTEMPTED",
-      // Delivered variants
-      del: "DELIVERED",
-      // In Transit variants
-      int: "IN TRANSIT",
-      reached_at_destination_hub: "IN TRANSIT",
-      // Pickup Failed
-      "pickup failed": "PICKUP FAILED",
-      pickup_failed: "PICKUP FAILED",
-      shpfr3: "PICKUP FAILED",
-      // RTO variants
-      rtd: "RTO DELIVERED",
-      "rto delivered": "RTO DELIVERED",
-      rto_delivered: "RTO DELIVERED",
-      rto_undelivered: "RTO UNDELIVERED",
-      "rto undelivered": "RTO UNDELIVERED",
-      rto_in_transit: "RTO IN TRANSIT",
-      "rto in transit": "RTO IN TRANSIT",
-      rto_initiated: "RTO INITIATED",
-      "rto initiated": "RTO INITIATED",
-      rtondr5: "RTO LOST",
-      rtound: "RTO LOST",
-      "rto lost": "RTO LOST",
-      rto_lost: "RTO LOST",
-      // NDR statuses
-      shndr16: "CONSIGNEE UNAVAILABLE",
-      "consignee unavailable": "CONSIGNEE UNAVAILABLE",
-      consignee_unavailable: "CONSIGNEE UNAVAILABLE",
-      shndr4: "DELIVERY REATTEMPT",
-      "delivery reattempt": "DELIVERY REATTEMPT",
-      delivery_reattempt: "DELIVERY REATTEMPT",
-      shndr6: "CONSIGNEE REFUSED",
-      "consignee refused": "CONSIGNEE REFUSED",
-      consignee_refused: "CONSIGNEE REFUSED",
-      // Undelivered
-      undelivered: "UNDELIVERED",
-      // Additional shipping status values
-      "picked up": "PICKED UP",
-      "in warehouse": "IN WAREHOUSE",
-      "dispatched": "DISPATCHED",
-      "out for pickup": "OUT FOR PICKUP",
-      "attempted delivery": "ATTEMPTED DELIVERY",
-      "returned": "RETURNED",
-      "cancelled": "CANCELLED",
-      "failed delivery": "FAILED DELIVERY",
-      // Legacy status values for backward compatibility
       claimed: "CLAIMED",
       ready_for_handover: "READY FOR HANDOVER",
-      // Vendor management status values
       active: "ACTIVE",
       pending: "PENDING",
       inactive: "INACTIVE",
       completed: "COMPLETED",
       rejected: "REJECTED",
+      awb_assigned: "SHIPMENT BOOKED",
+      "shipment booked": "SHIPMENT BOOKED",
+      del: "DELIVERED",
+      int: "IN TRANSIT",
+      crov: "DELIVERY ATTEMPTED",
+      rtd: "RTO DELIVERED",
+      "pickup failed": "PICKUP FAILED",
+      shpfr3: "PICKUP FAILED",
+      rto_undelivered: "RTO UNDELIVERED",
+      "rto undelivered": "RTO UNDELIVERED",
+      rtondr5: "RTO LOST",
+      rtound: "RTO LOST",
+      shndr16: "CONSIGNEE UNAVAILABLE",
+      shndr4: "DELIVERY REATTEMPT",
+      shndr6: "CONSIGNEE REFUSED",
+      undelivered: "UNDELIVERED",
+      "picked up": "PICKED UP",
+      "in warehouse": "IN WAREHOUSE",
+      dispatched: "DISPATCHED",
+      "out for pickup": "OUT FOR PICKUP",
+      returned: "RETURNED",
+      cancelled: "CANCELLED",
     }
 
-    // Handle undefined or null status
-    if (!status) {
-      return <Badge variant="outline" className="bg-gray-100 text-gray-800 text-xs whitespace-normal break-words">UNKNOWN</Badge>
-    }
-
-    // Normalize status to lowercase for lookup (handles "ACTIVE", "active", etc.)
-    // Also normalize spaces to underscores to handle "in transit" -> "in_transit"
-    let normalizedStatus = (status || '').toString().trim().toLowerCase()
     // Try with underscores first, then with spaces
     let statusKey = normalizedStatus.replace(/\s+/g, '_') as keyof typeof colors
     let colorClass = colors[statusKey]
@@ -2428,8 +2414,8 @@ export function AdminDashboard() {
       <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-3 sm:py-4 md:py-8">
         {/* Stats Cards - compact, colorful, 2x2 on mobile */}
         <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${isMobile ? 'grid-cols-2' :
-            isTablet ? 'grid-cols-2' :
-              'grid-cols-4'
+          isTablet ? 'grid-cols-2' :
+            'grid-cols-4'
           }`}>
           <Card
             className={`bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg ${isMobile ? 'cursor-pointer hover:shadow-xl transition-all duration-200 active:scale-95' : ''}`}
@@ -2734,76 +2720,54 @@ export function AdminDashboard() {
                                           />
                                           <span className="text-xs">All Status</span>
                                         </label>
-                                        {activeTab === "orders" && getUniqueStatuses().map((status) => (
-                                          <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                            <input
-                                              type="checkbox"
-                                              checked={statusFilter.includes(status)}
-                                              onChange={(e) => {
-                                                if (e.target.checked) {
-                                                  setStatusFilter([...statusFilter, status])
-                                                } else {
-                                                  const newFilters = statusFilter.filter(s => s !== status)
-                                                  setStatusFilter(newFilters)
-                                                }
-                                              }}
-                                              className="w-4 h-4"
-                                            />
-                                            <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
-                                          </label>
-                                        ))}
-                                        {activeTab !== "orders" && (
-                                          <>
-                                            <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                              <input
-                                                type="checkbox"
-                                                checked={statusFilter.includes('active')}
-                                                onChange={(e) => {
-                                                  if (e.target.checked) {
-                                                    setStatusFilter([...statusFilter, 'active'])
-                                                  } else {
-                                                    const newFilters = statusFilter.filter(s => s !== 'active')
-                                                    setStatusFilter(newFilters)
-                                                  }
-                                                }}
-                                                className="w-4 h-4"
-                                              />
-                                              <span className="text-xs">Active</span>
-                                            </label>
-                                            <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                              <input
-                                                type="checkbox"
-                                                checked={statusFilter.includes('pending')}
-                                                onChange={(e) => {
-                                                  if (e.target.checked) {
-                                                    setStatusFilter([...statusFilter, 'pending'])
-                                                  } else {
-                                                    const newFilters = statusFilter.filter(s => s !== 'pending')
-                                                    setStatusFilter(newFilters)
-                                                  }
-                                                }}
-                                                className="w-4 h-4"
-                                              />
-                                              <span className="text-xs">Pending</span>
-                                            </label>
-                                            <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                              <input
-                                                type="checkbox"
-                                                checked={statusFilter.includes('inactive')}
-                                                onChange={(e) => {
-                                                  if (e.target.checked) {
-                                                    setStatusFilter([...statusFilter, 'inactive'])
-                                                  } else {
-                                                    const newFilters = statusFilter.filter(s => s !== 'inactive')
-                                                    setStatusFilter(newFilters)
-                                                  }
-                                                }}
-                                                className="w-4 h-4"
-                                              />
-                                              <span className="text-xs">Inactive</span>
-                                            </label>
-                                          </>
-                                        )}
+                                        <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={statusFilter.includes('active')}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                setStatusFilter([...statusFilter, 'active'])
+                                              } else {
+                                                const newFilters = statusFilter.filter(s => s !== 'active')
+                                                setStatusFilter(newFilters)
+                                              }
+                                            }}
+                                            className="w-4 h-4"
+                                          />
+                                          <span className="text-xs">Active</span>
+                                        </label>
+                                        <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={statusFilter.includes('pending')}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                setStatusFilter([...statusFilter, 'pending'])
+                                              } else {
+                                                const newFilters = statusFilter.filter(s => s !== 'pending')
+                                                setStatusFilter(newFilters)
+                                              }
+                                            }}
+                                            className="w-4 h-4"
+                                          />
+                                          <span className="text-xs">Pending</span>
+                                        </label>
+                                        <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={statusFilter.includes('inactive')}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                setStatusFilter([...statusFilter, 'inactive'])
+                                              } else {
+                                                const newFilters = statusFilter.filter(s => s !== 'inactive')
+                                                setStatusFilter(newFilters)
+                                              }
+                                            }}
+                                            className="w-4 h-4"
+                                          />
+                                          <span className="text-xs">Inactive</span>
+                                        </label>
                                       </div>
                                     </div>
                                   </PopoverContent>
@@ -2898,76 +2862,54 @@ export function AdminDashboard() {
                                   />
                                   <span className="text-xs">All Status</span>
                                 </label>
-                                {activeTab === "orders" && getUniqueStatuses().map((status) => (
-                                  <label key={status} className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={statusFilter.includes(status)}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setStatusFilter([...statusFilter, status])
-                                        } else {
-                                          const newFilters = statusFilter.filter(s => s !== status)
-                                          setStatusFilter(newFilters)
-                                        }
-                                      }}
-                                      className="w-4 h-4"
-                                    />
-                                    <span className="text-xs">{status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}</span>
-                                  </label>
-                                ))}
-                                {activeTab === "vendors" && (
-                                  <>
-                                    <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={statusFilter.includes('active')}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setStatusFilter([...statusFilter, 'active'])
-                                          } else {
-                                            const newFilters = statusFilter.filter(s => s !== 'active')
-                                            setStatusFilter(newFilters)
-                                          }
-                                        }}
-                                        className="w-4 h-4"
-                                      />
-                                      <span className="text-xs">Active</span>
-                                    </label>
-                                    <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={statusFilter.includes('pending')}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setStatusFilter([...statusFilter, 'pending'])
-                                          } else {
-                                            const newFilters = statusFilter.filter(s => s !== 'pending')
-                                            setStatusFilter(newFilters)
-                                          }
-                                        }}
-                                        className="w-4 h-4"
-                                      />
-                                      <span className="text-xs">Pending</span>
-                                    </label>
-                                    <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={statusFilter.includes('inactive')}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setStatusFilter([...statusFilter, 'inactive'])
-                                          } else {
-                                            const newFilters = statusFilter.filter(s => s !== 'inactive')
-                                            setStatusFilter(newFilters)
-                                          }
-                                        }}
-                                        className="w-4 h-4"
-                                      />
-                                      <span className="text-xs">Inactive</span>
-                                    </label>
-                                  </>
-                                )}
+                                <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={statusFilter.includes('active')}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setStatusFilter([...statusFilter, 'active'])
+                                      } else {
+                                        const newFilters = statusFilter.filter(s => s !== 'active')
+                                        setStatusFilter(newFilters)
+                                      }
+                                    }}
+                                    className="w-4 h-4"
+                                  />
+                                  <span className="text-xs">Active</span>
+                                </label>
+                                <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={statusFilter.includes('pending')}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setStatusFilter([...statusFilter, 'pending'])
+                                      } else {
+                                        const newFilters = statusFilter.filter(s => s !== 'pending')
+                                        setStatusFilter(newFilters)
+                                      }
+                                    }}
+                                    className="w-4 h-4"
+                                  />
+                                  <span className="text-xs">Pending</span>
+                                </label>
+                                <label className="flex items-center space-x-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={statusFilter.includes('inactive')}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setStatusFilter([...statusFilter, 'inactive'])
+                                      } else {
+                                        const newFilters = statusFilter.filter(s => s !== 'inactive')
+                                        setStatusFilter(newFilters)
+                                      }
+                                    }}
+                                    className="w-4 h-4"
+                                  />
+                                  <span className="text-xs">Inactive</span>
+                                </label>
                               </div>
                             </div>
                           </PopoverContent>
@@ -3889,8 +3831,8 @@ export function AdminDashboard() {
                               <TableRow
                                 key={`${order.unique_id}-${index}`}
                                 className={`[&>td]:py-2 ${order.store_status === 'inactive'
-                                    ? 'opacity-50 grayscale pointer-events-none select-none'
-                                    : 'cursor-pointer hover:bg-gray-50'
+                                  ? 'opacity-50 grayscale pointer-events-none select-none'
+                                  : 'cursor-pointer hover:bg-gray-50'
                                   }`}
                                 onClick={() => {
                                   if (order.store_status === 'inactive') return; // Prevent click for inactive stores
@@ -4026,8 +3968,8 @@ export function AdminDashboard() {
                             <Card
                               key={`${order.unique_id}-${index}`}
                               className={`p-2.5 sm:p-3 transition-colors border-l-4 ${order.store_status === 'inactive'
-                                  ? 'opacity-50 grayscale pointer-events-none select-none'
-                                  : 'cursor-pointer hover:bg-gray-50 active:bg-gray-100'
+                                ? 'opacity-50 grayscale pointer-events-none select-none'
+                                : 'cursor-pointer hover:bg-gray-50 active:bg-gray-100'
                                 }`}
                               style={{
                                 borderLeftColor:

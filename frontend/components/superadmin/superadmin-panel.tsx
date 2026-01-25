@@ -72,7 +72,7 @@ export function SuperAdminPanel() {
   const [isEditUserOpen, setIsEditUserOpen] = useState(false)
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
   const [userToDelete, setUserToDelete] = useState<any>(null)
-  
+
   // Store management state
   const [stores, setStores] = useState<any[]>([])
   const [storesLoading, setStoresLoading] = useState(false)
@@ -97,7 +97,7 @@ export function SuperAdminPanel() {
   const [shipwayTestResult, setShipwayTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [shopifyTestResult, setShopifyTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [isAddingStore, setIsAddingStore] = useState(false)
-  
+
   // Warehouse Mapping state
   const [whMappings, setWhMappings] = useState<any[]>([])
   const [whMappingsLoading, setWhMappingsLoading] = useState(false)
@@ -357,8 +357,8 @@ export function SuperAdminPanel() {
   }
 
   const handleAddStore = async () => {
-    if (!newStore.store_name || !newStore.shipping_partner || !newStore.username || !newStore.password || 
-        !newStore.shopify_store_url || !newStore.shopify_token) {
+    if (!newStore.store_name || !newStore.shipping_partner || !newStore.username || !newStore.password ||
+      !newStore.shopify_store_url || !newStore.shopify_token) {
       toast({
         title: "Error",
         description: "Please fill in all required fields",
@@ -407,7 +407,7 @@ export function SuperAdminPanel() {
   }
 
   const handleEditStore = (store: any) => {
-    setEditingStore({ 
+    setEditingStore({
       ...store,
       password: '' // Don't show existing password, user needs to enter new one if changing
     })
@@ -415,8 +415,8 @@ export function SuperAdminPanel() {
   }
 
   const handleUpdateStore = async () => {
-    if (!editingStore.store_name || !editingStore.username || 
-        !editingStore.shopify_store_url || !editingStore.shopify_token) {
+    if (!editingStore.store_name || !editingStore.username ||
+      !editingStore.shopify_store_url || !editingStore.shopify_token) {
       toast({
         title: "Error",
         description: "Please fill in all required fields",
@@ -433,7 +433,7 @@ export function SuperAdminPanel() {
         shopify_token: editingStore.shopify_token,
         status: editingStore.status
       }
-      
+
       // Only include password if it was changed (not empty)
       if (editingStore.password && editingStore.password.trim() !== '') {
         updateData.password = editingStore.password
@@ -512,11 +512,11 @@ export function SuperAdminPanel() {
     setTestingConnection({ type: 'shipway', loading: true })
     setShipwayTestResult(null) // Clear previous result
     try {
-      const response = await apiClient.testShipwayConnection({ username: username, password: password })
-      
+      const response = await apiClient.testStoreShipwayConnection({ username: username, password: password })
+
       // Handle response - check for success property (handle both boolean true and string "true")
-      const isSuccess = response?.success === true || response?.success === 'true' || response?.success === 1
-      
+      const isSuccess = response?.success === true || (response?.success as any) === 'true' || (response?.success as any) === 1
+
       if (isSuccess) {
         const successMessage = response.message || `${newStore.shipping_partner || 'Shipping partner'} connection successful! Credentials are valid.`
         setShipwayTestResult({ success: true, message: successMessage })
@@ -585,7 +585,7 @@ export function SuperAdminPanel() {
       } else if (typeof error === 'string') {
         errorMessage = error
       }
-      
+
       setShopifyTestResult({ success: false, message: errorMessage })
       toast({
         title: "Connection Failed",
@@ -791,7 +791,7 @@ export function SuperAdminPanel() {
                 )}
               </div>
             </div>
-            
+
             {/* Desktop/Tablet Logout */}
             {!isMobile && (
               <Button variant="outline" onClick={logout} className="flex items-center gap-2">
@@ -799,11 +799,11 @@ export function SuperAdminPanel() {
                 {isDesktop && 'Logout'}
               </Button>
             )}
-            
+
             {/* Mobile Menu Button */}
             {isMobile && (
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 size="sm"
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                 className="p-2"
@@ -812,7 +812,7 @@ export function SuperAdminPanel() {
               </Button>
             )}
           </div>
-          
+
           {/* Mobile Menu */}
           {isMobile && isMobileMenuOpen && (
             <div className="border-t bg-white py-3">
@@ -821,9 +821,9 @@ export function SuperAdminPanel() {
                   <p className="text-xs sm:text-sm text-gray-600 truncate">Welcome, {user?.name}</p>
                   <p className="text-[10px] sm:text-xs text-gray-400 truncate break-all">{user?.email}</p>
                 </div>
-                <Button 
-                  variant="outline" 
-                  onClick={logout} 
+                <Button
+                  variant="outline"
+                  onClick={logout}
                   className="w-full flex items-center justify-center gap-2 text-sm"
                 >
                   <LogOut className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -837,11 +837,10 @@ export function SuperAdminPanel() {
 
       <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-3 sm:py-4 md:py-8">
         {/* Stats Cards */}
-        <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${
-          isMobile ? 'grid-cols-1' : 
-          isTablet ? 'grid-cols-2' : 
-          'grid-cols-3'
-        }`}>
+        <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${isMobile ? 'grid-cols-1' :
+          isTablet ? 'grid-cols-2' :
+            'grid-cols-3'
+          }`}>
           <Card>
             <CardContent className="p-3 sm:p-4 md:p-6">
               <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
@@ -1199,72 +1198,71 @@ export function SuperAdminPanel() {
                         {newStore.shipping_partner && (
                           <div className="space-y-2">
                             <Label className="text-sm font-semibold">{newStore.shipping_partner} Credentials</Label>
-                          <div>
-                            <Label htmlFor="shipping-username">Username *</Label>
-                            <Input
-                              id="shipping-username"
-                              value={newStore.username}
-                              onChange={(e) => setNewStore({ ...newStore, username: e.target.value })}
-                              placeholder={`Enter ${newStore.shipping_partner} username`}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="shipping-password">Password *</Label>
-                            <div className="relative">
+                            <div>
+                              <Label htmlFor="shipping-username">Username *</Label>
                               <Input
-                                id="shipway-password"
-                                type={showPassword ? "text" : "password"}
-                                value={newStore.password}
-                                onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
-                                placeholder={`Enter ${newStore.shipping_partner} password`}
-                                className="pr-10"
+                                id="shipping-username"
+                                value={newStore.username}
+                                onChange={(e) => setNewStore({ ...newStore, username: e.target.value })}
+                                placeholder={`Enter ${newStore.shipping_partner} username`}
                               />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                onClick={() => setShowPassword(!showPassword)}
-                              >
-                                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                              </Button>
                             </div>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="w-full"
-                            onClick={() => handleTestShipway(newStore.username, newStore.password)}
-                            disabled={testingConnection.loading && testingConnection.type === 'shipway'}
-                          >
-                            {testingConnection.loading && testingConnection.type === 'shipway' ? (
-                              <>
-                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600 mr-2"></div>
-                                Testing...
-                              </>
-                            ) : (
-                              <>
-                                <CheckCircle className="w-3 h-3 mr-2" />
-                                Test {newStore.shipping_partner} Connection
-                              </>
-                            )}
-                          </Button>
-                          {shipwayTestResult && (
-                            <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                              shipwayTestResult.success 
-                                ? 'bg-green-50 text-green-800 border border-green-200' 
-                                : 'bg-red-50 text-red-800 border border-red-200'
-                            }`}>
-                              {shipwayTestResult.success ? (
-                                <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                            <div>
+                              <Label htmlFor="shipping-password">Password *</Label>
+                              <div className="relative">
+                                <Input
+                                  id="shipway-password"
+                                  type={showPassword ? "text" : "password"}
+                                  value={newStore.password}
+                                  onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
+                                  placeholder={`Enter ${newStore.shipping_partner} password`}
+                                  className="pr-10"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                >
+                                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="w-full"
+                              onClick={() => handleTestShipway(newStore.username, newStore.password)}
+                              disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                            >
+                              {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                                <>
+                                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-600 mr-2"></div>
+                                  Testing...
+                                </>
                               ) : (
-                                <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                                <>
+                                  <CheckCircle className="w-3 h-3 mr-2" />
+                                  Test {newStore.shipping_partner} Connection
+                                </>
                               )}
-                              <span className="flex-1">{shipwayTestResult.message}</span>
-                            </div>
-                          )}
-                        </div>
+                            </Button>
+                            {shipwayTestResult && (
+                              <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shipwayTestResult.success
+                                ? 'bg-green-50 text-green-800 border border-green-200'
+                                : 'bg-red-50 text-red-800 border border-red-200'
+                                }`}>
+                                {shipwayTestResult.success ? (
+                                  <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                                )}
+                                <span className="flex-1">{shipwayTestResult.message}</span>
+                              </div>
+                            )}
+                          </div>
                         )}
 
                         <div className="space-y-2">
@@ -1321,11 +1319,10 @@ export function SuperAdminPanel() {
                             )}
                           </Button>
                           {shopifyTestResult && (
-                            <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                              shopifyTestResult.success 
-                                ? 'bg-green-50 text-green-800 border border-green-200' 
-                                : 'bg-red-50 text-red-800 border border-red-200'
-                            }`}>
+                            <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shopifyTestResult.success
+                              ? 'bg-green-50 text-green-800 border border-green-200'
+                              : 'bg-red-50 text-red-800 border border-red-200'
+                              }`}>
                               {shopifyTestResult.success ? (
                                 <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
                               ) : (
@@ -1356,8 +1353,8 @@ export function SuperAdminPanel() {
                         <Button variant="outline" onClick={() => setIsAddStoreOpen(false)} className={`${isMobile ? 'w-full text-sm' : ''}`}>
                           Cancel
                         </Button>
-                        <Button 
-                          onClick={handleAddStore} 
+                        <Button
+                          onClick={handleAddStore}
                           disabled={isAddingStore}
                           className={`${isMobile ? 'w-full text-sm' : ''}`}
                         >
@@ -1583,8 +1580,8 @@ export function SuperAdminPanel() {
                         <Button variant="outline" onClick={() => setIsAddMappingOpen(false)} className={`${isMobile ? 'w-full text-sm' : ''}`}>
                           Cancel
                         </Button>
-                        <Button 
-                          onClick={handleCreateMapping} 
+                        <Button
+                          onClick={handleCreateMapping}
                           disabled={!warehouseVerified}
                           className={`${isMobile ? 'w-full text-sm' : ''}`}
                         >
@@ -1891,11 +1888,10 @@ export function SuperAdminPanel() {
                   )}
                 </Button>
                 {shipwayTestResult && (
-                  <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                    shipwayTestResult.success 
-                      ? 'bg-green-50 text-green-800 border border-green-200' 
-                      : 'bg-red-50 text-red-800 border border-red-200'
-                  }`}>
+                  <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shipwayTestResult.success
+                    ? 'bg-green-50 text-green-800 border border-green-200'
+                    : 'bg-red-50 text-red-800 border border-red-200'
+                    }`}>
                     {shipwayTestResult.success ? (
                       <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
                     ) : (
@@ -1960,11 +1956,10 @@ export function SuperAdminPanel() {
                   )}
                 </Button>
                 {shopifyTestResult && (
-                  <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                    shopifyTestResult.success 
-                      ? 'bg-green-50 text-green-800 border border-green-200' 
-                      : 'bg-red-50 text-red-800 border border-red-200'
-                  }`}>
+                  <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shopifyTestResult.success
+                    ? 'bg-green-50 text-green-800 border border-green-200'
+                    : 'bg-red-50 text-red-800 border border-red-200'
+                    }`}>
                     {shopifyTestResult.success ? (
                       <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
                     ) : (

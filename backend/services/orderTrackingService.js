@@ -224,15 +224,18 @@ class OrderTrackingService {
       }
 
       // Normalize all tracking events before storing (for order_tracking table)
-      const normalizedTrackingEvents = trackingData.shipment_status_history.map(event => {
-        if (event && event.name) {
-          return {
-            ...event,
-            name: this.normalizeShipmentStatus(event.name)
-          };
-        }
-        return event;
-      });
+      // Use Promise.all since normalizeShipmentStatus is now async
+      const normalizedTrackingEvents = await Promise.all(
+        trackingData.shipment_status_history.map(async event => {
+          if (event && event.name) {
+            return {
+              ...event,
+              name: await this.normalizeShipmentStatus(event.name)
+            };
+          }
+          return event;
+        })
+      );
 
       // Determine actual order type based on latest status (using normalized status)
       const actualOrderType = this.determineOrderType({ ...trackingData, shipment_status_history: normalizedTrackingEvents });
@@ -243,31 +246,44 @@ class OrderTrackingService {
 
       console.log(`✅ [Tracking] Stored ${normalizedTrackingEvents.length} tracking events for order ${orderId}`);
 
-      // Normalize latest status for labels table
-      const normalizedLatestStatus = this.normalizeShipmentStatus(latestStatus.name);
+      // Normalize latest status for labels table (now async)
+      const normalizedLatestStatus = await this.normalizeShipmentStatus(latestStatus.name);
 
       // Update labels table with current shipment status and handover logic
-      // Check if status should set is_handover = 1
-      // Based on Shipway API statuses:
-      // is_handover = 0: AWB_ASSIGNED, Shipment Booked, Pickup Failed, SHPFR3
-      // is_handover = 1: All other statuses (In Transit, Delivered, RTO, Out for Delivery, etc.)
-      const isHandover = this.shouldSetHandover(normalizedLatestStatus);
+      // Check if status should set is_handover = 1 using database mapping
+      const isHandover = await this.shouldSetHandover(latestStatus.name);
 
       // Get the timestamp for handover event (if available)
       // IMPORTANT: We want the FIRST handover-qualifying event, not the latest
       let handoverTimestamp = null;
       if (isHandover) {
-        // Find the first occurrence of a handover-qualifying status
-        const firstHandoverEvent = normalizedTrackingEvents.find(event => {
-          return event && event.name && this.shouldSetHandover(event.name);
-        });
-        if (firstHandoverEvent && firstHandoverEvent.time) {
-          handoverTimestamp = firstHandoverEvent.time;
-          console.log(`🚚 [Tracking] Found first handover-qualifying event for order ${orderId} at timestamp: ${handoverTimestamp} (status: ${firstHandoverEvent.name})`);
+        // Find the first occurrence of a handover-qualifying status (async search)
+        for (const event of normalizedTrackingEvents) {
+          if (event && event.name) {
+            const eventIsHandover = await this.shouldSetHandover(event.name);
+            if (eventIsHandover && event.time) {
+              handoverTimestamp = event.time;
+              console.log(`🚚 [Tracking] Found first handover-qualifying event for order ${orderId} at timestamp: ${handoverTimestamp} (status: ${event.name})`);
+              break;
+            }
+          }
         }
       }
 
       await database.updateLabelsShipmentStatus(orderId, accountCode, normalizedLatestStatus, isHandover, handoverTimestamp);
+
+      // Check if status is RTO-related and store in RTO tracking table
+      if (this.isRTOStatus(normalizedLatestStatus)) {
+        try {
+          // Extract RTO warehouse from shipment_details.delivered_to
+          const rtoWh = trackingData.shipment_details?.[0]?.delivered_to || null;
+          await database.storeRTOTracking(orderId, normalizedLatestStatus, accountCode, rtoWh);
+          console.log(`📦 [RTO] Stored RTO tracking for order ${orderId} (status: ${normalizedLatestStatus}, rto_wh: ${rtoWh || 'N/A'})`);
+        } catch (rtoError) {
+          // Log but don't fail the entire tracking process if RTO storage fails
+          console.error(`⚠️ [RTO] Failed to store RTO tracking for order ${orderId}:`, rtoError.message);
+        }
+      }
 
       return {
         success: true,
@@ -285,53 +301,56 @@ class OrderTrackingService {
   }
 
   /**
-   * Normalize shipment status to handle case-insensitive matching and map pickup variations to "In Transit"
+   * Normalize shipment status using database mapping
+   * Falls back to basic normalization if status not found in mapping
    * @param {string} status - The raw status from Shipway API
-   * @returns {string} Normalized status (e.g., "In Transit" for all pickup variations)
+   * @returns {Promise<string>} Normalized status
    */
-  normalizeShipmentStatus(status) {
+  async normalizeShipmentStatus(status) {
     if (!status || typeof status !== 'string') {
       return status || 'Unknown';
     }
 
-    // Convert to lowercase and replace underscores with spaces for consistent comparison
-    // This handles: "picked_up", "PICKED_UP", "IN_TRANSIT", "in_transit", etc.
+    const database = require('../config/database');
+
+    // Try to get from database mapping first
+    const statusInfo = await database.getShipmentStatusInfo(status);
+    if (statusInfo) {
+      return statusInfo.renamed;
+    }
+
+    // Fallback: Handle common patterns for unmapped statuses
     const normalized = status.trim().toLowerCase().replace(/_/g, ' ');
 
-    // First, handle failure statuses that should NOT be mapped to "In Transit"
-    // These should be handled separately
+    // Handle failure statuses
     if (normalized.includes('pickup failed') || normalized.includes('failed pickup')) {
       return 'Pickup Failed';
     }
 
-    // Map all pickup variations to "In Transit" (case-insensitive, handles underscores)
-    // Matches: 
-    // - "picked up", "PICKED UP", "Picked Up" 
-    // - "picked_up", "PICKED_UP", "picked_UP"
-    // - "shipment picked up", "shipment_picked_up"
-    // - "pickup done", "pickup_done"
-    // - "picked", "PICKED"
-    // - "in transit", "IN TRANSIT", "In Transit"
-    // - "in_transit", "IN_TRANSIT", "in_TRANSIT"
-    // Note: "pickup failed" is excluded above
+    // Map pickup variations to "In Transit"
     if (
       normalized.includes('picked') ||
-      normalized.includes('pickup') ||
+      (normalized.includes('pickup') && !normalized.includes('failed')) ||
       normalized === 'in transit'
     ) {
       return 'In Transit';
     }
 
-    // Normalize "Delivered" variations (case-insensitive, handles underscores)
+    // Normalize "Delivered" variations
     if (normalized === 'delivered') {
       return 'Delivered';
     }
 
-    // Return original status with proper casing for common statuses
-    // For other statuses, return as-is (preserve original casing)
-    const commonStatuses = {
+    // Fallback common statuses for unmapped ones
+    const fallbackStatuses = {
       'out for delivery': 'Out for Delivery',
       'rto': 'RTO',
+      'rto initiated': 'RTO Initiated',
+      'rto in transit': 'RTO In Transit',
+      'rto delivered': 'RTO Delivered',
+      'rto out for delivery': 'RTO Out for Delivery',
+      'rto failed': 'RTO Failed',
+      'rtd': 'RTO Delivered',
       'cancelled': 'Cancelled',
       'returned': 'Returned',
       'failed delivery': 'Failed Delivery',
@@ -339,12 +358,11 @@ class OrderTrackingService {
       'shipment booked': 'Shipment Booked',
       'dispatched': 'Dispatched',
       'in warehouse': 'In Warehouse',
-      'out for pickup': 'Out for Pickup',
-      'rto delivered': 'RTO Delivered'
+      'out for pickup': 'Out for Pickup'
     };
 
-    if (commonStatuses[normalized]) {
-      return commonStatuses[normalized];
+    if (fallbackStatuses[normalized]) {
+      return fallbackStatuses[normalized];
     }
 
     // Return original status if no normalization needed
@@ -352,36 +370,71 @@ class OrderTrackingService {
   }
 
   /**
-   * Determine if a status should set is_handover = 1
-   * Based on Shipway API statuses:
-   * - is_handover = 0: AWB_ASSIGNED, Shipment Booked, Pickup Failed, SHPFR3
-   * - is_handover = 1: All other statuses (means package has been picked up and is in logistics flow)
-   * @param {string} status - The normalized status
-   * @returns {boolean} True if is_handover should be set to 1
+   * Determine if a status should set is_handover = 1 using database mapping
+   * Falls back to pattern-based detection for unmapped statuses
+   * @param {string} status - The status to check
+   * @returns {Promise<boolean>} True if is_handover should be set to 1
    */
-  shouldSetHandover(status) {
+  async shouldSetHandover(status) {
     if (!status || typeof status !== 'string') {
       return false;
     }
 
-    const normalizedStatus = status.trim().toLowerCase();
+    const database = require('../config/database');
 
-    // Statuses where is_handover should remain 0 (pre-pickup or pickup failed)
-    const noHandoverStatuses = [
-      'awb_assigned',
+    // Try to get from database mapping first
+    const statusInfo = await database.getShipmentStatusInfo(status);
+    if (statusInfo) {
+      return statusInfo.is_handover === 1;
+    }
+
+    // Fallback: Pattern-based detection for unmapped statuses
+    const normalizedStatus = status.trim().toLowerCase().replace(/_/g, ' ');
+
+    // Statuses where is_handover = 0 (not yet picked up)
+    const nonHandoverPatterns = [
       'awb assigned',
       'shipment booked',
-      'shipment_booked',
       'pickup failed',
-      'pickup_failed',
+      'out for pickup',
       'shpfr3'
     ];
 
-    // Check if status is in the no-handover list
-    const isNoHandover = noHandoverStatuses.some(s => normalizedStatus === s || normalizedStatus.includes(s));
+    // Check if it's a non-handover status
+    for (const pattern of nonHandoverPatterns) {
+      if (normalizedStatus.includes(pattern) || normalizedStatus === pattern) {
+        return false;
+      }
+    }
 
-    // is_handover = 1 for all other statuses
-    return !isNoHandover;
+    // Handover patterns (package is in transit)
+    const handoverPatterns = [
+      'in transit', 'picked', 'dispatched', 'warehouse',
+      'out for delivery', 'delivered', 'rto', 'undelivered',
+      'failed delivery', 'attempted', 'cancelled', 'returned'
+    ];
+
+    for (const pattern of handoverPatterns) {
+      if (normalizedStatus.includes(pattern)) {
+        return true;
+      }
+    }
+
+    // Default to false for unknown statuses
+    return false;
+  }
+
+  /**
+   * Check if a status is RTO-related
+   * @param {string} status - The status to check
+   * @returns {boolean} True if the status is RTO-related
+   */
+  isRTOStatus(status) {
+    if (!status || typeof status !== 'string') {
+      return false;
+    }
+    const normalizedStatus = status.toLowerCase();
+    return normalizedStatus.includes('rto');
   }
 
   /**
@@ -494,6 +547,9 @@ class OrderTrackingService {
       const currentStatus = trackingDetails.shipment_status;
       const currentDateTime = new Date().toISOString().slice(0, 19).replace('T', ' '); // Format: YYYY-MM-DD HH:MM:SS
 
+      // Extract shipment_details for additional info (including delivered_to for RTO warehouse)
+      const shipmentDetails = trackingDetails.shipment_details || [];
+
       // Create shipment_status_history in the format expected by processOrderTracking
       const shipmentStatusHistory = [
         {
@@ -504,10 +560,11 @@ class OrderTrackingService {
 
       console.log(`✅ [API] Received tracking data for AWB ${awb}: status="${currentStatus}"`);
 
-      // Return in the expected format
+      // Return in the expected format with shipment_details for RTO tracking
       return {
         success: "1",
-        shipment_status_history: shipmentStatusHistory
+        shipment_status_history: shipmentStatusHistory,
+        shipment_details: shipmentDetails // Include for RTO warehouse extraction
       };
 
     } catch (error) {

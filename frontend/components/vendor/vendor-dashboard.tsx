@@ -304,6 +304,14 @@ export function VendorDashboard() {
   const [dashboardStatsLoading, setDashboardStatsLoading] = useState(false)
   const [dashboardStatsError, setDashboardStatsError] = useState("")
 
+  // Shipment status mapping from database (for badge colors and display names)
+  const [shipmentStatusMapping, setShipmentStatusMapping] = useState<Array<{
+    raw: string;
+    renamed: string;
+    color: string;
+    is_handover: number;
+  }>>([]);
+
   // Tab cache tracking - which tabs have been loaded
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set());
 
@@ -425,6 +433,22 @@ export function VendorDashboard() {
       console.log("useEffect: User is not a vendor, skipping fetch functions");
     }
   }, [user])
+
+  // Fetch shipment status mapping from database on mount (public API, no auth needed)
+  useEffect(() => {
+    async function fetchStatusMapping() {
+      try {
+        const response = await apiClient.getShipmentStatusMapping();
+        if (response.success && response.data) {
+          setShipmentStatusMapping(response.data);
+          console.log("✅ Loaded shipment status mapping:", response.data.length, "entries");
+        }
+      } catch (err) {
+        console.error("Error fetching shipment status mapping:", err);
+      }
+    }
+    fetchStatusMapping();
+  }, []);
 
   // Dashboard stats fetch function (moved outside useEffect to be accessible from multiple places)
   const fetchDashboardStats = async () => {
@@ -1240,8 +1264,8 @@ export function VendorDashboard() {
                 const currentCache = tabDataCache['all-orders'];
                 if (currentCache) {
                   // Compare with cache to detect new orders
-                  const existingIds = new Set(currentCache.orders.map(o => o.unique_id));
-                  const newOrderIds = newOrders.filter(o => !existingIds.has(o.unique_id));
+                  const existingIds = new Set(currentCache.orders.map((o: any) => o.unique_id));
+                  const newOrderIds = newOrders.filter((o: any) => !existingIds.has(o.unique_id));
 
                   if (newOrderIds.length > 0 || ordersResponse.data.pagination) {
                     // Update cache with fresh data (silent update - no loading states)
@@ -1941,47 +1965,63 @@ export function VendorDashboard() {
   }
 
   // Maps shipment status to colored badge classes per UI requirement
-  // Includes mapping for enhanced Shipway API statuses
+  // Uses database mapping from ShipmentStatusMapping utility parameter
   const getShipmentBadgeClasses = (status?: string) => {
-    const s = (status || '').toLowerCase().trim();
+    if (!status) return 'text-blue-800 bg-blue-100 border border-blue-200';
 
+    const s = status.toLowerCase().trim().replace(/_/g, ' ');
+
+    // Try to find in database mapping first
+    const matchedStatus = shipmentStatusMapping.find(item =>
+      item.raw.toLowerCase().replace(/_/g, ' ') === s
+    );
+
+    if (matchedStatus) {
+      // Map database color names to Tailwind classes
+      const colorMap: Record<string, string> = {
+        'blue': 'text-blue-800 bg-blue-100 border border-blue-200',
+        'orange': 'text-orange-800 bg-orange-100 border border-orange-200',
+        'yellow': 'text-yellow-800 bg-yellow-100 border border-yellow-200',
+        'green': 'text-green-800 bg-green-100 border border-green-200',
+        'red': 'text-red-800 bg-red-100 border border-red-200',
+        'maroon': 'text-[#800000] bg-[#ffe4e6] border border-[#fecdd3]',
+      };
+      return colorMap[matchedStatus.color] || 'text-blue-800 bg-blue-100 border border-blue-200';
+    }
+
+    // Fallback: hardcoded mapping for unmapped statuses
     // Blue statuses - Shipment Booked
-    if (s === 'awb_assigned' || s === 'shipment booked' || s === 'shipment_booked') {
+    if (s === 'awb assigned' || s === 'shipment booked') {
       return 'text-blue-800 bg-blue-100 border border-blue-200';
     }
 
     // Orange statuses - In Transit variants
-    if (s === 'in transit' || s === 'in_transit' || s === 'int' ||
-      s === 'reached_at_destination_hub' || s === 'rto_in_transit' || s === 'rto in transit') {
+    if (s === 'in transit' || s === 'int' || s === 'reached at destination hub' ||
+      s === 'rto in transit') {
       return 'text-orange-800 bg-orange-100 border border-orange-200';
     }
 
     // Yellow statuses - Out for Delivery / Delivery Attempted / Reattempt
-    if (s === 'out for delivery' || s === 'out_for_delivery' ||
-      s === 'crov' || s === 'delivery attempted' ||
+    if (s === 'out for delivery' || s === 'crov' || s === 'delivery attempted' ||
       s === 'shndr4' || s === 'delivery reattempt') {
       return 'text-yellow-800 bg-yellow-100 border border-yellow-200';
     }
 
     // Green statuses - Delivered / RTO Delivered
-    if (s === 'del' || s === 'delivered' ||
-      s === 'rtd' || s === 'rto delivered' || s === 'rto_delivered') {
+    if (s === 'del' || s === 'delivered' || s === 'rtd' || s === 'rto delivered') {
       return 'text-green-800 bg-green-100 border border-green-200';
     }
 
     // Red statuses - Failed / RTO / Refused / Unavailable / Undelivered
-    if (s === 'pickup failed' || s === 'pickup_failed' || s === 'shpfr3' ||
-      s === 'rto' || s === 'rto_initiated' || s === 'rto initiated' ||
-      s === 'shndr16' || s === 'consignee unavailable' ||
-      s === 'shndr6' || s === 'consignee refused' ||
-      s === 'undelivered') {
+    if (s === 'pickup failed' || s === 'shpfr3' || s === 'rto' || s === 'rto initiated' ||
+      s === 'shndr16' || s === 'consignee unavailable' || s === 'shndr6' ||
+      s === 'consignee refused' || s === 'undelivered') {
       return 'text-red-800 bg-red-100 border border-red-200';
     }
 
     // Maroon statuses - RTO Undelivered / RTO Lost
-    if (s === 'rto undelivered' || s === 'rto_undelivered' ||
-      s === 'rtondr5' || s === 'rtound' || s === 'rto lost' || s === 'rto_lost') {
-      return 'text-[#800000] bg-[#ffe4e6] border border-[#fecdd3]'; // Maroon
+    if (s === 'rto undelivered' || s === 'rtondr5' || s === 'rtound' || s === 'rto lost') {
+      return 'text-[#800000] bg-[#ffe4e6] border border-[#fecdd3]';
     }
 
     // Default - Blue
@@ -1989,64 +2029,49 @@ export function VendorDashboard() {
   }
 
   // Maps raw Shipway status to user-friendly display name
+  // Uses database mapping from ShipmentStatusMapping utility parameter
   const getShipmentDisplayName = (status?: string): string => {
     if (!status) return 'Unknown';
 
-    const s = status.toLowerCase().trim();
+    const s = status.toLowerCase().trim().replace(/_/g, ' ');
 
+    // Try to find in database mapping first
+    const matchedStatus = shipmentStatusMapping.find(item =>
+      item.raw.toLowerCase().replace(/_/g, ' ') === s
+    );
+
+    if (matchedStatus) {
+      return matchedStatus.renamed;
+    }
+
+    // Fallback: hardcoded mapping for unmapped statuses
     const statusDisplayMap: Record<string, string> = {
-      // Shipment Booked
-      'awb_assigned': 'Shipment Booked',
+      'awb assigned': 'Shipment Booked',
       'shipment booked': 'Shipment Booked',
-      'shipment_booked': 'Shipment Booked',
-
-      // Delivery Attempted
       'crov': 'Delivery Attempted',
-
-      // Delivered
       'del': 'Delivered',
       'delivered': 'Delivered',
-
-      // In Transit
       'in transit': 'In Transit',
-      'in_transit': 'In Transit',
       'int': 'In Transit',
-      'reached_at_destination_hub': 'In Transit',
-
-      // Out for Delivery
+      'reached at destination hub': 'In Transit',
       'out for delivery': 'Out for Delivery',
-      'out_for_delivery': 'Out for Delivery',
-
-      // Pickup Failed
       'pickup failed': 'Pickup Failed',
-      'pickup_failed': 'Pickup Failed',
       'shpfr3': 'Pickup Failed',
-
-      // RTO variants
       'rtd': 'RTO Delivered',
       'rto': 'RTO',
       'rto delivered': 'RTO Delivered',
-      'rto_delivered': 'RTO Delivered',
       'rto undelivered': 'RTO Undelivered',
-      'rto_undelivered': 'RTO Undelivered',
-      'rto_in_transit': 'RTO In Transit',
       'rto in transit': 'RTO In Transit',
-      'rto_initiated': 'RTO Initiated',
       'rto initiated': 'RTO Initiated',
       'rtondr5': 'RTO Lost',
       'rtound': 'RTO Lost',
       'rto lost': 'RTO Lost',
-      'rto_lost': 'RTO Lost',
-
-      // NDR statuses
       'shndr16': 'Consignee Unavailable',
       'consignee unavailable': 'Consignee Unavailable',
       'shndr4': 'Delivery Reattempt',
       'delivery reattempt': 'Delivery Reattempt',
       'shndr6': 'Consignee Refused',
       'consignee refused': 'Consignee Refused',
-
-      // Undelivered
       'undelivered': 'Undelivered',
     };
 
@@ -2784,9 +2809,9 @@ export function VendorDashboard() {
     // Check for iPhone, iPad, or iPod
     const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
     // Also check for iPad on iOS 13+ (which reports as Mac)
-    const isIPadOS13 = /Macintosh/i.test(userAgent) &&
+    const isIPadOS13 = Boolean(/Macintosh/i.test(userAgent) &&
       navigator.maxTouchPoints &&
-      navigator.maxTouchPoints > 1;
+      navigator.maxTouchPoints > 1);
     return isIOS || isIPadOS13;
   };
 

@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { 
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -19,7 +19,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { 
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -30,16 +30,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { 
-  Loader2, 
-  Plus, 
-  Users, 
-  UserPlus, 
-  Search, 
-  Filter, 
-  LogOut, 
-  Shield, 
-  Building2, 
+import {
+  Loader2,
+  Plus,
+  Users,
+  UserPlus,
+  Search,
+  Filter,
+  LogOut,
+  Shield,
+  Building2,
   UserCheck,
   Mail,
   Phone,
@@ -171,7 +171,7 @@ export function UserManagement() {
   const [shipwayTestResult, setShipwayTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [shopifyTestResult, setShopifyTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [isAddingStore, setIsAddingStore] = useState(false)
-  
+
   // Warehouse Mapping state
   const [whMappings, setWhMappings] = useState<any[]>([])
   const [whMappingsLoading, setWhMappingsLoading] = useState(false)
@@ -298,11 +298,11 @@ export function UserManagement() {
     setWarehouseInfo(null)
     setWarehouseVerified(false)
     setWarehouseVerifyError("")
-    
+
     try {
       // Get auth header from localStorage
       const authHeader = localStorage.getItem('authHeader')
-      
+
       if (!authHeader) {
         setWarehouseValid(false)
         setWarehouseVerifyError('Authentication required. Please login again.')
@@ -311,9 +311,9 @@ export function UserManagement() {
 
       console.log('🔍 Frontend: Validating warehouse ID:', warehouseId)
       const response = await apiClient.validateWarehouseForUser(warehouseId)
-      
+
       console.log('📦 Frontend: Warehouse validation response:', response)
-      
+
       if (response.success) {
         setWarehouseValid(true)
         setWarehouseInfo(response.data.warehouse)
@@ -333,6 +333,17 @@ export function UserManagement() {
     }
   }
 
+  const handleVerifyWarehouse = async () => {
+    const warehouseId = editDialogOpen ? editFormData.warehouseId : formData.warehouseId
+    if (!warehouseId.trim()) return
+
+    setWarehouseVerifyLoading(true)
+    try {
+      await validateWarehouse(warehouseId)
+    } finally {
+      setWarehouseVerifyLoading(false)
+    }
+  }
 
   const handleInputChange = (field: keyof CreateUserForm, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -348,7 +359,7 @@ export function UserManagement() {
   const handleEditInputChange = (field: keyof EditUserForm, value: string) => {
     setEditFormData(prev => {
       const newData = { ...prev, [field]: value }
-      
+
       // Handle role changes
       if (field === 'role') {
         if (value === 'admin') {
@@ -366,10 +377,10 @@ export function UserManagement() {
           setWarehouseVerifyError("")
         }
       }
-      
+
       return newData
     })
-    
+
     // Reset validation states when warehouse ID changes, but don't validate automatically
     if (field === 'warehouseId') {
       setWarehouseValid(null)
@@ -426,7 +437,7 @@ export function UserManagement() {
       })
 
       const response = await apiClient.createUser(userData)
-      
+
       if (response.success) {
         setSuccess(`User "${formData.name}" created successfully!`)
         // Reset form
@@ -503,7 +514,7 @@ export function UserManagement() {
       }
 
       const response = await apiClient.updateUser(selectedUser.id, updateData)
-      
+
       if (response.success) {
         setSuccess(`User "${editFormData.name}" updated successfully!`)
         setEditDialogOpen(false)
@@ -527,7 +538,7 @@ export function UserManagement() {
 
     try {
       const response = await apiClient.deleteUser(user.id)
-      
+
       if (response.success) {
         setSuccess(`User "${user.name}" deleted successfully!`)
         // Reload users
@@ -574,7 +585,7 @@ export function UserManagement() {
 
     try {
       const response = await apiClient.changeUserPassword(passwordUser.id, newUserPassword)
-      
+
       if (response.success) {
         setPasswordSuccess(`Password changed successfully for ${passwordUser.name}!`)
         // Reset form
@@ -613,8 +624,8 @@ export function UserManagement() {
   }
 
   const handleAddStore = async () => {
-    if (!newStore.store_name || !newStore.shipping_partner || !newStore.username || !newStore.password || 
-        !newStore.shopify_store_url || !newStore.shopify_token) {
+    if (!newStore.store_name || !newStore.shipping_partner || !newStore.username || !newStore.password ||
+      !newStore.shopify_store_url || !newStore.shopify_token) {
       setError("Please fill in all required fields")
       return
     }
@@ -650,7 +661,7 @@ export function UserManagement() {
   const handleEditStore = (store: any) => {
     setError("")
     setSuccess("")
-    setEditingStore({ 
+    setEditingStore({
       ...store,
       password: store.password || '',
       shopify_token: store.shopify_token || '',
@@ -665,11 +676,11 @@ export function UserManagement() {
   const handleUpdateStore = async (e?: React.MouseEvent) => {
     e?.preventDefault()
     e?.stopPropagation()
-    
+
     if (!editingStore) return
-    
-    if (!editingStore.store_name || !editingStore.username || 
-        !editingStore.shopify_store_url || !editingStore.shopify_token) {
+
+    if (!editingStore.store_name || !editingStore.username ||
+      !editingStore.shopify_store_url || !editingStore.shopify_token) {
       setError("Please fill in all required fields")
       return
     }
@@ -686,7 +697,7 @@ export function UserManagement() {
         shopify_token: editingStore.shopify_token,
         status: editingStore.status
       }
-      
+
       if (editingStore.password && editingStore.password.trim() !== '') {
         updateData.password = editingStore.password
       }
@@ -744,11 +755,11 @@ export function UserManagement() {
     setTestingConnection({ type: 'shipway', loading: true })
     setShipwayTestResult(null) // Clear previous result
     try {
-      const response = await apiClient.testShipwayConnection({ username: username, password: password })
-      
+      const response = await apiClient.testStoreShipwayConnection({ username: username, password: password })
+
       // Handle response - check for success property (handle both boolean true and string "true")
-      const isSuccess = response?.success === true || response?.success === 'true' || response?.success === 1
-      
+      const isSuccess = response?.success === true || (response?.success as any) === 'true' || (response?.success as any) === 1
+
       if (isSuccess) {
         const successMessage = response.message || "Connection successful! Credentials are valid."
         setShipwayTestResult({ success: true, message: successMessage })
@@ -935,26 +946,26 @@ export function UserManagement() {
 
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         user.email.toLowerCase().includes(searchTerm.toLowerCase())
+      user.email.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesRole = roleFilter === "all" || user.role === roleFilter
     const matchesStatus = statusFilter === "all" || user.status === statusFilter
-    
+
     return matchesSearch && matchesRole && matchesStatus
   })
 
   const filteredStores = stores.filter(store => {
-    const matchesSearch = 
+    const matchesSearch =
       (store.store_name || '').toLowerCase().includes(storeSearchTerm.toLowerCase()) ||
       (store.account_code || '').toLowerCase().includes(storeSearchTerm.toLowerCase()) ||
       (store.username || '').toLowerCase().includes(storeSearchTerm.toLowerCase())
     const matchesStatus = storeStatusFilter === "all" || store.status === storeStatusFilter
     const matchesShippingPartner = storeShippingPartnerFilter === "all" || store.shipping_partner === storeShippingPartnerFilter
-    
+
     return matchesSearch && matchesStatus && matchesShippingPartner
   })
 
   const filteredWhMappings = whMappings.filter(mapping => {
-    const matchesSearch = 
+    const matchesSearch =
       (mapping.claimio_wh_id || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase()) ||
       (mapping.vendor_name || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase()) ||
       (mapping.account_code || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase()) ||
@@ -962,7 +973,7 @@ export function UserManagement() {
       (mapping.vendor_wh_id || '').toLowerCase().includes(whMappingSearchTerm.toLowerCase())
     const matchesStore = whMappingStoreFilter === "all" || mapping.account_code === whMappingStoreFilter || mapping.store_name === whMappingStoreFilter
     const matchesVendor = whMappingVendorFilter === "all" || mapping.vendor_name === whMappingVendorFilter || mapping.claimio_wh_id === whMappingVendorFilter
-    
+
     return matchesSearch && matchesStore && matchesVendor
   })
 
@@ -1013,8 +1024,8 @@ export function UserManagement() {
                   <p className="text-xs text-gray-500 truncate">{currentUser?.email}</p>
                 </div>
               </div>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 size="sm"
                 onClick={handleLogout}
                 disabled={logoutLoading}
@@ -1195,8 +1206,8 @@ export function UserManagement() {
                             <Badge variant={getRoleBadgeVariant(user.role)} className="text-xs">
                               {user.role}
                             </Badge>
-                            <Badge 
-                              variant={getStatusBadgeVariant(user.status)} 
+                            <Badge
+                              variant={getStatusBadgeVariant(user.status)}
                               className={`text-xs ${user.status === 'active' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}`}
                             >
                               {user.status}
@@ -1359,63 +1370,62 @@ export function UserManagement() {
                               placeholder={`Enter ${newStore.shipping_partner} username`}
                             />
                           </div>
-                        <div>
-                          <Label htmlFor="shipping-password">Password *</Label>
-                          <div className="relative">
-                            <Input
-                              id="shipping-password"
-                              type={showPassword ? "text" : "password"}
-                              value={newStore.password}
-                              onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
-                              placeholder={`Enter ${newStore.shipping_partner} password`}
-                              className="pr-10"
-                            />
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                              onClick={() => setShowPassword(!showPassword)}
-                            >
-                              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </Button>
+                          <div>
+                            <Label htmlFor="shipping-password">Password *</Label>
+                            <div className="relative">
+                              <Input
+                                id="shipping-password"
+                                type={showPassword ? "text" : "password"}
+                                value={newStore.password}
+                                onChange={(e) => setNewStore({ ...newStore, password: e.target.value })}
+                                placeholder={`Enter ${newStore.shipping_partner} password`}
+                                className="pr-10"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                onClick={() => setShowPassword(!showPassword)}
+                              >
+                                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          onClick={() => handleTestShipway(newStore.username, newStore.password)}
-                          disabled={testingConnection.loading && testingConnection.type === 'shipway'}
-                        >
-                          {testingConnection.loading && testingConnection.type === 'shipway' ? (
-                            <>
-                              <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                              Testing...
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle className="w-3 h-3 mr-2" />
-                              Test {newStore.shipping_partner} Connection
-                            </>
-                          )}
-                        </Button>
-                        {shipwayTestResult && (
-                          <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                            shipwayTestResult.success 
-                              ? 'bg-green-50 text-green-800 border border-green-200' 
-                              : 'bg-red-50 text-red-800 border border-red-200'
-                          }`}>
-                            {shipwayTestResult.success ? (
-                              <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => handleTestShipway(newStore.username, newStore.password)}
+                            disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                          >
+                            {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                              <>
+                                <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                                Testing...
+                              </>
                             ) : (
-                              <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                              <>
+                                <CheckCircle className="w-3 h-3 mr-2" />
+                                Test {newStore.shipping_partner} Connection
+                              </>
                             )}
-                            <span className="flex-1">{shipwayTestResult.message}</span>
-                          </div>
-                        )}
-                      </div>
+                          </Button>
+                          {shipwayTestResult && (
+                            <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shipwayTestResult.success
+                              ? 'bg-green-50 text-green-800 border border-green-200'
+                              : 'bg-red-50 text-red-800 border border-red-200'
+                              }`}>
+                              {shipwayTestResult.success ? (
+                                <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                              ) : (
+                                <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                              )}
+                              <span className="flex-1">{shipwayTestResult.message}</span>
+                            </div>
+                          )}
+                        </div>
                       )}
 
                       <div className="space-y-2">
@@ -1472,11 +1482,10 @@ export function UserManagement() {
                           )}
                         </Button>
                         {shopifyTestResult && (
-                          <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                            shopifyTestResult.success 
-                              ? 'bg-green-50 text-green-800 border border-green-200' 
-                              : 'bg-red-50 text-red-800 border border-red-200'
-                          }`}>
+                          <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shopifyTestResult.success
+                            ? 'bg-green-50 text-green-800 border border-green-200'
+                            : 'bg-red-50 text-red-800 border border-red-200'
+                            }`}>
                             {shopifyTestResult.success ? (
                               <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
                             ) : (
@@ -1507,7 +1516,7 @@ export function UserManagement() {
                       <Button variant="outline" onClick={() => setIsAddStoreOpen(false)}>
                         Cancel
                       </Button>
-                      <Button 
+                      <Button
                         onClick={handleAddStore}
                         disabled={isAddingStore}
                       >
@@ -1632,7 +1641,7 @@ export function UserManagement() {
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          <Badge 
+                          <Badge
                             variant={store.status === 'active' ? 'default' : 'destructive'}
                             className={store.status === 'active' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
                           >
@@ -1790,8 +1799,8 @@ export function UserManagement() {
                       <Button variant="outline" onClick={() => setIsAddMappingOpen(false)}>
                         Cancel
                       </Button>
-                      <Button 
-                        onClick={handleCreateMapping} 
+                      <Button
+                        onClick={handleCreateMapping}
                         disabled={!warehouseVerified}
                         className="bg-blue-600 hover:bg-blue-700"
                       >
@@ -1906,7 +1915,7 @@ export function UserManagement() {
                             <p className="text-xs text-gray-600">Return WH: {mapping.return_warehouse_id || 'N/A'}</p>
                           </div>
                           <div className="flex flex-col items-end gap-2">
-                            <Badge 
+                            <Badge
                               variant={mapping.is_active ? 'default' : 'destructive'}
                               className={mapping.is_active ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
                             >
@@ -2168,8 +2177,8 @@ export function UserManagement() {
                   <p className="text-xs text-gray-500 break-all max-w-[200px]">{currentUser?.email}</p>
                 </div>
               )}
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={handleLogout}
                 disabled={logoutLoading}
                 size={isMobile ? 'sm' : 'default'}
@@ -2191,11 +2200,10 @@ export function UserManagement() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 md:py-8">
         <div className={`space-y-6 md:space-y-8`}>
           {/* Stats Cards */}
-          <div className={`grid gap-4 md:gap-6 ${
-            isMobile ? 'grid-cols-2' : 
-            isTablet ? 'grid-cols-2' : 
-            'grid-cols-4'
-          }`}>
+          <div className={`grid gap-4 md:gap-6 ${isMobile ? 'grid-cols-2' :
+            isTablet ? 'grid-cols-2' :
+              'grid-cols-4'
+            }`}>
             <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg">
               <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
                 <div className="flex items-center justify-between">
@@ -2209,7 +2217,7 @@ export function UserManagement() {
                 </div>
               </CardContent>
             </Card>
-            
+
             <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg">
               <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
                 <div className="flex items-center justify-between">
@@ -2223,7 +2231,7 @@ export function UserManagement() {
                 </div>
               </CardContent>
             </Card>
-            
+
             <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg">
               <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
                 <div className="flex items-center justify-between">
@@ -2235,7 +2243,7 @@ export function UserManagement() {
                 </div>
               </CardContent>
             </Card>
-            
+
             <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg">
               <CardContent className={`${isMobile ? 'p-4' : 'p-6'}`}>
                 <div className="flex items-center justify-between">
@@ -2400,20 +2408,54 @@ export function UserManagement() {
                             {formData.role === 'vendor' && (
                               <div className="space-y-2">
                                 <Label htmlFor="warehouseId" className="text-sm font-medium text-gray-700">Warehouse ID *</Label>
-                                <div className="flex items-center gap-2 relative">
-                                  <Input
-                                    id="warehouseId"
-                                    value={formData.warehouseId}
-                                    onChange={(e) => handleInputChange('warehouseId', e.target.value)}
-                                    required
-                                    disabled={creating}
-                                    className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
-                                      warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
-                                      warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
-                                    }`}
-                                    placeholder="Enter warehouse ID"
-                                  />
+                                <div className="flex items-center gap-2">
+                                  <div className="relative flex-1">
+                                    <Input
+                                      id="warehouseId"
+                                      value={formData.warehouseId}
+                                      onChange={(e) => handleInputChange('warehouseId', e.target.value)}
+                                      required
+                                      disabled={creating}
+                                      className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' :
+                                        warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
+                                        }`}
+                                      placeholder="Enter warehouse ID"
+                                    />
+                                    {warehouseValidating && (
+                                      <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-blue-600" />
+                                    )}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={handleVerifyWarehouse}
+                                    disabled={warehouseVerifyLoading || !formData.warehouseId.trim() || creating || !addUserDialogOpen}
+                                  >
+                                    {warehouseVerifyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                                  </Button>
                                 </div>
+                                {warehouseValid === true && (
+                                  <div className="space-y-1">
+                                    <p className="text-sm text-green-600 flex items-center gap-1">
+                                      <UserCheck className="h-3 w-3" />
+                                      Valid warehouse ID
+                                    </p>
+                                    {warehouseInfo && (
+                                      <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border">
+                                        <p><strong>Address:</strong> {warehouseInfo.address}</p>
+                                        <p><strong>City:</strong> {warehouseInfo.city}</p>
+                                        <p><strong>Pincode:</strong> {warehouseInfo.pincode}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {warehouseValid === false && (
+                                  <p className="text-sm text-red-600 flex items-center gap-1">
+                                    <Shield className="h-3 w-3" />
+                                    Invalid warehouse ID
+                                  </p>
+                                )}
                               </div>
                             )}
 
@@ -2617,13 +2659,13 @@ export function UserManagement() {
                                     {getRoleIcon(user.role)}
                                     {user.role}
                                   </Badge>
-                                  <Badge 
+                                  <Badge
                                     variant={getStatusBadgeVariant(user.status)}
                                     className={user.status === 'active' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
                                   >
                                     {user.status}
                                   </Badge>
-                                  
+
                                   {/* Action Buttons - Only show for non-superadmin users */}
                                   {user.role !== 'superadmin' && (
                                     <div className="flex items-center space-x-2">
@@ -2647,7 +2689,7 @@ export function UserManagement() {
                                             </TooltipContent>
                                           </Tooltip>
                                         </Dialog>
-                                        
+
                                         <Tooltip>
                                           <TooltipTrigger asChild>
                                             <Button
@@ -2663,7 +2705,7 @@ export function UserManagement() {
                                             <p>Change Password</p>
                                           </TooltipContent>
                                         </Tooltip>
-                                        
+
                                         <AlertDialog>
                                           <Tooltip>
                                             <TooltipTrigger asChild>
@@ -2857,11 +2899,10 @@ export function UserManagement() {
                                 )}
                               </Button>
                               {shipwayTestResult && (
-                                <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                                  shipwayTestResult.success 
-                                    ? 'bg-green-50 text-green-800 border border-green-200' 
-                                    : 'bg-red-50 text-red-800 border border-red-200'
-                                }`}>
+                                <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shipwayTestResult.success
+                                  ? 'bg-green-50 text-green-800 border border-green-200'
+                                  : 'bg-red-50 text-red-800 border border-red-200'
+                                  }`}>
                                   {shipwayTestResult.success ? (
                                     <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
                                   ) : (
@@ -2927,11 +2968,10 @@ export function UserManagement() {
                               )}
                             </Button>
                             {shopifyTestResult && (
-                              <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${
-                                shopifyTestResult.success 
-                                  ? 'bg-green-50 text-green-800 border border-green-200' 
-                                  : 'bg-red-50 text-red-800 border border-red-200'
-                              }`}>
+                              <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shopifyTestResult.success
+                                ? 'bg-green-50 text-green-800 border border-green-200'
+                                : 'bg-red-50 text-red-800 border border-red-200'
+                                }`}>
                                 {shopifyTestResult.success ? (
                                   <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
                                 ) : (
@@ -2962,7 +3002,7 @@ export function UserManagement() {
                           <Button variant="outline" onClick={() => setIsAddStoreOpen(false)}>
                             Cancel
                           </Button>
-                          <Button 
+                          <Button
                             onClick={handleAddStore}
                             disabled={isAddingStore}
                           >
@@ -3018,7 +3058,7 @@ export function UserManagement() {
                                   {store.shopify_store_url || 'N/A'}
                                 </TableCell>
                                 <TableCell>
-                                  <Badge 
+                                  <Badge
                                     variant={store.status === 'active' ? 'default' : 'destructive'}
                                     className={store.status === 'active' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
                                   >
@@ -3090,7 +3130,7 @@ export function UserManagement() {
                     <Dialog open={isAddMappingOpen} onOpenChange={(open) => {
                       setIsAddMappingOpen(open)
                       if (!open) {
-                        setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "" })
+                        setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", return_warehouse_id: "" })
                         setSelectedVendor(null)
                         setSelectedStore(null)
                         setWarehouseInfo(null)
@@ -3217,8 +3257,8 @@ export function UserManagement() {
                           <Button variant="outline" onClick={() => setIsAddMappingOpen(false)}>
                             Cancel
                           </Button>
-                          <Button 
-                            onClick={handleCreateMapping} 
+                          <Button
+                            onClick={handleCreateMapping}
                             disabled={!warehouseVerified}
                             className="bg-blue-600 hover:bg-blue-700"
                           >
@@ -3395,10 +3435,9 @@ export function UserManagement() {
                         onChange={(e) => handleEditInputChange('warehouseId', e.target.value)}
                         required
                         disabled={editing}
-                        className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${
-                          warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 
+                        className={`bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500 ${warehouseValid === false ? 'border-red-500 focus:border-red-500 focus:ring-red-500' :
                           warehouseValid === true ? 'border-green-500 focus:border-green-500 focus:ring-green-500' : ''
-                        }`}
+                          }`}
                         placeholder="Enter warehouse ID"
                       />
                       {warehouseValidating && (
@@ -3781,8 +3820,8 @@ export function UserManagement() {
             </div>
           )}
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setIsEditStoreOpen(false)
                 setEditingStore(null)
@@ -3793,7 +3832,7 @@ export function UserManagement() {
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               type="button"
               onClick={handleUpdateStore}
               disabled={updatingStore}

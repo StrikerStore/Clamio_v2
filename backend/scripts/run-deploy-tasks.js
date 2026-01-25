@@ -13,7 +13,7 @@ const { execSync } = require('child_process');
 
 // Configuration
 const STATE_FILE = path.join(__dirname, '../.deploy-state.json');
-const CURRENT_DEPLOY_VERSION = '2026-01-25-is-handover-update'; // Change this for each deploy that needs the sync
+const CURRENT_DEPLOY_VERSION = '2026-01-25-rto-records-update'; // Change this for each deploy that needs the sync
 
 /**
  * Get the current deploy state
@@ -64,30 +64,30 @@ async function runDeployTasks() {
     }
 
     // ============================================
-    // TASK 1: Sync is_handover for existing labels
+    // TASK 1: Update RTO old records
     // ============================================
-    const TASK_SYNC_HANDOVER = 'sync-is-handover';
+    const TASK_UPDATE_RTO_RECORDS = 'update-rto-records';
 
-    if (hasTaskRun(state, TASK_SYNC_HANDOVER)) {
-        console.log(`✅ [SKIP] Task "${TASK_SYNC_HANDOVER}" already completed for this deploy`);
+    if (hasTaskRun(state, TASK_UPDATE_RTO_RECORDS)) {
+        console.log(`✅ [SKIP] Task "${TASK_UPDATE_RTO_RECORDS}" already completed for this deploy`);
     } else {
-        console.log(`\n🔄 [RUN] Task: ${TASK_SYNC_HANDOVER}`);
+        console.log(`\n🔄 [RUN] Task: ${TASK_UPDATE_RTO_RECORDS}`);
         console.log('-'.repeat(60));
 
         try {
-            // Run the sync script
-            execSync('node scripts/sync-is-handover.js', {
+            // Run the update script
+            execSync('node scripts/update-rto-records.js', {
                 cwd: path.join(__dirname, '..'),
                 stdio: 'inherit',
                 env: process.env
             });
 
             // Mark task as completed
-            state.tasksCompleted.push(TASK_SYNC_HANDOVER);
+            state.tasksCompleted.push(TASK_UPDATE_RTO_RECORDS);
             saveDeployState(state);
-            console.log(`✅ Task "${TASK_SYNC_HANDOVER}" completed successfully`);
+            console.log(`✅ Task "${TASK_UPDATE_RTO_RECORDS}" completed successfully`);
         } catch (error) {
-            console.error(`❌ Task "${TASK_SYNC_HANDOVER}" failed:`, error.message);
+            console.error(`❌ Task "${TASK_UPDATE_RTO_RECORDS}" failed:`, error.message);
             // Don't mark as completed so it can retry next time
             console.log('⚠️ Task will retry on next deployment');
         }
@@ -96,13 +96,6 @@ async function runDeployTasks() {
     // ============================================
     // ADD MORE TASKS HERE AS NEEDED
     // ============================================
-    // Example:
-    // const TASK_ANOTHER = 'another-task';
-    // if (!hasTaskRun(state, TASK_ANOTHER)) {
-    //   // Run task...
-    //   state.tasksCompleted.push(TASK_ANOTHER);
-    //   saveDeployState(state);
-    // }
 
     // Final save
     saveDeployState(state);
