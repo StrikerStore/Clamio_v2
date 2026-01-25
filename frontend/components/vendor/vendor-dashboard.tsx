@@ -155,7 +155,7 @@ export function VendorDashboard() {
   const { isMobile, isTablet, isDesktop, deviceType } = useDeviceType()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("all-orders")
-  
+
   // Separate filters for each tab
   const [tabFilters, setTabFilters] = useState({
     "all-orders": {
@@ -210,7 +210,7 @@ export function VendorDashboard() {
   const [allOrdersTotalCount, setAllOrdersTotalCount] = useState(0);
   const [allOrdersTotalQuantity, setAllOrdersTotalQuantity] = useState(0);
   const [isLoadingMoreAllOrders, setIsLoadingMoreAllOrders] = useState(false);
-  
+
   // Use ref to store latest lastUpdated value to avoid stale closure in polling
   const lastUpdatedRef = useRef<string | null>(null);
 
@@ -261,12 +261,12 @@ export function VendorDashboard() {
   const [showProofDialog, setShowProofDialog] = useState(false)
   const [selectedSettlementForView, setSelectedSettlementForView] = useState<any>(null)
   const [showViewRequestDialog, setShowViewRequestDialog] = useState(false)
-  const [selectedImageProduct, setSelectedImageProduct] = useState<{url: string, title: string} | null>(null)
-  
+  const [selectedImageProduct, setSelectedImageProduct] = useState<{ url: string, title: string } | null>(null)
+
   // Loading states for label downloads
-  const [labelDownloadLoading, setLabelDownloadLoading] = useState<{[key: string]: boolean}>({})
+  const [labelDownloadLoading, setLabelDownloadLoading] = useState<{ [key: string]: boolean }>({})
   const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false)
-  
+
   // Merge confirmation dialog state
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [mergeDialogData, setMergeDialogData] = useState<{
@@ -277,19 +277,19 @@ export function VendorDashboard() {
   } | null>(null)
   const [selectedMergeFormat, setSelectedMergeFormat] = useState<string>("thermal")
   const [mergeLoading, setMergeLoading] = useState(false)
-  
+
   // Loading states for reverse operations
-  const [reverseLoading, setReverseLoading] = useState<{[key: string]: boolean}>({})
+  const [reverseLoading, setReverseLoading] = useState<{ [key: string]: boolean }>({})
 
   // Tab highlight animation state
   const [highlightedTab, setHighlightedTab] = useState<string | null>(null)
-  
+
   // Status filter state for handover tab
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
-  
+
   // Status filter state for order tracking tab
   const [selectedTrackingStatuses, setSelectedTrackingStatuses] = useState<string[]>([])
-  
+
   // Label download filter state for my orders tab
   const [selectedLabelFilter, setSelectedLabelFilter] = useState<string>('all')
 
@@ -303,10 +303,10 @@ export function VendorDashboard() {
   } | null>(null)
   const [dashboardStatsLoading, setDashboardStatsLoading] = useState(false)
   const [dashboardStatsError, setDashboardStatsError] = useState("")
-  
+
   // Tab cache tracking - which tabs have been loaded
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set());
-  
+
   // Cache for each tab's data to persist when switching tabs
   const [tabDataCache, setTabDataCache] = useState<{
     'all-orders'?: {
@@ -338,7 +338,7 @@ export function VendorDashboard() {
       totalCount: number;
     };
   }>({});
-  
+
   // Loading progress state for each tab
   const [loadingProgress, setLoadingProgress] = useState<{
     [key: string]: { loaded: number; total: number; isLoading: boolean }
@@ -349,7 +349,7 @@ export function VendorDashboard() {
       console.log("fetchAddress: Starting address fetch...");
       console.log("fetchAddress: User object:", user);
       console.log("fetchAddress: User role:", user?.role);
-      
+
       setAddressLoading(true);
       setAddressError("");
       try {
@@ -411,7 +411,7 @@ export function VendorDashboard() {
         console.error("Error fetching transactions:", err);
       }
     }
-    
+
     console.log("useEffect: User object:", user);
     console.log("useEffect: User role:", user?.role);
     if (user?.role === "vendor") {
@@ -436,7 +436,7 @@ export function VendorDashboard() {
       if (response.success && response.data) {
         console.log("✅ Dashboard stats received:", response.data);
         setDashboardStats(response.data);
-        
+
         // Initialize loading progress for all tabs with total counts from stats
         setLoadingProgress(prev => ({
           ...prev,
@@ -481,36 +481,36 @@ export function VendorDashboard() {
       if (response.success && response.data) {
         const ordersData = response.data.orders || [];
         const pagination = response.data.pagination;
-        
+
         if (Array.isArray(ordersData)) {
-        console.log('📊 Raw orders data:', response.data.orders.length, 'orders');
-        // Check for duplicates in raw data
-        const uniqueIds = new Set<string>();
-        const duplicates: Array<{index: number, unique_id: string, order: any}> = [];
-        response.data.orders.forEach((order: any, index: number) => {
-          if (uniqueIds.has(order.unique_id)) {
-            duplicates.push({ index, unique_id: order.unique_id, order });
-          } else {
-            uniqueIds.add(order.unique_id);
+          console.log('📊 Raw orders data:', response.data.orders.length, 'orders');
+          // Check for duplicates in raw data
+          const uniqueIds = new Set<string>();
+          const duplicates: Array<{ index: number, unique_id: string, order: any }> = [];
+          response.data.orders.forEach((order: any, index: number) => {
+            if (uniqueIds.has(order.unique_id)) {
+              duplicates.push({ index, unique_id: order.unique_id, order });
+            } else {
+              uniqueIds.add(order.unique_id);
+            }
+          });
+          if (duplicates.length > 0) {
+            console.warn('🚨 Duplicate unique_ids found in raw API data:', duplicates);
           }
-        });
-        if (duplicates.length > 0) {
-          console.warn('🚨 Duplicate unique_ids found in raw API data:', duplicates);
-        }
-        
-        // Filter out duplicates and ensure uniqueness
-        const uniqueOrders = response.data.orders.filter((order: any, index: number, self: any[]) => 
-          index === self.findIndex((o: any) => o.unique_id === order.unique_id)
-        );
-        
+
+          // Filter out duplicates and ensure uniqueness
+          const uniqueOrders = response.data.orders.filter((order: any, index: number, self: any[]) =>
+            index === self.findIndex((o: any) => o.unique_id === order.unique_id)
+          );
+
           setOrders(uniqueOrders);
-          
+
           // Update pagination metadata
           if (pagination) {
             setAllOrdersHasMore(pagination.hasMore || false);
             setAllOrdersTotalCount(pagination.total || 0);
             setAllOrdersTotalQuantity(pagination.totalQuantity || 0);
-            
+
             // Update loading progress
             setLoadingProgress(prev => ({
               ...prev,
@@ -520,10 +520,10 @@ export function VendorDashboard() {
                 isLoading: false
               }
             }));
-            
+
             setAllOrdersPage(2);
           }
-          
+
           console.log('✅ Orders refreshed successfully');
         } else {
           setOrders([]);
@@ -540,18 +540,18 @@ export function VendorDashboard() {
       const groupedResponse = await apiClient.getGroupedOrders(1, 50);
       if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
         setGroupedOrders(groupedResponse.data.groupedOrders);
-        
+
         // Update pagination metadata
         if (groupedResponse.data.pagination) {
           setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
           setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
         }
-        
+
         // Ensure My Orders card/tab counts reflect the latest absolute total
         if (typeof groupedResponse.data.totalQuantity === 'number') {
           setGroupedOrdersTotalQuantity(groupedResponse.data.totalQuantity);
         }
-        
+
         console.log('✅ Grouped orders refreshed successfully');
       } else {
         console.log('⚠️ Failed to refresh grouped orders');
@@ -586,7 +586,7 @@ export function VendorDashboard() {
   const fetchOrders = async (resetPagination: boolean = true, filters?: { search?: string, dateFrom?: Date, dateTo?: Date }) => {
     // PARALLEL LOADING: Orders can load independently of dashboard stats
     // Cards will show stats when available, orders will show when available
-    
+
     if (resetPagination) {
       setOrdersLoading(true);
       setAllOrdersPage(1);
@@ -594,52 +594,52 @@ export function VendorDashboard() {
       setIsLoadingMoreAllOrders(true);
     }
     setOrdersError("");
-    
+
     try {
       const pageToFetch = resetPagination ? 1 : allOrdersPage;
-      
+
       // OPTIMIZATION: For initial load without filters, load 20 orders first, then 30 more in background
       // If filters are provided, use a large limit to fetch all matching orders
       // Otherwise use optimized pagination: 20 first, then 30 more
       const isInitialLoad = resetPagination && !filters;
       const initialLimit = isInitialLoad ? 20 : (filters ? 10000 : 50);
-      
+
       // Format dates for API if filters are provided
       const searchParam = filters?.search;
       const dateFromStr = filters?.dateFrom ? filters.dateFrom.toISOString().split('T')[0] : undefined;
       const dateToStr = filters?.dateTo ? filters.dateTo.toISOString().split('T')[0] : undefined;
-      
+
       // Run both API calls in parallel for better performance
       const [ordersResponse, lastUpdatedResponse] = await Promise.all([
         apiClient.getOrders(pageToFetch, initialLimit, 'unclaimed', searchParam, dateFromStr, dateToStr),
         apiClient.getOrdersLastUpdated()
       ]);
-      
+
       // Process orders response
       if (ordersResponse.success && ordersResponse.data) {
         const ordersData = ordersResponse.data.orders || [];
         const pagination = ordersResponse.data.pagination;
-        
+
         // Update orders and pagination
         if (resetPagination) {
           const nextPage = filters ? 1 : 2; // Next page will be 2 if no filters
           const hasMore = filters ? false : (pagination?.hasMore || false);
-          
+
           // Display first batch immediately
           setOrders(ordersData);
           setOrdersLoading(false); // Stop loading state after first 20 orders
-          
+
           // Update pagination metadata
           if (pagination) {
             setAllOrdersHasMore(hasMore);
             setAllOrdersTotalCount(pagination.total || 0);
             setAllOrdersTotalQuantity(pagination.totalQuantity || 0);
-            
+
             // Only increment page if no filters (normal pagination)
             if (!filters) {
               setAllOrdersPage(nextPage);
             }
-            
+
             // Update loading progress
             setLoadingProgress(prev => ({
               ...prev,
@@ -650,7 +650,7 @@ export function VendorDashboard() {
               }
             }));
           }
-          
+
           // For initial load without filters, fetch remaining orders in background
           // First batch shows 20 orders quickly, then we fetch full 50 and update silently
           if (isInitialLoad && ordersData.length === 20 && pagination && pagination.total > 20) {
@@ -660,13 +660,13 @@ export function VendorDashboard() {
               if (fullResponse.success && fullResponse.data) {
                 const fullOrdersData = fullResponse.data.orders || [];
                 const fullPagination = fullResponse.data.pagination;
-                
+
                 // Replace with full first page (50 orders) when background load completes
                 if (fullOrdersData.length > ordersData.length) {
                   console.log(`✅ Background load complete: Updated to ${fullOrdersData.length} orders (from ${ordersData.length})`);
-                  
+
                   setOrders(fullOrdersData);
-                  
+
                   // Update cache with full first page
                   setTabDataCache(prev => ({
                     ...prev,
@@ -678,13 +678,13 @@ export function VendorDashboard() {
                       totalQuantity: fullPagination?.totalQuantity || 0,
                     }
                   }));
-                  
+
                   // Update pagination metadata with full data
                   if (fullPagination) {
                     setAllOrdersTotalCount(fullPagination.total || 0);
                     setAllOrdersTotalQuantity(fullPagination.totalQuantity || 0);
                     setAllOrdersHasMore(fullPagination.hasMore || false);
-                    
+
                     // Update loading progress with full count
                     setLoadingProgress(prev => ({
                       ...prev,
@@ -702,7 +702,7 @@ export function VendorDashboard() {
               // Don't show error to user - first 20 orders are already displayed
             });
           }
-          
+
           // Store initial cache (will be updated when background load completes)
           setTabDataCache(prev => ({
             ...prev,
@@ -714,18 +714,18 @@ export function VendorDashboard() {
               totalQuantity: pagination?.totalQuantity || 0,
             }
           }));
-          
+
           // Mark tab as loaded
           setLoadedTabs(prev => new Set(prev).add('all-orders'));
         } else {
           // Infinite scroll - append orders
           // Calculate new count first
           const currentLoaded = orders.length + ordersData.length;
-          
+
           // Update orders state
           setOrders(prev => {
             const updatedOrders = [...prev, ...ordersData];
-            
+
             // Update cache with appended orders
             if (pagination) {
               const nextPage = allOrdersPage + 1;
@@ -739,12 +739,12 @@ export function VendorDashboard() {
                   totalQuantity: pagination.totalQuantity || 0,
                 }
               }));
-              
+
               // Update pagination metadata AFTER orders state update
               setAllOrdersHasMore(pagination.hasMore || false);
               setAllOrdersTotalCount(pagination.total || 0);
               setAllOrdersTotalQuantity(pagination.totalQuantity || 0);
-              
+
               // Update loading progress with correct count
               setLoadingProgress(prevProgress => ({
                 ...prevProgress,
@@ -754,11 +754,11 @@ export function VendorDashboard() {
                   isLoading: false
                 }
               }));
-              
+
               // Increment page for next load
               setAllOrdersPage(nextPage);
             }
-            
+
             return updatedOrders;
           });
         }
@@ -768,7 +768,7 @@ export function VendorDashboard() {
         }
         setOrdersError("No orders found");
       }
-      
+
       // Process last updated response
       if (lastUpdatedResponse.success && lastUpdatedResponse.data) {
         const timestamp = lastUpdatedResponse.data.lastUpdated;
@@ -793,13 +793,13 @@ export function VendorDashboard() {
       let allOrders: any[] = [];
       let page = 1;
       let hasMore = true;
-      
+
       while (hasMore) {
         const response = await apiClient.getGroupedOrders(page, 50);
-        
+
         if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
           allOrders = [...allOrders, ...response.data.groupedOrders];
-          
+
           if (response.data.pagination) {
             hasMore = response.data.pagination.hasMore;
             page++;
@@ -810,7 +810,7 @@ export function VendorDashboard() {
           hasMore = false;
         }
       }
-      
+
       console.log('✅ Fetched all grouped orders:', allOrders.length);
       setAllGroupedOrders(allOrders);
     } catch (err: any) {
@@ -828,28 +828,28 @@ export function VendorDashboard() {
     } else {
       setIsLoadingMore(true);
     }
-    
+
     setGroupedOrdersError("");
-    
+
     try {
       const pageToFetch = resetPagination ? 1 : groupedOrdersPage;
       const response = await apiClient.getGroupedOrders(pageToFetch, 50);
-      
+
       if (response.success && response.data && Array.isArray(response.data.groupedOrders)) {
         const nextPage = resetPagination ? 2 : groupedOrdersPage + 1;
         const pagination = response.data.pagination;
-        
+
         if (resetPagination) {
           // Replace orders on reset (initial load or refresh)
           setGroupedOrders(response.data.groupedOrders);
-          
+
           // Update pagination metadata
           if (pagination) {
             setGroupedOrdersHasMore(pagination.hasMore);
             setGroupedOrdersTotalCount(pagination.total);
             setGroupedOrdersPage(nextPage);
           }
-          
+
           // Update total quantity (only on reset to avoid overwriting with partial data)
           if (response.data.totalQuantity !== undefined) {
             console.log('🔢 Setting groupedOrdersTotalQuantity:', response.data.totalQuantity);
@@ -857,7 +857,7 @@ export function VendorDashboard() {
           } else {
             console.log('⚠️ totalQuantity not found in response data:', response.data);
           }
-          
+
           // Store in cache (also include allGroupedOrders if available)
           setTabDataCache(prev => ({
             ...prev,
@@ -870,14 +870,14 @@ export function VendorDashboard() {
               totalQuantity: response.data.totalQuantity || 0,
             }
           }));
-          
+
           // Mark tab as loaded
           setLoadedTabs(prev => new Set(prev).add('my-orders'));
         } else {
           // Append orders for infinite scroll
           setGroupedOrders(prev => {
             const updatedOrders = [...prev, ...response.data.groupedOrders];
-            
+
             // Update cache with appended orders
             if (pagination) {
               setTabDataCache(prevCache => ({
@@ -891,12 +891,12 @@ export function VendorDashboard() {
                   totalQuantity: prevCache['my-orders']?.totalQuantity || 0,
                 }
               }));
-              
+
               setGroupedOrdersHasMore(pagination.hasMore);
               setGroupedOrdersTotalCount(pagination.total);
               setGroupedOrdersPage(nextPage);
             }
-            
+
             return updatedOrders;
           });
         }
@@ -924,21 +924,21 @@ export function VendorDashboard() {
     } else {
       setIsLoadingMoreHandover(true);
     }
-    
+
     setHandoverOrdersError("");
-    
+
     try {
       const page = resetPagination ? 1 : handoverOrdersPage;
       const response = await apiClient.getHandoverOrders(page, 50);
-      
+
       if (response.success && response.data) {
         const newOrders = response.data.handoverOrders || [];
         const pagination = response.data.pagination;
         const nextPage = resetPagination ? 2 : handoverOrdersPage + 1;
-        
+
         if (resetPagination) {
           setHandoverOrders(newOrders);
-          
+
           // Update pagination metadata
           if (pagination) {
             setHandoverOrdersHasMore(pagination.hasMore);
@@ -946,7 +946,7 @@ export function VendorDashboard() {
             setHandoverOrdersTotalQuantity(pagination.totalQuantity || 0);
             setHandoverOrdersPage(nextPage);
           }
-          
+
           // Store in cache
           setTabDataCache(prev => ({
             ...prev,
@@ -958,20 +958,20 @@ export function VendorDashboard() {
               totalQuantity: pagination?.totalQuantity || 0,
             }
           }));
-          
+
           // Mark tab as loaded
           setLoadedTabs(prev => new Set(prev).add('handover'));
         } else {
           // Append orders for infinite scroll
           setHandoverOrders(prev => {
             const updatedOrders = [...prev, ...newOrders];
-            
+
             // Update cache with appended orders
             const summary = response.data.summary;
             if (summary || response.data.pagination) {
               const totalCount = summary?.total_orders || response.data.pagination?.total || 0;
               const totalQuantity = summary?.total_quantity || 0;
-              
+
               setTabDataCache(prevCache => ({
                 ...prevCache,
                 'handover': {
@@ -982,7 +982,7 @@ export function VendorDashboard() {
                   totalQuantity: totalQuantity,
                 }
               }));
-              
+
               setHandoverOrdersHasMore(response.data.pagination?.has_next || false);
               if (summary?.total_orders !== undefined) {
                 setHandoverOrdersTotalCount(summary.total_orders);
@@ -992,7 +992,7 @@ export function VendorDashboard() {
               }
               setHandoverOrdersPage(nextPage);
             }
-            
+
             return updatedOrders;
           });
         }
@@ -1016,26 +1016,26 @@ export function VendorDashboard() {
       setIsLoadingMoreTracking(true);
     }
     setTrackingOrdersError("");
-    
+
     try {
       const pageToFetch = resetPagination ? 1 : trackingOrdersPage;
       const response = await apiClient.getOrderTrackingOrders(pageToFetch, 50);
-      
+
       if (response.success && response.data) {
         const newOrders = response.data.trackingOrders || [];
-        
+
         const pagination = response.data.pagination;
         const nextPage = resetPagination ? 2 : trackingOrdersPage + 1;
-        
+
         if (resetPagination) {
           setTrackingOrders(newOrders);
-          
+
           // Update pagination metadata
           if (pagination) {
             setTrackingOrdersHasMore(pagination.hasMore || false);
             setTrackingOrdersTotalCount(pagination.total || 0);
             setTrackingOrdersPage(nextPage);
-            
+
             // Update loading progress
             setLoadingProgress(prev => ({
               ...prev,
@@ -1046,7 +1046,7 @@ export function VendorDashboard() {
               }
             }));
           }
-          
+
           // Store in cache
           setTabDataCache(prev => ({
             ...prev,
@@ -1057,18 +1057,18 @@ export function VendorDashboard() {
               totalCount: pagination?.total || 0,
             }
           }));
-          
+
           // Mark tab as loaded
           setLoadedTabs(prev => new Set(prev).add('order-tracking'));
         } else {
           // Append orders for infinite scroll
           setTrackingOrders(prev => {
             const updatedOrders = [...prev, ...newOrders];
-            
+
             // Update cache with appended orders
             if (pagination) {
               const currentLoaded = updatedOrders.length;
-              
+
               setTabDataCache(prevCache => ({
                 ...prevCache,
                 'order-tracking': {
@@ -1078,10 +1078,10 @@ export function VendorDashboard() {
                   totalCount: pagination.total || 0,
                 }
               }));
-              
+
               setTrackingOrdersHasMore(pagination.hasMore || false);
               setTrackingOrdersTotalCount(pagination.total || 0);
-              
+
               // Update loading progress
               setLoadingProgress(prevProgress => ({
                 ...prevProgress,
@@ -1091,15 +1091,15 @@ export function VendorDashboard() {
                   isLoading: false
                 }
               }));
-              
+
               setTrackingOrdersPage(nextPage);
             }
-            
+
             return updatedOrders;
           });
         }
-        
-        
+
+
         // Update summary data (for backward compatibility)
         if (response.data.summary) {
           if (response.data.summary.total_orders !== undefined) {
@@ -1138,24 +1138,24 @@ export function VendorDashboard() {
   // Lazy loading: Load active tab data (runs in parallel with dashboard stats)
   useEffect(() => {
     if (user?.role !== "vendor") return;
-    
+
     // PARALLEL LOADING: Load tab data immediately, don't wait for dashboard stats
     // Both dashboard stats and orders will load in parallel for faster initial load
     console.log("🚀 Starting tab data load (in parallel with dashboard stats)...");
-    
+
     // Check if tab is already loaded (cached)
     const isTabLoaded = loadedTabs.has(activeTab);
     const cachedData = tabDataCache[activeTab as keyof typeof tabDataCache];
-    
+
     if (!isTabLoaded || !cachedData) {
       // Tab not loaded yet - fetch data
       setLoadingProgress(prev => ({
         ...prev,
         [activeTab]: { loaded: 0, total: 0, isLoading: true }
       }));
-      
+
       // Load tab data based on active tab
-      switch(activeTab) {
+      switch (activeTab) {
         case "all-orders":
           fetchOrders(true);
           break;
@@ -1169,15 +1169,15 @@ export function VendorDashboard() {
           fetchOrderTrackingOrders(true);
           break;
       }
-      
+
       // Mark tab as loaded (will be set after data loads)
       // Don't set it here - wait for fetch to complete
     } else {
       // Tab is cached - restore data immediately (synchronously before any async operations)
       console.log(`🔄 Restoring cached data for tab: ${activeTab}`);
-      
+
       // Restore cache synchronously to prevent any "0" flash
-      switch(activeTab) {
+      switch (activeTab) {
         case "all-orders":
           const allOrdersCache = cachedData as typeof tabDataCache['all-orders'];
           if (allOrdersCache) {
@@ -1227,11 +1227,11 @@ export function VendorDashboard() {
           }
           break;
       }
-      
+
       // Then refresh in background to check for new orders
       const refreshTab = async () => {
         try {
-          switch(activeTab) {
+          switch (activeTab) {
             case "all-orders":
               // Fetch page 1 to check for new orders
               const ordersResponse = await apiClient.getOrders(1, 50, 'unclaimed');
@@ -1242,7 +1242,7 @@ export function VendorDashboard() {
                   // Compare with cache to detect new orders
                   const existingIds = new Set(currentCache.orders.map(o => o.unique_id));
                   const newOrderIds = newOrders.filter(o => !existingIds.has(o.unique_id));
-                  
+
                   if (newOrderIds.length > 0 || ordersResponse.data.pagination) {
                     // Update cache with fresh data (silent update - no loading states)
                     const updatedCache = {
@@ -1253,7 +1253,7 @@ export function VendorDashboard() {
                       totalQuantity: ordersResponse.data.pagination?.totalQuantity || 0,
                     };
                     setTabDataCache(prev => ({ ...prev, 'all-orders': updatedCache }));
-                    
+
                     // Update active state ONLY if this tab is still active (silent update)
                     // This happens in background, so no "0" flash
                     if (activeTab === 'all-orders') {
@@ -1269,7 +1269,7 @@ export function VendorDashboard() {
                       setAllOrdersHasMore(updatedCache.hasMore);
                       setAllOrdersTotalCount(updatedCache.totalCount);
                       setAllOrdersTotalQuantity(updatedCache.totalQuantity);
-                      
+
                       // Only show toast for new orders (not for every refresh)
                       if (newOrderIds.length > 0) {
                         toast({
@@ -1353,7 +1353,7 @@ export function VendorDashboard() {
           console.error('Error refreshing tab:', error);
         }
       };
-      
+
       // Refresh in background (don't block UI)
       refreshTab();
     }
@@ -1438,13 +1438,13 @@ export function VendorDashboard() {
         if (response.success && response.data) {
           const newLastUpdated = response.data.lastUpdated;
           const currentLastUpdated = lastUpdatedRef.current; // Use ref to get latest value
-          
+
           // Debug logging
           if (currentLastUpdated !== null && newLastUpdated !== currentLastUpdated) {
             console.log('🔄 Orders updated by another vendor, refreshing...');
             console.log('  - Old timestamp:', currentLastUpdated);
             console.log('  - New timestamp:', newLastUpdated);
-            
+
             // Refresh orders (only if dashboard stats are loaded - don't load before cards show)
             if (dashboardStats) {
               const ordersResponse = await apiClient.getOrders(1, 50, 'unclaimed');
@@ -1458,7 +1458,7 @@ export function VendorDashboard() {
             } else {
               console.log('⏳ Skipping order refresh - waiting for dashboard stats to load first');
             }
-            
+
             // Update both state and ref
             setLastUpdated(newLastUpdated);
             lastUpdatedRef.current = newLastUpdated;
@@ -1481,12 +1481,12 @@ export function VendorDashboard() {
       if (interval) {
         clearInterval(interval);
       }
-      
+
       // Only start polling if tab is visible
       if (!document.hidden) {
         // Poll immediately on visibility
         pollForUpdates();
-        
+
         // Then poll every 15 seconds
         interval = setInterval(pollForUpdates, 10000);
       }
@@ -1533,7 +1533,7 @@ export function VendorDashboard() {
 
     window.addEventListener('focus', handleFocus);
     window.addEventListener('blur', handleBlur);
-    
+
     return () => {
       stopPolling();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -1546,34 +1546,34 @@ export function VendorDashboard() {
     console.log('🔵 FRONTEND: Starting claim process');
     console.log('  - unique_id:', unique_id);
     console.log('  - vendorToken from localStorage:', localStorage.getItem('vendorToken')?.substring(0, 8) + '...');
-    
+
     try {
       console.log('📤 FRONTEND: Calling apiClient.claimOrder...');
       const response = await apiClient.claimOrder(unique_id);
-      
+
       console.log('📥 FRONTEND: Response received');
       console.log('  - success:', response.success);
       console.log('  - message:', response.message);
       console.log('  - data:', response.data);
-      
+
       if (response.success && response.data) {
         console.log('✅ FRONTEND: Claim successful, updating UI');
-        
+
         // Update the order in the orders array with the new data
         setOrders((prevOrders) =>
           prevOrders.map((order) =>
             order.unique_id === unique_id ? { ...order, ...response.data } : order
           )
         );
-        
+
         // Show success message with order_id
         const claimedOrderId = response.data.order_id || unique_id;
         toast({
           title: 'Order Claimed',
           description: `Claimed order id ${claimedOrderId}`,
         });
-        
-                // Refresh orders to ensure tabs are updated correctly
+
+        // Refresh orders to ensure tabs are updated correctly
         console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
         try {
           await refreshOrders();
@@ -1581,7 +1581,7 @@ export function VendorDashboard() {
         } catch (refreshError) {
           console.log('⚠️ FRONTEND: Failed to refresh orders, but claim was successful');
         }
-        
+
         // Refresh dashboard stats to update card and tab counts
         console.log('🔄 FRONTEND: Refreshing dashboard stats to update card counts...');
         try {
@@ -1590,7 +1590,7 @@ export function VendorDashboard() {
         } catch (statsError) {
           console.log('⚠️ FRONTEND: Failed to refresh dashboard stats, but claim was successful');
         }
-        
+
       } else {
         console.log('❌ FRONTEND: Claim failed');
         console.log('  - Error message:', response.message);
@@ -1605,7 +1605,7 @@ export function VendorDashboard() {
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
       console.log('  - Error stack:', err.stack);
-      
+
       toast({
         title: 'Claim Failed',
         description: err.message || 'Network error occurred',
@@ -1666,7 +1666,7 @@ export function VendorDashboard() {
     const manifestKey = manifestIds.join(',');
     try {
       setManifestDownloadLoading(manifestKey);
-      
+
       const vendorToken = localStorage.getItem('vendorToken');
       if (!vendorToken) {
         console.error('No vendor token found');
@@ -1728,10 +1728,10 @@ export function VendorDashboard() {
     try {
       // Get filtered orders for handover tab
       const handoverOrders = getFilteredHandoverOrders();
-      
+
       // Extract unique manifest_ids from selected orders
       const uniqueManifestIds = new Set<string>();
-      
+
       selectedHandoverOrders.forEach(orderId => {
         const order = handoverOrders.find((o: any) => o.order_id === orderId);
         if (order && order.manifest_id) {
@@ -1751,13 +1751,13 @@ export function VendorDashboard() {
       }
 
       console.log('📥 Bulk downloading manifests:', manifestIdsArray);
-      
+
       // Download all manifests in single PDF
       await downloadManifestSummary(manifestIdsArray);
-      
+
       // Clear selection after successful download
       setSelectedHandoverOrders([]);
-      
+
     } catch (error) {
       console.error('Bulk manifest download error:', error);
       toast({
@@ -1807,7 +1807,7 @@ export function VendorDashboard() {
           title: "Orders Marked Ready",
           description: `Successfully marked ${data.data.total_successful} out of ${data.data.total_requested} orders as ready for handover`,
         });
-        
+
         // Show details if some orders failed
         if (data.data.total_failed > 0) {
           toast({
@@ -1817,22 +1817,22 @@ export function VendorDashboard() {
           });
           console.log('Failed orders:', data.data.failed_orders);
         }
-        
+
         // Auto-download manifest summary PDF
         if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
           console.log('📥 Auto-downloading manifest summary PDF...', data.data.manifest_ids);
           await downloadManifestSummary(data.data.manifest_ids);
         }
-        
+
         // Clear selection and refresh orders
         setSelectedMyOrders([]);
-        
+
         // Highlight Handover tab to show the change
         highlightTab("handover");
 
         fetchGroupedOrders();
         fetchHandoverOrders();
-        
+
         // Refresh dashboard stats to update card and tab counts
         console.log('🔄 FRONTEND: Refreshing dashboard stats after bulk marking orders as ready...');
         try {
@@ -1941,21 +1941,116 @@ export function VendorDashboard() {
   }
 
   // Maps shipment status to colored badge classes per UI requirement
+  // Includes mapping for enhanced Shipway API statuses
   const getShipmentBadgeClasses = (status?: string) => {
-    const s = (status || '').toLowerCase();
-    if (s === 'in transit' || s === 'in_transit' || s.includes('transit')) {
+    const s = (status || '').toLowerCase().trim();
+
+    // Blue statuses - Shipment Booked
+    if (s === 'awb_assigned' || s === 'shipment booked' || s === 'shipment_booked') {
+      return 'text-blue-800 bg-blue-100 border border-blue-200';
+    }
+
+    // Orange statuses - In Transit variants
+    if (s === 'in transit' || s === 'in_transit' || s === 'int' ||
+      s === 'reached_at_destination_hub' || s === 'rto_in_transit' || s === 'rto in transit') {
       return 'text-orange-800 bg-orange-100 border border-orange-200';
     }
-    if (s === 'out for delivery' || s === 'out_for_delivery') {
+
+    // Yellow statuses - Out for Delivery / Delivery Attempted / Reattempt
+    if (s === 'out for delivery' || s === 'out_for_delivery' ||
+      s === 'crov' || s === 'delivery attempted' ||
+      s === 'shndr4' || s === 'delivery reattempt') {
       return 'text-yellow-800 bg-yellow-100 border border-yellow-200';
     }
-    if (s === 'delivered') {
+
+    // Green statuses - Delivered / RTO Delivered
+    if (s === 'del' || s === 'delivered' ||
+      s === 'rtd' || s === 'rto delivered' || s === 'rto_delivered') {
       return 'text-green-800 bg-green-100 border border-green-200';
     }
-    if (s === 'pickup failed' || s === 'failed pickup' || s === 'failed delivery') {
+
+    // Red statuses - Failed / RTO / Refused / Unavailable / Undelivered
+    if (s === 'pickup failed' || s === 'pickup_failed' || s === 'shpfr3' ||
+      s === 'rto' || s === 'rto_initiated' || s === 'rto initiated' ||
+      s === 'shndr16' || s === 'consignee unavailable' ||
+      s === 'shndr6' || s === 'consignee refused' ||
+      s === 'undelivered') {
       return 'text-red-800 bg-red-100 border border-red-200';
     }
+
+    // Maroon statuses - RTO Undelivered / RTO Lost
+    if (s === 'rto undelivered' || s === 'rto_undelivered' ||
+      s === 'rtondr5' || s === 'rtound' || s === 'rto lost' || s === 'rto_lost') {
+      return 'text-[#800000] bg-[#ffe4e6] border border-[#fecdd3]'; // Maroon
+    }
+
+    // Default - Blue
     return 'text-blue-800 bg-blue-100 border border-blue-200';
+  }
+
+  // Maps raw Shipway status to user-friendly display name
+  const getShipmentDisplayName = (status?: string): string => {
+    if (!status) return 'Unknown';
+
+    const s = status.toLowerCase().trim();
+
+    const statusDisplayMap: Record<string, string> = {
+      // Shipment Booked
+      'awb_assigned': 'Shipment Booked',
+      'shipment booked': 'Shipment Booked',
+      'shipment_booked': 'Shipment Booked',
+
+      // Delivery Attempted
+      'crov': 'Delivery Attempted',
+
+      // Delivered
+      'del': 'Delivered',
+      'delivered': 'Delivered',
+
+      // In Transit
+      'in transit': 'In Transit',
+      'in_transit': 'In Transit',
+      'int': 'In Transit',
+      'reached_at_destination_hub': 'In Transit',
+
+      // Out for Delivery
+      'out for delivery': 'Out for Delivery',
+      'out_for_delivery': 'Out for Delivery',
+
+      // Pickup Failed
+      'pickup failed': 'Pickup Failed',
+      'pickup_failed': 'Pickup Failed',
+      'shpfr3': 'Pickup Failed',
+
+      // RTO variants
+      'rtd': 'RTO Delivered',
+      'rto': 'RTO',
+      'rto delivered': 'RTO Delivered',
+      'rto_delivered': 'RTO Delivered',
+      'rto undelivered': 'RTO Undelivered',
+      'rto_undelivered': 'RTO Undelivered',
+      'rto_in_transit': 'RTO In Transit',
+      'rto in transit': 'RTO In Transit',
+      'rto_initiated': 'RTO Initiated',
+      'rto initiated': 'RTO Initiated',
+      'rtondr5': 'RTO Lost',
+      'rtound': 'RTO Lost',
+      'rto lost': 'RTO Lost',
+      'rto_lost': 'RTO Lost',
+
+      // NDR statuses
+      'shndr16': 'Consignee Unavailable',
+      'consignee unavailable': 'Consignee Unavailable',
+      'shndr4': 'Delivery Reattempt',
+      'delivery reattempt': 'Delivery Reattempt',
+      'shndr6': 'Consignee Refused',
+      'consignee refused': 'Consignee Refused',
+
+      // Undelivered
+      'undelivered': 'Undelivered',
+    };
+
+    return statusDisplayMap[s] || status; // Return mapped name or original if not found
   }
 
   const getPriorityBadge = (priority: string) => {
@@ -1971,12 +2066,12 @@ export function VendorDashboard() {
 
   // Helper functions to get current tab's filters
   const getCurrentTabFilters = () => tabFilters[activeTab as keyof typeof tabFilters];
-  
+
   const updateCurrentTabFilter = (filterName: string, value: any) => {
     setTabFilters(prev => {
       const currentTabFilters = prev[activeTab as keyof typeof prev];
       let updatedFilters = { ...currentTabFilters, [filterName]: value };
-      
+
       // Date validation logic
       if (filterName === 'dateFrom' && value) {
         // If setting from date and to date exists, ensure from date is not after to date
@@ -2000,14 +2095,14 @@ export function VendorDashboard() {
           // Defer toast to avoid render cycle issue
           setTimeout(() => {
             toast({
-              title: "Date Range Adjusted", 
+              title: "Date Range Adjusted",
               description: "From date was cleared because it was after the selected to date",
               variant: "default",
             });
           }, 0);
         }
       }
-      
+
       return {
         ...prev,
         [activeTab]: updatedFilters
@@ -2020,7 +2115,7 @@ export function VendorDashboard() {
     const seen = new Set();
     const uniqueOrders = [];
     const duplicates = [];
-    
+
     for (const order of orders) {
       const key = order[keyField];
       if (seen.has(key)) {
@@ -2031,11 +2126,11 @@ export function VendorDashboard() {
         uniqueOrders.push(order);
       }
     }
-    
+
     if (duplicates.length > 0) {
       console.warn(`Found ${duplicates.length} duplicate orders with ${keyField}:`, duplicates);
     }
-    
+
     return uniqueOrders;
   };
 
@@ -2044,7 +2139,7 @@ export function VendorDashboard() {
     if (tab === "my-orders") {
       return getFilteredGroupedOrdersForTab(tab);
     }
-    
+
     // Use cached data if available to prevent "0" flash when switching tabs
     let baseOrders = orders;
     if (tab === "all-orders" && tabDataCache['all-orders']) {
@@ -2054,12 +2149,12 @@ export function VendorDashboard() {
         baseOrders = cachedOrders;
       }
     }
-    
+
     const tabFilter = tabFilters[tab as keyof typeof tabFilters];
-    
+
     // Get current vendor's warehouseId
     const currentVendorId = user?.warehouseId;
-    
+
     switch (tab) {
       case "all-orders":
         // Show only unclaimed orders (filter cached or current orders)
@@ -2068,19 +2163,19 @@ export function VendorDashboard() {
       case "handover":
         // Show orders ready for handover by current vendor with is_manifest = 1
         // Use claims_status for filtering since the main status now shows enhanced status
-        let handoverOrders = orders.filter(order => 
-          order.claims_status === 'ready_for_handover' && 
+        let handoverOrders = orders.filter(order =>
+          order.claims_status === 'ready_for_handover' &&
           order.claimed_by === currentVendorId &&
           order.is_manifest === 1
         );
-        
+
         // Apply status filter if any statuses are selected
         if (selectedStatuses.length > 0) {
-          handoverOrders = handoverOrders.filter(order => 
+          handoverOrders = handoverOrders.filter(order =>
             selectedStatuses.includes(order.status)
           );
         }
-        
+
         // Group orders by order_id for handover tab
         const handoverGrouped = handoverOrders.reduce((acc: any, order) => {
           const orderId = order.order_id;
@@ -2103,21 +2198,21 @@ export function VendorDashboard() {
           acc[orderId].total_quantity += order.quantity || 0;
           return acc;
         }, {});
-        
+
         baseOrders = Object.values(handoverGrouped);
         break;
       case "my-orders":
         // For My Orders, use groupedOrders directly and apply label download filter
         let filteredGroupedOrders = [...groupedOrders];
-        
+
         // Debug: Log the first order to see data structure
         if (groupedOrders.length > 0) {
           console.log('🔍 First Order Data Structure:', groupedOrders[0]);
         }
-        
+
         // Apply label download filter to grouped orders
         if (selectedLabelFilter === 'downloaded') {
-          filteredGroupedOrders = groupedOrders.filter(order => 
+          filteredGroupedOrders = groupedOrders.filter(order =>
             order.label_downloaded === 1
           );
           console.log('🔍 Label Downloaded Filter:', {
@@ -2126,7 +2221,7 @@ export function VendorDashboard() {
             selectedFilter: selectedLabelFilter
           });
         } else if (selectedLabelFilter === 'not_downloaded') {
-          filteredGroupedOrders = groupedOrders.filter(order => 
+          filteredGroupedOrders = groupedOrders.filter(order =>
             order.label_downloaded === 0
           );
           console.log('🔍 Label Not Downloaded Filter:', {
@@ -2135,20 +2230,20 @@ export function VendorDashboard() {
             selectedFilter: selectedLabelFilter
           });
         }
-        
+
         baseOrders = filteredGroupedOrders;
         break;
       default:
         baseOrders = orders;
     }
-    
+
     // Apply search filter across order id, product name, SKU, and customer name
     if (tabFilter.searchTerm.trim()) {
       const term = tabFilter.searchTerm.toLowerCase();
       baseOrders = baseOrders.filter(order => {
         const orderId = String(order.order_id || order.id || '').toLowerCase();
         const customer = String(order.customer_name || order.customer || '').toLowerCase();
-        
+
         // For grouped orders (handover tab), search through products array
         if (Array.isArray(order.products) && order.products.length > 0) {
           const productMatch = order.products.some((product: any) => {
@@ -2158,7 +2253,7 @@ export function VendorDashboard() {
           });
           return orderId.includes(term) || customer.includes(term) || productMatch;
         }
-        
+
         // For individual orders (all-orders tab), search direct fields
         const productName = String(order.product_name || order.product || '').toLowerCase();
         const sku = String(order.product_code || order.sku || '').toLowerCase();
@@ -2170,19 +2265,19 @@ export function VendorDashboard() {
         );
       });
     }
-    
+
     // Apply date range filter
     if (tabFilter.dateFrom && tabFilter.dateTo) {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date || order.created_at || order.date;
         if (!orderDate) return true; // Show orders without dates if no date filter
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const fromDateObj = new Date(tabFilter.dateFrom!);
           const toDateObj = new Date(tabFilter.dateTo!);
           toDateObj.setHours(23, 59, 59, 999); // Include the entire end date
-          
+
           return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
         } catch (error) {
           return true; // Show orders with invalid dates
@@ -2192,7 +2287,7 @@ export function VendorDashboard() {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date || order.created_at || order.date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const fromDateObj = new Date(tabFilter.dateFrom!);
@@ -2205,7 +2300,7 @@ export function VendorDashboard() {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date || order.created_at || order.date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const toDateObj = new Date(tabFilter.dateTo!);
@@ -2216,7 +2311,7 @@ export function VendorDashboard() {
         }
       });
     }
-    
+
     // Ensure unique orders before returning
     // Use 'order_id' for handover tab (grouped orders) and 'unique_id' for all-orders tab (individual orders)
     const deduplicationKey = tab === "handover" ? 'order_id' : 'unique_id';
@@ -2227,14 +2322,14 @@ export function VendorDashboard() {
   const getFilteredHandoverOrders = () => {
     let filtered = [...handoverOrders];
     const tabFilter = tabFilters["handover"];
-    
+
     // Apply status filter if any statuses are selected
     if (selectedStatuses.length > 0) {
-      filtered = filtered.filter(order => 
+      filtered = filtered.filter(order =>
         selectedStatuses.includes(order.current_shipment_status || order.status)
       );
     }
-    
+
     // Apply search filter
     if (tabFilter.searchTerm.trim()) {
       const term = tabFilter.searchTerm.toLowerCase();
@@ -2243,7 +2338,7 @@ export function VendorDashboard() {
         const customer = String(order.customer_name || '').toLowerCase();
         const manifestId = String(order.manifest_id || '').toLowerCase();
         const awb = String(order.products?.[0]?.awb || '').toLowerCase();
-        
+
         // Search through products array
         if (Array.isArray(order.products) && order.products.length > 0) {
           const productMatch = order.products.some((product: any) => {
@@ -2256,19 +2351,19 @@ export function VendorDashboard() {
         return orderId.includes(term) || customer.includes(term) || manifestId.includes(term) || awb.includes(term);
       });
     }
-    
+
     // Apply date range filter
     if (tabFilter.dateFrom && tabFilter.dateTo) {
       filtered = filtered.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const fromDateObj = new Date(tabFilter.dateFrom!);
           const toDateObj = new Date(tabFilter.dateTo!);
           toDateObj.setHours(23, 59, 59, 999);
-          
+
           return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
         } catch (error) {
           return true;
@@ -2278,7 +2373,7 @@ export function VendorDashboard() {
       filtered = filtered.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const fromDateObj = new Date(tabFilter.dateFrom!);
@@ -2291,7 +2386,7 @@ export function VendorDashboard() {
       filtered = filtered.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const toDateObj = new Date(tabFilter.dateTo!);
@@ -2302,7 +2397,7 @@ export function VendorDashboard() {
         }
       });
     }
-    
+
     return filtered;
   };
 
@@ -2310,21 +2405,21 @@ export function VendorDashboard() {
   const getFilteredTrackingOrders = () => {
     let filtered = [...trackingOrders];
     const tabFilter = tabFilters["order-tracking"];
-    
+
     // Apply status filter if any statuses are selected
     if (selectedTrackingStatuses.length > 0) {
-      filtered = filtered.filter(order => 
+      filtered = filtered.filter(order =>
         selectedTrackingStatuses.includes(order.current_shipment_status || order.status)
       );
     }
-    
+
     // Apply search filter
     if (tabFilter.searchTerm.trim()) {
       const term = tabFilter.searchTerm.toLowerCase();
       filtered = filtered.filter(order => {
         const orderId = String(order.order_id || '').toLowerCase();
         const awb = String(order.products?.[0]?.awb || '').toLowerCase();
-        
+
         // Search through products array
         if (Array.isArray(order.products) && order.products.length > 0) {
           const productMatch = order.products.some((product: any) => {
@@ -2337,19 +2432,19 @@ export function VendorDashboard() {
         return orderId.includes(term) || awb.includes(term);
       });
     }
-    
+
     // Apply date range filter
     if (tabFilter.dateFrom && tabFilter.dateTo) {
       filtered = filtered.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const fromDateObj = new Date(tabFilter.dateFrom!);
           const toDateObj = new Date(tabFilter.dateTo!);
           toDateObj.setHours(23, 59, 59, 999);
-          
+
           return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
         } catch (error) {
           return true;
@@ -2359,7 +2454,7 @@ export function VendorDashboard() {
       filtered = filtered.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const fromDateObj = new Date(tabFilter.dateFrom!);
@@ -2372,7 +2467,7 @@ export function VendorDashboard() {
       filtered = filtered.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const toDateObj = new Date(tabFilter.dateTo!);
@@ -2383,7 +2478,7 @@ export function VendorDashboard() {
         }
       });
     }
-    
+
     return filtered;
   };
 
@@ -2414,20 +2509,20 @@ export function VendorDashboard() {
   const getFilteredGroupedOrdersForTab = (tab: string, useAllOrders: boolean = false) => {
     let baseOrders = useAllOrders && allGroupedOrders.length > 0 ? allGroupedOrders : groupedOrders;
     const tabFilter = tabFilters[tab as keyof typeof tabFilters];
-    
+
     // Apply label download filter for my orders tab
     if (tab === "my-orders" && selectedLabelFilter !== 'all') {
       if (selectedLabelFilter === 'downloaded') {
-        baseOrders = baseOrders.filter(order => 
+        baseOrders = baseOrders.filter(order =>
           order.label_downloaded === 1
         );
       } else if (selectedLabelFilter === 'not_downloaded') {
-        baseOrders = baseOrders.filter(order => 
+        baseOrders = baseOrders.filter(order =>
           order.label_downloaded === 0
         );
       }
     }
-    
+
     // Apply search filter (search across order id, customer, and all products in each order)
     if (tabFilter.searchTerm.trim()) {
       const term = tabFilter.searchTerm.toLowerCase();
@@ -2442,19 +2537,19 @@ export function VendorDashboard() {
         return orderId.includes(term) || customer.includes(term) || productMatch;
       });
     }
-    
+
     // Apply date range filter
     if (tabFilter.dateFrom && tabFilter.dateTo) {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const fromDateObj = new Date(tabFilter.dateFrom!);
           const toDateObj = new Date(tabFilter.dateTo!);
           toDateObj.setHours(23, 59, 59, 999);
-          
+
           return orderDateObj >= fromDateObj && orderDateObj <= toDateObj;
         } catch (error) {
           return true;
@@ -2464,7 +2559,7 @@ export function VendorDashboard() {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const fromDateObj = new Date(tabFilter.dateFrom!);
@@ -2477,7 +2572,7 @@ export function VendorDashboard() {
       baseOrders = baseOrders.filter(order => {
         const orderDate = order.order_date;
         if (!orderDate) return true;
-        
+
         try {
           const orderDateObj = new Date(orderDate);
           const toDateObj = new Date(tabFilter.dateTo!);
@@ -2488,7 +2583,7 @@ export function VendorDashboard() {
         }
       });
     }
-    
+
     // Ensure unique orders before returning
     return ensureUniqueOrders(baseOrders, 'order_id');
   }
@@ -2560,11 +2655,11 @@ export function VendorDashboard() {
   const isUnclaimDisabled = (order: any): boolean => {
     // Disable if order is handed over (is_handover = 1)
     const isHandedOver = order.is_handover === 1 || order.is_handover === '1' || order.is_handover === true;
-    
+
     // Disable if status is "Out for Pickup"
-    const isOutForPickup = order.current_shipment_status && 
+    const isOutForPickup = order.current_shipment_status &&
       String(order.current_shipment_status).toLowerCase() === 'out for pickup';
-    
+
     return isHandedOver || isOutForPickup;
   };
 
@@ -2572,39 +2667,39 @@ export function VendorDashboard() {
     console.log('🔵 FRONTEND: Starting reverse process');
     console.log('  - orderId:', orderId);
     console.log('  - uniqueIds:', uniqueIds);
-    
+
     // Set loading state for this order
     setReverseLoading(prev => ({ ...prev, [orderId]: true }));
-    
+
     try {
       // If uniqueIds are provided (for grouped orders), use the grouped reverse endpoint
       if (uniqueIds && uniqueIds.length > 0) {
         console.log('🔄 FRONTEND: Reversing grouped order with shared AWB');
         console.log('  - Order ID:', orderId);
         console.log('  - Product count:', uniqueIds.length);
-        
+
         try {
           console.log('📤 FRONTEND: Calling apiClient.reverseGroupedOrder...');
           const response = await apiClient.reverseGroupedOrder(orderId, uniqueIds);
-          
+
           console.log('📥 FRONTEND: Grouped reverse response received');
           console.log('  - success:', response.success);
           console.log('  - message:', response.message);
           console.log('  - data:', response.data);
-          
+
           if (response.success && response.data) {
             console.log('✅ FRONTEND: Grouped reverse successful');
             console.log('  - Products processed:', response.data.products_processed);
             console.log('  - Skipped products:', response.data.skipped_products);
             console.log('  - Total requested:', response.data.total_requested);
-            
+
             // Show success message with details about skipped products
             let description = response.message || `Successfully unclaimed ${response.data.products_processed} product${response.data.products_processed > 1 ? 's' : ''} in order ${orderId}`;
-            
+
             if (response.data.skipped_products > 0) {
               description += ` (${response.data.skipped_products} products were claimed by other vendors and were not affected)`;
             }
-            
+
             toast({
               title: 'Order Unclaimed',
               description: description,
@@ -2627,20 +2722,20 @@ export function VendorDashboard() {
             variant: 'destructive',
           });
         }
-        
+
       } else {
         // Single order reverse (fallback)
         console.log('📤 FRONTEND: Calling apiClient.reverseOrder for single order...');
         const response = await apiClient.reverseOrder(orderId);
-        
+
         console.log('📥 FRONTEND: Reverse response received');
         console.log('  - success:', response.success);
         console.log('  - message:', response.message);
         console.log('  - data:', response.data);
-        
+
         if (response.success && response.data) {
           console.log('✅ FRONTEND: Reverse successful, updating UI');
-          
+
           // Show success message
           toast({
             title: 'Order Unclaimed',
@@ -2656,7 +2751,7 @@ export function VendorDashboard() {
           });
         }
       }
-      
+
       // Refresh orders to ensure tabs are updated correctly
       console.log('🔄 FRONTEND: Refreshing orders to update tab filtering...');
       try {
@@ -2665,13 +2760,13 @@ export function VendorDashboard() {
       } catch (refreshError) {
         console.log('⚠️ FRONTEND: Failed to refresh orders, but reverse was successful');
       }
-      
+
     } catch (err: any) {
       console.log('💥 FRONTEND: Exception occurred');
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
       console.log('  - Error stack:', err.stack);
-      
+
       toast({
         title: 'Unclaim Failed',
         description: err.message || 'Network error occurred',
@@ -2689,39 +2784,39 @@ export function VendorDashboard() {
     // Check for iPhone, iPad, or iPod
     const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
     // Also check for iPad on iOS 13+ (which reports as Mac)
-    const isIPadOS13 = /Macintosh/i.test(userAgent) && 
-                       navigator.maxTouchPoints && 
-                       navigator.maxTouchPoints > 1;
+    const isIPadOS13 = /Macintosh/i.test(userAgent) &&
+      navigator.maxTouchPoints &&
+      navigator.maxTouchPoints > 1;
     return isIOS || isIPadOS13;
   };
 
   // Helper function to download file with iOS compatibility
   const downloadFile = async (url: string, filename: string): Promise<void> => {
     const isIOS = isIOSDevice();
-    
+
     if (isIOS) {
       // iOS: Use same approach as Android (link.click() with download attribute)
       // Match Android's working implementation exactly
       console.log('🍎 iOS detected: Using link.click() with download attribute (matching Android logic)');
-      
+
       // Create anchor element (same as Android)
       const link = document.createElement('a');
       link.href = url; // Blob URL
       link.download = filename; // ✅ CRITICAL: Set download attribute (same as Android)
       // NO target='_blank' - let download attribute handle it (same as Android)
-      
+
       // Append to DOM (required for iOS to recognize the element)
       document.body.appendChild(link);
-      
+
       // Programmatically click (same as Android)
       link.click();
-      
+
       // Remove from DOM immediately after click (same as Android)
       document.body.removeChild(link);
-      
+
       // Clean up blob URL immediately (same as Android)
       window.URL.revokeObjectURL(url);
-      
+
       // Refocus main window to keep it active (iOS-specific addition for polling)
       setTimeout(() => {
         window.focus(); // Bring focus back to main tab to keep polling active
@@ -2743,7 +2838,7 @@ export function VendorDashboard() {
   const handleDownloadLabel = async (orderId: string, format: string) => {
     // Set loading state for this specific order
     setLabelDownloadLoading(prev => ({ ...prev, [orderId]: true }));
-    
+
     try {
       console.log('🔵 FRONTEND: Starting download label process');
       console.log('  - order_id:', orderId);
@@ -2758,26 +2853,26 @@ export function VendorDashboard() {
 
       // Call the download label API with format parameter
       const response = await apiClient.downloadLabel(orderId, format);
-      
+
       console.log('📥 FRONTEND: Download label response received');
       console.log('  - success:', response.success);
       console.log('  - data:', response.data);
-      
+
       if (response.success && response.data) {
         const { shipping_url, awb, original_order_id, clone_order_id, formatted_pdf, format: responseFormat } = response.data;
-        
+
         console.log('✅ FRONTEND: Label generated successfully');
         console.log('  - Shipping URL:', shipping_url);
         console.log('  - AWB:', awb);
         console.log('  - Format:', responseFormat);
         console.log('  - Has formatted PDF:', !!formatted_pdf);
-        
+
         // Handle different formats
         if (formatted_pdf && (responseFormat === 'a4' || responseFormat === 'four-in-one')) {
           // Handle A4 and four-in-one formats with base64 PDF
           try {
             console.log('🔄 FRONTEND: Processing formatted PDF...');
-            
+
             // Convert base64 to blob
             const binaryString = atob(formatted_pdf);
             const bytes = new Uint8Array(binaryString.length);
@@ -2785,37 +2880,37 @@ export function VendorDashboard() {
               bytes[i] = binaryString.charCodeAt(i);
             }
             const blob = new Blob([bytes], { type: 'application/pdf' });
-            
+
             // Create download URL
             const url = window.URL.createObjectURL(blob);
-            
+
             // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
             const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
             const vendorId = user?.warehouseId || 'unknown';
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`;
-            
+
             // Download using iOS-compatible method
             await downloadFile(url, filename);
-            
+
             console.log('✅ FRONTEND: Formatted PDF downloaded successfully');
-            
+
             // Show success message
             const orderDisplayId = clone_order_id || original_order_id || orderId;
             toast({
               title: "Label Downloaded",
               description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully`,
             });
-            
+
             // Refresh orders to update the UI (works immediately on iOS with iframe approach)
             await refreshOrders();
-            
+
           } catch (pdfError) {
             console.error('❌ FRONTEND: Formatted PDF download failed:', pdfError);
-            
+
             // Fallback: open original URL in new tab
             window.open(shipping_url, '_blank');
-            
+
             toast({
               title: "Label Generated",
               description: `Label generated successfully. Opening in new tab.`,
@@ -2825,50 +2920,50 @@ export function VendorDashboard() {
           // Handle thermal format (original behavior)
           try {
             const blob = await apiClient.downloadLabelFile(shipping_url);
-            
+
             // Create download URL
             const url = window.URL.createObjectURL(blob);
-            
+
             // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
             const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
             const vendorId = user?.warehouseId || 'unknown';
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
-            
+
             // Download using iOS-compatible method
             await downloadFile(url, filename);
-            
+
             console.log('✅ FRONTEND: Label file downloaded successfully');
-            
+
             // Show success message
             const orderDisplayId = clone_order_id || original_order_id || orderId;
             toast({
               title: "Label Downloaded",
               description: `${format} label for order ${orderDisplayId} downloaded successfully`,
             });
-            
+
             // Refresh orders to update the UI (works immediately on iOS with iframe approach)
             await refreshOrders();
-            
+
           } catch (downloadError) {
             console.error('❌ FRONTEND: Label file download failed:', downloadError);
-            
+
             // Fallback: open in new tab
             window.open(shipping_url, '_blank');
-            
+
             toast({
               title: "Label Generated",
               description: `Label generated successfully. Opening in new tab.`,
             });
           }
         }
-        
+
       } else {
         console.log('❌ FRONTEND: Download label failed');
         console.log('  - Error message:', response.message);
         console.log('  - Warning flag:', response.warning);
         console.log('  - User message:', response.userMessage);
-        
+
         // Show warning toast with yellowish color for non-blocking errors
         if (response.warning) {
           toast({
@@ -2884,7 +2979,7 @@ export function VendorDashboard() {
           });
         }
       }
-      
+
     } catch (error) {
       console.error('❌ FRONTEND: Download label error:', error);
       toast({
@@ -2930,14 +3025,14 @@ export function VendorDashboard() {
 
       // Step 1: Generate labels only (without merging)
       const generateResponse = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat, true);
-      
+
       console.log('📥 FRONTEND: Label generation response received');
       console.log('  - response:', generateResponse);
 
       // Check if response is ApiResponse (from generate_only call)
       if (generateResponse && 'success' in generateResponse && generateResponse.success) {
         const data = generateResponse.data;
-        
+
         // Show merge confirmation dialog
         setMergeDialogData({
           successful: data.successful || [],
@@ -2983,25 +3078,25 @@ export function VendorDashboard() {
 
       // Step 2: Call merge endpoint with selected format
       const blob = await apiClient.bulkDownloadLabelsMerge(mergeDialogData.successful, selectedMergeFormat);
-      
+
       console.log('📥 FRONTEND: PDF merge response received');
       console.log('  - blob size:', blob.size);
       console.log('  - blob type:', blob.type);
-      
+
       // Create download URL for the combined PDF
       const url = window.URL.createObjectURL(blob);
-      
+
       // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
       const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
       const vendorId = user?.warehouseId || 'unknown';
       const vendorCity = vendorAddress?.city || 'unknown';
       const filename = `${vendorId}_${vendorCity}_${currentDate}_${selectedMergeFormat}.pdf`;
-      
+
       // Download using iOS-compatible method
       await downloadFile(url, filename);
-      
+
       console.log('✅ FRONTEND: Bulk labels PDF merged and downloaded successfully');
-      
+
       // Show success toast
       if (mergeDialogData.totalFailed > 0) {
         toast({
@@ -3044,7 +3139,7 @@ export function VendorDashboard() {
       } else {
         setSelectedOrdersForDownload([])
       }
-      
+
     } catch (error) {
       console.error('❌ FRONTEND: PDF merge error:', error);
       toast({
@@ -3076,44 +3171,44 @@ export function VendorDashboard() {
     try {
       console.log('📤 FRONTEND: Calling apiClient.bulkClaimOrders...');
       const response = await apiClient.bulkClaimOrders(selectedUnclaimedOrders);
-      
+
       console.log('📥 FRONTEND: Bulk claim response received');
       console.log('  - success:', response.success);
       console.log('  - data:', response.data);
-      
+
       if (response.success && response.data) {
         const { successful_claims, failed_claims, total_successful, total_failed } = response.data;
-        
+
         console.log('✅ FRONTEND: Bulk claim successful');
         console.log('  - Successful:', total_successful);
         console.log('  - Failed:', total_failed);
-        
+
         // Show success message
         toast({
           title: "Bulk Claim Complete",
           description: `Successfully claimed ${total_successful} orders${total_failed > 0 ? `. ${total_failed} orders failed to claim.` : ''}`,
         });
-        
+
         // Clear selected orders
         setSelectedUnclaimedOrders([]);
-        
+
         // OPTIMIZATION: Update UI state directly instead of fetching all orders
         // Remove successfully claimed orders from "All Orders" tab
         if (successful_claims && successful_claims.length > 0) {
           const claimedUniqueIds = successful_claims.map((claim: any) => claim.unique_id);
-          
+
           console.log('🔍 FRONTEND: Verifying order statuses in database before removing from UI...');
           console.log('  - Unique IDs to verify:', claimedUniqueIds);
-          
+
           // STEP 1: Verify orders are actually marked as "claimed" in database
           try {
             const verifyResponse = await apiClient.verifyOrderStatuses(claimedUniqueIds);
-            
+
             if (verifyResponse.success && verifyResponse.data && verifyResponse.data.statuses) {
               const statuses = verifyResponse.data.statuses;
               const verifiedClaimedIds = new Set<string>();
               const notClaimedIds: string[] = [];
-              
+
               // STEP 2: Check each order's status and collect only verified "claimed" orders
               claimedUniqueIds.forEach((unique_id: string) => {
                 const orderStatus = statuses[unique_id];
@@ -3125,17 +3220,17 @@ export function VendorDashboard() {
                   console.log(`⚠️ Warning: ${unique_id} is NOT marked as "claimed" in database (status: ${orderStatus?.status || 'unknown'})`);
                 }
               });
-              
+
               if (notClaimedIds.length > 0) {
                 console.log(`⚠️ FRONTEND: ${notClaimedIds.length} orders were not verified as claimed - will NOT remove from UI`);
                 console.log('  - Not claimed unique_ids:', notClaimedIds);
               }
-              
+
               // STEP 3: Remove ONLY verified claimed orders from "All Orders" tab
               if (verifiedClaimedIds.size > 0) {
                 console.log('🔄 FRONTEND: Removing verified claimed orders from All Orders tab...');
                 console.log('  - Verified unique IDs to remove:', Array.from(verifiedClaimedIds));
-                
+
                 setOrders((prevOrders) => {
                   const filteredOrders = prevOrders.filter(
                     (order) => !verifiedClaimedIds.has(order.unique_id)
@@ -3157,7 +3252,7 @@ export function VendorDashboard() {
             // Don't remove orders if verification fails - keep UI in sync with actual DB state
           }
         }
-        
+
         // Refresh grouped orders for "My Orders" tab (this is fast - paginated)
         console.log('🔄 FRONTEND: Refreshing grouped orders for My Orders tab...');
         try {
@@ -3177,7 +3272,7 @@ export function VendorDashboard() {
         } catch (groupedError) {
           console.log('⚠️ FRONTEND: Failed to refresh grouped orders, but bulk claim was successful');
         }
-        
+
         // Refresh dashboard stats to update card and tab counts
         console.log('🔄 FRONTEND: Refreshing dashboard stats to update card counts...');
         try {
@@ -3186,10 +3281,10 @@ export function VendorDashboard() {
         } catch (statsError) {
           console.log('⚠️ FRONTEND: Failed to refresh dashboard stats, but bulk claim was successful');
         }
-        
+
         // Highlight My Orders tab to show the change
         highlightTab("my-orders");
-        
+
       } else {
         console.log('❌ FRONTEND: Bulk claim failed');
         console.log('  - Error message:', response.message);
@@ -3203,7 +3298,7 @@ export function VendorDashboard() {
       console.log('💥 FRONTEND: Exception occurred during bulk claim');
       console.log('  - Error:', err);
       console.log('  - Error message:', err.message);
-      
+
       toast({
         title: 'Bulk Claim Failed',
         description: err.message || 'Network error occurred',
@@ -3225,9 +3320,9 @@ export function VendorDashboard() {
   // Infinite scroll handler for all tabs
   const handleScroll = useCallback(() => {
     // Use window scrolling instead of container scrolling
-    const scrolledToBottom = 
+    const scrolledToBottom =
       window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200;
-    
+
     // Handle All Orders tab
     if (activeTab === 'all-orders') {
       // Check if filters are applied - if so, don't trigger infinite scroll (filtering is client-side)
@@ -3237,7 +3332,7 @@ export function VendorDashboard() {
         tabFilter.dateFrom ||
         tabFilter.dateTo
       );
-      
+
       // Only trigger infinite scroll if no filters are applied and we have more to load
       if (!hasFilters && scrolledToBottom && allOrdersHasMore && !ordersLoading && !isLoadingMoreAllOrders) {
         console.log('📜 Infinite scroll triggered - loading more All Orders...');
@@ -3262,19 +3357,19 @@ export function VendorDashboard() {
         });
       }
     }
-    
+
     // Handle My Orders tab
     if (activeTab === 'my-orders' && scrolledToBottom && groupedOrdersHasMore && !groupedOrdersLoading && !isLoadingMore) {
       console.log('📜 Infinite scroll triggered - loading more My Orders...');
       fetchGroupedOrders(false); // false = don't reset pagination
     }
-    
+
     // Handle Handover tab
     if (activeTab === 'handover' && scrolledToBottom && handoverOrdersHasMore && !handoverOrdersLoading && !isLoadingMoreHandover) {
       console.log('📜 Infinite scroll triggered - loading more Handover orders...');
       fetchHandoverOrders(false); // false = don't reset pagination
     }
-    
+
     // Handle Order Tracking tab
     if (activeTab === 'order-tracking' && scrolledToBottom && trackingOrdersHasMore && !trackingOrdersLoading && !isLoadingMoreTracking) {
       console.log('📜 Infinite scroll triggered - loading more Order Tracking orders...');
@@ -3341,13 +3436,13 @@ export function VendorDashboard() {
   const getQuantitySumForTab = (tabName: string) => {
     if (tabName === "my-orders") {
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
-      
+
       // Check if any filters are applied
       const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
       const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
       const hasLabelFilter = selectedLabelFilter !== 'all';
       const hasFilters = hasSearchFilter || hasDateFilter || hasLabelFilter;
-      
+
       if (!hasFilters) {
         // No filters applied - use absolute total from API (all pages) - this matches the card
         console.log('🔢 TAB COUNT: No filters - using absolute total from API');
@@ -3361,71 +3456,71 @@ export function VendorDashboard() {
         console.log('🔢 TAB COUNT: filteredOrders.length:', filteredOrders.length);
         console.log('🔢 TAB COUNT: allGroupedOrders.length:', allGroupedOrders.length);
         console.log('🔢 TAB COUNT: groupedOrders.length:', groupedOrders.length);
-        
+
         // Calculate total quantity (product count) from filtered orders
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
-        
+
         console.log('🔢 TAB COUNT: Filtered total quantity:', filteredTotal);
         return filteredTotal;
       }
     } else if (tabName === "handover") {
       const tabFilter = tabFilters["handover"];
-      
+
       // Check if any filters are applied
       const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
       const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
       const hasStatusFilter = selectedStatuses.length > 0;
       const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
-      
+
       if (!hasFilters) {
         // No filters applied - use absolute total from API (matches the card)
         return handoverOrdersTotalQuantity;
       } else {
         // Filters applied - calculate from filtered orders
         const filteredOrders = getFilteredHandoverOrders();
-        
+
         // Calculate total quantity (product count) from filtered orders
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
-        
+
         return filteredTotal;
       }
     } else if (tabName === "order-tracking") {
       const tabFilter = tabFilters["order-tracking"];
-      
+
       // Check if any filters are applied
       const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
       const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
       const hasStatusFilter = selectedTrackingStatuses.length > 0;
       const hasFilters = hasSearchFilter || hasDateFilter || hasStatusFilter;
-      
+
       if (!hasFilters) {
         // No filters applied - use absolute total from API (matches the card)
         return trackingOrdersTotalQuantity;
       } else {
         // Filters applied - calculate from filtered orders
         const filteredOrders = getFilteredTrackingOrders();
-        
+
         // Calculate total quantity (product count) from filtered orders
         const filteredTotal = filteredOrders.reduce((sum, order) => {
           return sum + (order.total_quantity || 0);
         }, 0);
-        
+
         return filteredTotal;
       }
     } else {
       // For All Orders tab, show filtered results (applies search, date filters)
       const filteredOrders = getFilteredOrdersForTab(tabName);
       const tabFilter = tabFilters[tabName as keyof typeof tabFilters];
-      
+
       // Check if any filters are applied
       const hasSearchFilter = tabFilter.searchTerm.trim().length > 0;
       const hasDateFilter = tabFilter.dateFrom || tabFilter.dateTo;
       const hasFilters = hasSearchFilter || hasDateFilter;
-      
+
       if (!hasFilters) {
         // No filters applied - use the same calculation as the card
         const unclaimedOrders = orders.filter(order => order.status === 'unclaimed');
@@ -3455,7 +3550,7 @@ export function VendorDashboard() {
       tabFilter.dateFrom ||
       tabFilter.dateTo
     );
-    
+
     // For "all-orders" and "my-orders", show totalQuantity (sum of quantities) to match cards
     if (tabName === "all-orders") {
       if (hasFilters) {
@@ -3469,7 +3564,7 @@ export function VendorDashboard() {
         return dashboardStats?.allOrders?.totalQuantity || 0;
       }
     }
-    
+
     if (tabName === "my-orders") {
       if (hasFilters) {
         // Filters applied - use getQuantitySumForTab which handles filtered calculation
@@ -3479,7 +3574,7 @@ export function VendorDashboard() {
         return dashboardStats?.myOrders?.totalQuantity || 0;
       }
     }
-    
+
     // For other tabs (handover, order-tracking), show totalCount (number of orders)
     if (hasFilters) {
       // Filters applied - return filtered count
@@ -3490,7 +3585,7 @@ export function VendorDashboard() {
       }
       return getFilteredOrdersForTab(tabName).length;
     }
-    
+
     // Otherwise, use pre-calculated dashboard stats (total count)
     if (dashboardStats) {
       switch (tabName) {
@@ -3502,7 +3597,7 @@ export function VendorDashboard() {
           return 0;
       }
     }
-    
+
     // If dashboard stats not loaded yet, return 0 (don't show incorrect count from loaded data)
     return 0;
   };
@@ -3510,11 +3605,11 @@ export function VendorDashboard() {
   // Helper function to get quantity sum for selected orders with labels downloaded
   const getReadyOrdersQuantitySum = () => {
     const myOrders = getFilteredOrdersForTab("my-orders");
-    const selectedReadyOrders = myOrders.filter(order => 
+    const selectedReadyOrders = myOrders.filter(order =>
       selectedMyOrders.includes(order.order_id) &&
-      (order.label_downloaded === 1 || 
-       order.label_downloaded === '1' || 
-       order.label_downloaded === true)
+      (order.label_downloaded === 1 ||
+        order.label_downloaded === '1' ||
+        order.label_downloaded === true)
     );
     return selectedReadyOrders.reduce((sum, order) => {
       return sum + (order.total_quantity || 0);
@@ -3537,7 +3632,7 @@ export function VendorDashboard() {
           title: "Orders Refreshed",
           description: "Your orders have been refreshed from Shipway.",
         });
-        
+
         // Clear filters and refresh all orders
         setActiveTab("all-orders");
         setTabFilters({
@@ -3546,7 +3641,7 @@ export function VendorDashboard() {
           "handover": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
           "order-tracking": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
         });
-        
+
         // Re-fetch all orders and grouped orders
         try {
           const ordersResponse = await apiClient.getOrders();
@@ -3554,19 +3649,19 @@ export function VendorDashboard() {
             setOrders(ordersResponse.data.orders);
             console.log('✅ FRONTEND: Orders refreshed successfully');
           }
-          
+
           // Reset pagination and fetch first page
           setGroupedOrdersPage(1);
           const groupedResponse = await apiClient.getGroupedOrders(1, 50);
           if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
             setGroupedOrders(groupedResponse.data.groupedOrders);
-            
+
             // Update pagination metadata
             if (groupedResponse.data.pagination) {
               setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
               setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
             }
-            
+
             console.log('✅ FRONTEND: Grouped orders refreshed successfully');
           }
 
@@ -3578,7 +3673,7 @@ export function VendorDashboard() {
         } catch (refreshError) {
           console.log('⚠️ FRONTEND: Failed to refresh orders data, but Shipway sync was successful');
         }
-        
+
         console.log('✅ FRONTEND: Orders refreshed successfully via API');
       } else {
         toast({
@@ -3615,9 +3710,9 @@ export function VendorDashboard() {
                   {isMobile ? 'CLAIMIO - Vendor' : 'CLAIMIO - Vendor'}
                 </h1>
                 {!isMobile && (
-                <p className="text-sm sm:text-base text-gray-600 truncate">
-                  Welcome back, {user?.name}
-                </p>
+                  <p className="text-sm sm:text-base text-gray-600 truncate">
+                    Welcome back, {user?.name}
+                  </p>
                 )}
               </div>
             </div>
@@ -3625,24 +3720,24 @@ export function VendorDashboard() {
             {/* Desktop/Tablet - Vendor Address and Logout */}
             {!isMobile && (
               <>
-            {/* Vendor Address */}
-            <div className="flex-1 flex flex-col items-end min-w-0">
-              {addressLoading ? (
-                <span className="text-xs text-gray-400">Loading address...</span>
-              ) : addressError ? (
-                <span className="text-xs text-red-500">{addressError}</span>
-              ) : vendorAddress ? (
-                <div className="text-right truncate">
-                  <div className="text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
-                  <div className="text-xs text-gray-700 truncate">{vendorAddress.address}</div>
-                  <div className="text-xs text-gray-700 truncate">{vendorAddress.city}, {vendorAddress.pincode}</div>
+                {/* Vendor Address */}
+                <div className="flex-1 flex flex-col items-end min-w-0">
+                  {addressLoading ? (
+                    <span className="text-xs text-gray-400">Loading address...</span>
+                  ) : addressError ? (
+                    <span className="text-xs text-red-500">{addressError}</span>
+                  ) : vendorAddress ? (
+                    <div className="text-right truncate">
+                      <div className="text-xs text-gray-900 font-semibold truncate">Vendor ID: <span className="font-mono">{vendorAddress.warehouseId}</span></div>
+                      <div className="text-xs text-gray-700 truncate">{vendorAddress.address}</div>
+                      <div className="text-xs text-gray-700 truncate">{vendorAddress.city}, {vendorAddress.pincode}</div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-            {/* Logout Button */}
-            <div className="flex-shrink-0">
-              <Button variant="outline" onClick={logout}>
-                <LogOut className="w-4 h-4 mr-2" />
+                {/* Logout Button */}
+                <div className="flex-shrink-0">
+                  <Button variant="outline" onClick={logout}>
+                    <LogOut className="w-4 h-4 mr-2" />
                     {isDesktop && 'Logout'}
                   </Button>
                 </div>
@@ -3653,8 +3748,8 @@ export function VendorDashboard() {
             {isMobile && (
               <div className="flex items-center gap-2">
                 {/* Tracking Icon Button */}
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="sm"
                   onClick={() => setActiveTab("order-tracking")}
                   className="p-2"
@@ -3663,8 +3758,8 @@ export function VendorDashboard() {
                   <Truck className="w-5 h-5" />
                 </Button>
                 {/* Menu Button */}
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="sm"
                   onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                   className="p-2"
@@ -3683,7 +3778,7 @@ export function VendorDashboard() {
                   <p className="text-xs sm:text-sm text-gray-600 truncate">Welcome, {user?.name}</p>
                   <p className="text-[10px] sm:text-xs text-gray-400 truncate break-all">{user?.email}</p>
                 </div>
-                
+
                 {/* Vendor Address in Mobile Menu */}
                 {addressLoading ? (
                   <div className="px-2">
@@ -3701,28 +3796,27 @@ export function VendorDashboard() {
                   </div>
                 ) : null}
 
-                <Button 
-                  variant="outline" 
-                  onClick={logout} 
+                <Button
+                  variant="outline"
+                  onClick={logout}
                   className="w-full flex items-center justify-center gap-2 text-sm"
                 >
                   <LogOut className="w-3 h-3 sm:w-4 sm:h-4" />
-                Logout
-              </Button>
+                  Logout
+                </Button>
+              </div>
             </div>
-          </div>
           )}
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-3 sm:py-4 md:py-8">
         {/* Stats Cards */}
-        <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${
-          isMobile ? 'grid-cols-2' : 
-          isTablet ? 'grid-cols-2' : 
-          'grid-cols-4'
-        }`}>
-          <Card 
+        <div className={`grid gap-2 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8 ${isMobile ? 'grid-cols-2' :
+          isTablet ? 'grid-cols-2' :
+            'grid-cols-4'
+          }`}>
+          <Card
             className={`bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "all-orders" ? 'ring-2 ring-blue-300 ring-offset-2' : ''}`}
             onClick={() => setActiveTab("all-orders")}
           >
@@ -3749,7 +3843,7 @@ export function VendorDashboard() {
             </CardContent>
           </Card>
 
-          <Card 
+          <Card
             className={`bg-gradient-to-br from-green-500 to-green-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "my-orders" ? 'ring-2 ring-green-300 ring-offset-2' : ''}`}
             onClick={() => setActiveTab("my-orders")}
           >
@@ -3776,7 +3870,7 @@ export function VendorDashboard() {
             </CardContent>
           </Card>
 
-          <Card 
+          <Card
             className={`bg-gradient-to-br from-orange-500 to-orange-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "handover" ? 'ring-2 ring-orange-300 ring-offset-2' : ''}`}
             onClick={() => setActiveTab("handover")}
           >
@@ -3804,7 +3898,7 @@ export function VendorDashboard() {
           </Card>
 
           {/* Order Tracking Card */}
-          <Card 
+          <Card
             className={`bg-gradient-to-br from-purple-500 to-purple-600 text-white border-0 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02] ${activeTab === "order-tracking" ? 'ring-2 ring-purple-300 ring-offset-2' : ''}`}
             onClick={() => setActiveTab("order-tracking")}
           >
@@ -3878,35 +3972,32 @@ export function VendorDashboard() {
                   <TabsTrigger value="all-orders" className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''}`}>
                     All ({getTotalCountForTab("all-orders")})
                   </TabsTrigger>
-                  <TabsTrigger 
-                    value="my-orders" 
-                    className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''} ${
-                      highlightedTab === "my-orders" 
-                        ? 'bg-green-100 text-green-700 border-green-300 shadow-lg scale-105 transition-all duration-300' 
-                        : ''
-                    }`}
+                  <TabsTrigger
+                    value="my-orders"
+                    className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''} ${highlightedTab === "my-orders"
+                      ? 'bg-green-100 text-green-700 border-green-300 shadow-lg scale-105 transition-all duration-300'
+                      : ''
+                      }`}
                   >
                     My Orders ({getTotalCountForTab("my-orders")})
                   </TabsTrigger>
-                  <TabsTrigger 
-                    value="handover" 
-                    className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''} ${
-                      highlightedTab === "handover" 
-                        ? 'bg-orange-100 text-orange-700 border-orange-300 shadow-lg scale-105 transition-all duration-300' 
-                        : ''
-                    }`}
+                  <TabsTrigger
+                    value="handover"
+                    className={`${isMobile ? 'text-xs sm:text-sm px-1.5 sm:px-2 py-2.5 sm:py-3' : ''} ${highlightedTab === "handover"
+                      ? 'bg-orange-100 text-orange-700 border-orange-300 shadow-lg scale-105 transition-all duration-300'
+                      : ''
+                      }`}
                   >
                     Handover ({getTotalCountForTab("handover")})
                   </TabsTrigger>
                   {/* Order Tracking Tab - Desktop Only (Mobile users use the tracking icon in header) */}
                   {!isMobile && (
-                    <TabsTrigger 
+                    <TabsTrigger
                       value="order-tracking"
-                      className={`${
-                        highlightedTab === "order-tracking" 
-                          ? 'bg-purple-100 text-purple-700 border-purple-300 shadow-lg scale-105 transition-all duration-300' 
-                          : ''
-                      }`}
+                      className={`${highlightedTab === "order-tracking"
+                        ? 'bg-purple-100 text-purple-700 border-purple-300 shadow-lg scale-105 transition-all duration-300'
+                        : ''
+                        }`}
                     >
                       Order Tracking ({getTotalCountForTab("order-tracking")})
                     </TabsTrigger>
@@ -3949,7 +4040,7 @@ export function VendorDashboard() {
                       )}
                     </div>
                   </div>
-                  
+
                   {/* Status Filter - Desktop Only for Handover Tab */}
                   {!isMobile && activeTab === "handover" && (
                     <div className="w-[180px] flex-shrink-0">
@@ -3974,7 +4065,7 @@ export function VendorDashboard() {
                       </Select>
                     </div>
                   )}
-                  
+
                   {/* Status Filter - Desktop Only for Order Tracking Tab */}
                   {!isMobile && activeTab === "order-tracking" && (
                     <div className="w-[280px] flex-shrink-0">
@@ -3999,8 +4090,8 @@ export function VendorDashboard() {
                       </Select>
                     </div>
                   )}
-                  
-                  
+
+
                   <div className={`flex gap-2 items-center ${isMobile ? 'w-full' : ''}`}>
                     {/* Date Range Container - Responsive width */}
                     <div className={`flex gap-2 items-center ${isMobile ? 'flex-1' : ''}`}>
@@ -4018,7 +4109,7 @@ export function VendorDashboard() {
                         className={`${isMobile ? 'flex-1 min-w-0' : 'w-36'}`}
                       />
                     </div>
-                    
+
                     {/* Filter Icons - Mobile View - Fixed width on right */}
                     {isMobile && (
                       <div className="flex items-center flex-shrink-0">
@@ -4048,7 +4139,7 @@ export function VendorDashboard() {
                             </Select>
                           </div>
                         )}
-                        
+
                         {/* Status Filter for Order Tracking */}
                         {activeTab === "order-tracking" && (
                           <div className="relative">
@@ -4079,7 +4170,7 @@ export function VendorDashboard() {
                             )}
                           </div>
                         )}
-                        
+
                         {/* Label Download Filter for My Orders */}
                         {activeTab === "my-orders" && (
                           <div className="relative">
@@ -4104,7 +4195,7 @@ export function VendorDashboard() {
                       </div>
                     )}
                   </div>
-                  
+
                   {/* Bulk Manifest Download Button - Desktop Only for Handover Tab */}
                   {!isMobile && activeTab === "handover" && (
                     <Button
@@ -4125,12 +4216,12 @@ export function VendorDashboard() {
                       )}
                     </Button>
                   )}
-                  
+
                   {/* Tab-specific Actions */}
                   {activeTab === "all-orders" && !isMobile && (
-                    <Button 
-                      onClick={() => handleBulkClaimOrders()} 
-                      disabled={selectedUnclaimedOrders.length === 0 || claimLoading} 
+                    <Button
+                      onClick={() => handleBulkClaimOrders()}
+                      disabled={selectedUnclaimedOrders.length === 0 || claimLoading}
                       className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                     >
                       {claimLoading ? (
@@ -4146,7 +4237,7 @@ export function VendorDashboard() {
                       )}
                     </Button>
                   )}
-                  
+
                   {activeTab === "my-orders" && !isMobile && (
                     <div className="flex gap-2 items-center">
                       <Select value={labelFormat} onValueChange={setLabelFormat}>
@@ -4159,7 +4250,7 @@ export function VendorDashboard() {
                           <SelectItem value="four-in-one">Four in One</SelectItem>
                         </SelectContent>
                       </Select>
-                      
+
                       {/* Label Download Filter - Desktop Only for My Orders Tab */}
                       <div className="relative">
                         <Select value={selectedLabelFilter} onValueChange={setSelectedLabelFilter}>
@@ -4199,7 +4290,7 @@ export function VendorDashboard() {
                       <Button
                         onClick={() => handleBulkMarkReady()}
                         disabled={
-                          getVisibleSelectedOrdersCount() === 0 || 
+                          getVisibleSelectedOrdersCount() === 0 ||
                           bulkMarkReadyLoading ||
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -4234,7 +4325,7 @@ export function VendorDashboard() {
               </div>
 
               {/* Scrollable Content Section */}
-              <div 
+              <div
                 ref={scrollableContentRef}
                 onScroll={handleScroll}
                 className={`${isMobile ? `${activeTab === 'my-orders' ? 'pb-32' : activeTab === 'order-tracking' ? 'pb-1' : 'pb-20'}` : ''} relative`}
@@ -4244,8 +4335,8 @@ export function VendorDashboard() {
                   {isMobile ? (
                     <div className="space-y-2.5 sm:space-y-3">
                       {getFilteredOrdersForTab("all-orders").map((order, index) => (
-                        <Card 
-                          key={`${order.unique_id}-${index}`} 
+                        <Card
+                          key={`${order.unique_id}-${index}`}
                           className="p-2.5 sm:p-3 cursor-pointer hover:bg-gray-50 transition-colors"
                           onClick={() => {
                             if (selectedUnclaimedOrders.includes(order.unique_id)) {
@@ -4257,14 +4348,14 @@ export function VendorDashboard() {
                         >
                           <div className="space-y-2 sm:space-y-3">
                             <div className="flex items-start gap-2 sm:gap-3">
-                            <input
-                              type="checkbox"
+                              <input
+                                type="checkbox"
                                 checked={selectedUnclaimedOrders.includes(order.unique_id)}
-                              onChange={(e) => {
+                                onChange={(e) => {
                                   e.stopPropagation();
-                                if (e.target.checked) {
+                                  if (e.target.checked) {
                                     setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
-                                } else {
+                                  } else {
                                     setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
                                   }
                                 }}
@@ -4277,7 +4368,7 @@ export function VendorDashboard() {
                                 className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg object-cover cursor-pointer flex-shrink-0"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})
+                                  order.product_image && setSelectedImageProduct({ url: order.product_image, title: order.product_name || "Product Image" })
                                 }}
                                 onError={(e) => {
                                   e.currentTarget.src = "/placeholder.svg";
@@ -4329,18 +4420,18 @@ export function VendorDashboard() {
                         <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
                           <TableRow>
                             <TableHead className="w-12">Select</TableHead>
-                          <TableHead>Image</TableHead>
-                          <TableHead>Order ID</TableHead>
-                          <TableHead>Order Date</TableHead>
-                          <TableHead>Product</TableHead>
+                            <TableHead>Image</TableHead>
+                            <TableHead>Order ID</TableHead>
+                            <TableHead>Order Date</TableHead>
+                            <TableHead>Product</TableHead>
                             <TableHead className="w-24">Size</TableHead>
-                          <TableHead>Product Code</TableHead>
+                            <TableHead>Product Code</TableHead>
                             <TableHead>Quantity</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredOrdersForTab("all-orders").map((order, index) => (
-                            <TableRow 
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {getFilteredOrdersForTab("all-orders").map((order, index) => (
+                            <TableRow
                               key={`${order.unique_id}-${index}`}
                               className="cursor-pointer hover:bg-gray-50 transition-colors"
                               onClick={() => {
@@ -4351,83 +4442,83 @@ export function VendorDashboard() {
                                 }
                               }}
                             >
-                            <TableCell>
-                              <input
-                                type="checkbox"
-                                checked={selectedUnclaimedOrders.includes(order.unique_id)}
-                                onChange={(e) => {
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedUnclaimedOrders.includes(order.unique_id)}
+                                  onChange={(e) => {
                                     e.stopPropagation();
-                                  if (e.target.checked) {
-                                    setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
-                                  } else {
-                                    setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
-                                  }
-                                }}
+                                    if (e.target.checked) {
+                                      setSelectedUnclaimedOrders([...selectedUnclaimedOrders, order.unique_id])
+                                    } else {
+                                      setSelectedUnclaimedOrders(selectedUnclaimedOrders.filter((id) => id !== order.unique_id))
+                                    }
+                                  }}
                                   onClick={(e) => e.stopPropagation()}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <img
-                                      src={order.product_image || "/placeholder.svg"}
-                                      alt={order.product_name}
-                                      className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <img
+                                        src={order.product_image || "/placeholder.svg"}
+                                        alt={order.product_name}
+                                        className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          order.product_image && setSelectedImageProduct({url: order.product_image, title: order.product_name || "Product Image"})
+                                          order.product_image && setSelectedImageProduct({ url: order.product_image, title: order.product_name || "Product Image" })
                                         }}
-                                      onError={(e) => {
-                                        e.currentTarget.src = "/placeholder.svg";
-                                      }}
-                                    />
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    <p>Click to view full image</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            </TableCell>
-                            <TableCell className="font-medium">{order.order_id}</TableCell>
-                            <TableCell>
-                              {order.order_date ? (
-                                <div className="flex flex-col">
-                                  <span className="text-sm font-medium">
-                                    {new Date(order.order_date).toLocaleDateString()}
-                                  </span>
-                                  <span className="text-xs text-gray-500">
-                                    {new Date(order.order_date).toLocaleTimeString()}
-                                  </span>
-                                </div>
-                              ) : "N/A"}
-                            </TableCell>
-                            <TableCell>{order.product_name}</TableCell>
-                            <TableCell>
+                                        onError={(e) => {
+                                          e.currentTarget.src = "/placeholder.svg";
+                                        }}
+                                      />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Click to view full image</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </TableCell>
+                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell>
+                                {order.order_date ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">
+                                      {new Date(order.order_date).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(order.order_date).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+                                ) : "N/A"}
+                              </TableCell>
+                              <TableCell>{order.product_name}</TableCell>
+                              <TableCell>
                                 <span className="text-red-600 font-medium">
                                   {order.size || "-"}
                                 </span>
-                            </TableCell>
+                              </TableCell>
                               <TableCell>{order.product_code}</TableCell>
                               <TableCell>{order.quantity || "-"}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                    {/* Progress Indicator and Loading Spinner - Desktop */}
-                    {(loadingProgress['all-orders']?.total > 0 || allOrdersTotalCount > 0) && (
-                      <div className="text-sm text-gray-500 text-center py-3 border-t bg-gray-50">
-                        {isLoadingMoreAllOrders ? (
-                          <>
-                            <Loader2 className="inline animate-spin mr-2 h-4 w-4" />
-                            Loading more orders...
-                          </>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      {/* Progress Indicator and Loading Spinner - Desktop */}
+                      {(loadingProgress['all-orders']?.total > 0 || allOrdersTotalCount > 0) && (
+                        <div className="text-sm text-gray-500 text-center py-3 border-t bg-gray-50">
+                          {isLoadingMoreAllOrders ? (
+                            <>
+                              <Loader2 className="inline animate-spin mr-2 h-4 w-4" />
+                              Loading more orders...
+                            </>
                           ) : (
                             `Showing ${getFilteredOrdersForTab("all-orders").length} of ${allOrdersTotalCount || tabDataCache['all-orders']?.totalCount || dashboardStats?.allOrders?.totalCount || loadingProgress['all-orders']?.total || 0}`
                           )}
-                      </div>
-                    )}
-                  </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </TabsContent>
 
@@ -4449,116 +4540,115 @@ export function VendorDashboard() {
                       {getFilteredOrdersForTab("my-orders").map((order, index) => {
                         const hasLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === '1' || order.label_downloaded === true;
                         return (
-                        <Card 
-                          key={`${order.order_id}-${index}`} 
-                          className={`p-2.5 sm:p-3 cursor-pointer transition-colors ${
-                            hasLabelDownloaded 
-                              ? 'bg-green-50 hover:bg-green-100 border-green-200' 
+                          <Card
+                            key={`${order.order_id}-${index}`}
+                            className={`p-2.5 sm:p-3 cursor-pointer transition-colors ${hasLabelDownloaded
+                              ? 'bg-green-50 hover:bg-green-100 border-green-200'
                               : 'hover:bg-gray-50'
-                          }`}
-                          onClick={() => {
-                            if (selectedMyOrders.includes(order.order_id)) {
-                              setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
-                            } else {
-                              setSelectedMyOrders([...selectedMyOrders, order.order_id])
-                            }
-                          }}
-                        >
-                        
-                          <div className="space-y-1.5 sm:space-y-2">
-                            {/* Top Row: Checkbox | Order Info | Total */}
-                            <div className="flex items-center justify-between gap-1.5 sm:gap-2">
-                              <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedMyOrders.includes(order.order_id)}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    if (e.target.checked) {
-                                      setSelectedMyOrders([...selectedMyOrders, order.order_id])
-                                    } else {
-                                      setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
-                                    }
-                                  }}
-                                  className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                
-                                {/* Order Info */}
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
-                                    {(order.current_shipment_status || order.status) && (
-                                      <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
-                                        {order.current_shipment_status || order.status}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <p className="text-xs sm:text-sm text-gray-500 truncate">
-                                    {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
-                                  </p>
-                                </div>
-                              </div>
-                              
-                              {/* Total Count - Right aligned */}
-                              <div className="text-right flex-shrink-0">
-                                <div className="text-sm text-gray-500">Total</div>
-                                <div className="text-xl font-bold text-green-600">{order.total_quantity || 0}</div>
-                              </div>
-                            </div>
-                            
-                            <div className="space-y-2">
-                              {order.products.map((product: any) => (
-                                <div key={product.unique_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
-                                  <img
-                                    src={product.image || "/placeholder.svg"}
-                                    alt={product.product_name}
-                                    className="w-10 h-10 rounded-md object-cover cursor-pointer"
-                                    onClick={(e) => {
+                              }`}
+                            onClick={() => {
+                              if (selectedMyOrders.includes(order.order_id)) {
+                                setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                              } else {
+                                setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                              }
+                            }}
+                          >
+
+                            <div className="space-y-1.5 sm:space-y-2">
+                              {/* Top Row: Checkbox | Order Info | Total */}
+                              <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                                <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedMyOrders.includes(order.order_id)}
+                                    onChange={(e) => {
                                       e.stopPropagation();
-                                      product.image && setSelectedImageProduct({url: product.image, title: product.product_name || "Product Image"})
+                                      if (e.target.checked) {
+                                        setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                                      } else {
+                                        setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                                      }
                                     }}
-                                    onError={(e) => {
-                                      e.currentTarget.src = "/placeholder.svg";
-                                    }}
+                                    className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0"
+                                    onClick={(e) => e.stopPropagation()}
                                   />
+
+                                  {/* Order Info */}
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
-                                    <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code || "N/A"}</p>
-                                    {product.size && (
-                                      <p className="text-xs font-medium text-red-600">Size: {product.size}</p>
-                                    )}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                      {(order.current_shipment_status || order.status) && (
+                                        <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                          {getShipmentDisplayName(order.current_shipment_status || order.status)}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <p className="text-xs sm:text-sm text-gray-500 truncate">
+                                      {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                    </p>
                                   </div>
-                                   <div className="text-xs font-medium">{product.quantity || 0}</div>
                                 </div>
-                              ))}
+
+                                {/* Total Count - Right aligned */}
+                                <div className="text-right flex-shrink-0">
+                                  <div className="text-sm text-gray-500">Total</div>
+                                  <div className="text-xl font-bold text-green-600">{order.total_quantity || 0}</div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {order.products.map((product: any) => (
+                                  <div key={product.unique_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                                    <img
+                                      src={product.image || "/placeholder.svg"}
+                                      alt={product.product_name}
+                                      className="w-10 h-10 rounded-md object-cover cursor-pointer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        product.image && setSelectedImageProduct({ url: product.image, title: product.product_name || "Product Image" })
+                                      }}
+                                      onError={(e) => {
+                                        e.currentTarget.src = "/placeholder.svg";
+                                      }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
+                                      <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code || "N/A"}</p>
+                                      {product.size && (
+                                        <p className="text-xs font-medium text-red-600">Size: {product.size}</p>
+                                      )}
+                                    </div>
+                                    <div className="text-xs font-medium">{product.quantity || 0}</div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Unclaim Button Row - Full Width at Bottom */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                }}
+                                disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {reverseLoading[order.order_id] ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
+                                    Unclaiming...
+                                  </>
+                                ) : (
+                                  'Unclaim Order'
+                                )}
+                              </Button>
                             </div>
-                            
-                            {/* Unclaim Button Row - Full Width at Bottom */}
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
-                              }}
-                              disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
-                              className="w-full text-xs h-8 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {reverseLoading[order.order_id] ? (
-                                <>
-                                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600 mr-1"></div>
-                                  Unclaiming...
-                                </>
-                              ) : (
-                                'Unclaim Order'
-                              )}
-                            </Button>
-                          </div>
-                        </Card>
+                          </Card>
                         );
                       })}
-                      
+
                       {/* Loading More Indicator */}
                       {isLoadingMore && (
                         <div className="flex items-center justify-center p-4">
@@ -4568,7 +4658,7 @@ export function VendorDashboard() {
                           </div>
                         </div>
                       )}
-                      
+
                       {/* End of List Indicator */}
                       {!groupedOrdersHasMore && groupedOrders.length > 0 && (
                         <div className="flex items-center justify-center p-4">
@@ -4611,139 +4701,138 @@ export function VendorDashboard() {
                           {getFilteredOrdersForTab("my-orders").map((order, index) => {
                             const hasLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === '1' || order.label_downloaded === true;
                             return (
-                            <TableRow 
-                              key={`${order.order_id}-${index}`} 
-                              className={`group cursor-pointer transition-colors ${
-                                hasLabelDownloaded 
-                                  ? 'bg-green-50 hover:bg-green-100' 
+                              <TableRow
+                                key={`${order.order_id}-${index}`}
+                                className={`group cursor-pointer transition-colors ${hasLabelDownloaded
+                                  ? 'bg-green-50 hover:bg-green-100'
                                   : 'hover:bg-gray-50'
-                              }`}
-                              onClick={() => {
-                                if (selectedMyOrders.includes(order.order_id)) {
-                                  setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
-                                } else {
-                                  setSelectedMyOrders([...selectedMyOrders, order.order_id])
-                                }
-                              }}
-                            >
-                              <TableCell>
-                                <input
-                                  type="checkbox"
-                                  checked={selectedMyOrders.includes(order.order_id)}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    if (e.target.checked) {
-                                      setSelectedMyOrders([...selectedMyOrders, order.order_id])
-                                    } else {
-                                      setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
-                                    }
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              </TableCell>
-                              <TableCell className="font-medium">
-                                {order.order_id}
-                              </TableCell>
-                              <TableCell>
-                                {order.order_date ? (
-                                  <div className="flex flex-col">
-                                    <span className="text-sm font-medium">
-                                      {new Date(order.order_date).toLocaleDateString()}
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                      {new Date(order.order_date).toLocaleTimeString()}
-                                    </span>
-                                  </div>
-                                ) : "N/A"}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex flex-col gap-2 max-w-md">
-                                  {order.products.map((product: any, index: number) => (
-                                    <div key={product.unique_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
-                                      <TooltipProvider>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <img
-                                              src={product.image || "/placeholder.svg"}
-                                              alt={product.product_name}
-                                              className="w-10 h-10 rounded-md object-cover flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                product.image && setSelectedImageProduct({url: product.image, title: product.product_name || "Product Image"})
-                                              }}
-                                              onError={(e) => {
-                                                e.currentTarget.src = "/placeholder.svg";
-                                              }}
-                                            />
-                                          </TooltipTrigger>
-                                          <TooltipContent>
-                                            <p>Click to view full image</p>
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-medium text-gray-900 break-words">
-                                          {product.product_name}
-                                        </p>
-                                        <p className="text-xs text-gray-500">
-                                          Code: {product.product_code || "N/A"}
-                                        </p>
-                                        {product.size && (
-                                          <p className="text-xs font-medium text-red-600">
-                                            Size: {product.size}
-                                          </p>
-                                        )}
-                                      </div>
-                                      <div className="text-right flex-shrink-0">
-                                        <p className="text-sm font-medium">
-                                           {product.quantity || 0}
-                                        </p>
-                                      </div>
+                                  }`}
+                                onClick={() => {
+                                  if (selectedMyOrders.includes(order.order_id)) {
+                                    setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                                  } else {
+                                    setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                                  }
+                                }}
+                              >
+                                <TableCell>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedMyOrders.includes(order.order_id)}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      if (e.target.checked) {
+                                        setSelectedMyOrders([...selectedMyOrders, order.order_id])
+                                      } else {
+                                        setSelectedMyOrders(selectedMyOrders.filter((id) => id !== order.order_id))
+                                      }
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                </TableCell>
+                                <TableCell className="font-medium">
+                                  {order.order_id}
+                                </TableCell>
+                                <TableCell>
+                                  {order.order_date ? (
+                                    <div className="flex flex-col">
+                                      <span className="text-sm font-medium">
+                                        {new Date(order.order_date).toLocaleDateString()}
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        {new Date(order.order_date).toLocaleTimeString()}
+                                      </span>
                                     </div>
-                                  ))}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-center align-middle">
-                                <div className="text-lg font-semibold text-blue-600">
-                                  {order.total_quantity || 0}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                {(order.current_shipment_status || order.status) ? (
-                                  <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
-                                    {order.current_shipment_status || order.status}
+                                  ) : "N/A"}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-col gap-2 max-w-md">
+                                    {order.products.map((product: any, index: number) => (
+                                      <div key={product.unique_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
+                                        <TooltipProvider>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <img
+                                                src={product.image || "/placeholder.svg"}
+                                                alt={product.product_name}
+                                                className="w-10 h-10 rounded-md object-cover flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  product.image && setSelectedImageProduct({ url: product.image, title: product.product_name || "Product Image" })
+                                                }}
+                                                onError={(e) => {
+                                                  e.currentTarget.src = "/placeholder.svg";
+                                                }}
+                                              />
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                              <p>Click to view full image</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </TooltipProvider>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-medium text-gray-900 break-words">
+                                            {product.product_name}
+                                          </p>
+                                          <p className="text-xs text-gray-500">
+                                            Code: {product.product_code || "N/A"}
+                                          </p>
+                                          {product.size && (
+                                            <p className="text-xs font-medium text-red-600">
+                                              Size: {product.size}
+                                            </p>
+                                          )}
+                                        </div>
+                                        <div className="text-right flex-shrink-0">
+                                          <p className="text-sm font-medium">
+                                            {product.quantity || 0}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
-                                ) : (
-                                  <span className="text-sm font-medium text-gray-800">N/A</span>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Button 
-                                  size="sm" 
-                                  variant="destructive" 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
-                                  }}
-                                  disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
-                                  className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {reverseLoading[order.order_id] ? (
-                                    <>
-                                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                                      Loading...
-                                    </>
+                                </TableCell>
+                                <TableCell className="text-center align-middle">
+                                  <div className="text-lg font-semibold text-blue-600">
+                                    {order.total_quantity || 0}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {(order.current_shipment_status || order.status) ? (
+                                    <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                      {getShipmentDisplayName(order.current_shipment_status || order.status)}
+                                    </div>
                                   ) : (
-                                    'Unclaim'
+                                    <span className="text-sm font-medium text-gray-800">N/A</span>
                                   )}
-                                </Button>
-                              </TableCell>
-                            </TableRow>
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                    }}
+                                    disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                    className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {reverseLoading[order.order_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                        Loading...
+                                      </>
+                                    ) : (
+                                      'Unclaim'
+                                    )}
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
                             );
                           })}
                         </TableBody>
                       </Table>
-                      
+
                       {/* Loading More Indicator for Desktop */}
                       {isLoadingMore && (
                         <div className="flex items-center justify-center p-6 border-t">
@@ -4753,7 +4842,7 @@ export function VendorDashboard() {
                           </div>
                         </div>
                       )}
-                      
+
                       {/* End of List Indicator for Desktop */}
                       {!groupedOrdersHasMore && groupedOrders.length > 0 && (
                         <div className="flex items-center justify-center p-4 border-t bg-gray-50">
@@ -4769,8 +4858,8 @@ export function VendorDashboard() {
                   {isMobile ? (
                     <div className="space-y-2.5 sm:space-y-3 pb-32">
                       {getFilteredHandoverOrders().map((order, index) => (
-                        <Card 
-                          key={`${order.order_id}-${index}`} 
+                        <Card
+                          key={`${order.order_id}-${index}`}
                           className="p-2.5 sm:p-3 cursor-pointer transition-colors hover:bg-gray-50"
                           onClick={() => {
                             if (selectedHandoverOrders.includes(order.order_id)) {
@@ -4805,7 +4894,7 @@ export function VendorDashboard() {
                                     <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
                                     {(order.current_shipment_status || order.status) && (
                                       <div className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
-                                        {order.current_shipment_status || order.status}
+                                        {getShipmentDisplayName(order.current_shipment_status || order.status)}
                                       </div>
                                     )}
                                   </div>
@@ -4820,7 +4909,7 @@ export function VendorDashboard() {
                                 <div className="text-xl font-bold text-green-600">{order.total_quantity || 0}</div>
                               </div>
                             </div>
-                            
+
                             {/* Products List */}
                             <div className="space-y-2">
                               {order.products && order.products.map((product: any) => (
@@ -4831,7 +4920,7 @@ export function VendorDashboard() {
                                     className="w-10 h-10 rounded-md object-cover cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})
+                                      (product.image || product.product_image) && setSelectedImageProduct({ url: product.image || product.product_image, title: product.product_name || "Product Image" })
                                     }}
                                     onError={(e) => {
                                       e.currentTarget.src = "/placeholder.svg";
@@ -4847,12 +4936,12 @@ export function VendorDashboard() {
                                 </div>
                               ))}
                             </div>
-                            
+
                             {/* Action Buttons Row - Full Width at Bottom */}
                             <div className="flex gap-2">
-                              <Button 
-                                size="sm" 
-                                variant="outline" 
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const manifestId = order.manifest_id;
@@ -4881,9 +4970,9 @@ export function VendorDashboard() {
                                   </>
                                 )}
                               </Button>
-                              <Button 
-                                size="sm" 
-                                variant="outline" 
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
@@ -4904,7 +4993,7 @@ export function VendorDashboard() {
                           </div>
                         </Card>
                       ))}
-                      
+
                       {/* Loading More Indicator for Mobile Handover */}
                       {isLoadingMoreHandover && (
                         <div className="flex items-center justify-center p-4">
@@ -4914,7 +5003,7 @@ export function VendorDashboard() {
                           </div>
                         </div>
                       )}
-                      
+
                       {/* End of List Indicator for Mobile Handover */}
                       {!handoverOrdersHasMore && handoverOrders.length > 0 && (
                         <div className="flex items-center justify-center p-4">
@@ -4924,188 +5013,188 @@ export function VendorDashboard() {
                     </div>
                   ) : (
                     /* Desktop/Tablet Table Layout */
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
-                        <TableRow>
-                          <TableHead className="w-12">
-                            <input
-                              type="checkbox"
-                              checked={selectedHandoverOrders.length === getFilteredHandoverOrders().length && getFilteredHandoverOrders().length > 0}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedHandoverOrders(getFilteredHandoverOrders().map((o: any) => o.order_id));
-                                } else {
-                                  setSelectedHandoverOrders([]);
-                                }
-                              }}
-                              className="w-4 h-4 cursor-pointer"
-                            />
-                          </TableHead>
-                          <TableHead>Order ID</TableHead>
-                          <TableHead>Order Date</TableHead>
-                          <TableHead>Products</TableHead>
-                          <TableHead>Count</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredHandoverOrders().map((order, index) => (
-                          <TableRow key={`${order.order_id}-${index}`}>
-                            <TableCell>
+                    <div className="rounded-md border">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
+                          <TableRow>
+                            <TableHead className="w-12">
                               <input
                                 type="checkbox"
-                                checked={selectedHandoverOrders.includes(order.order_id)}
+                                checked={selectedHandoverOrders.length === getFilteredHandoverOrders().length && getFilteredHandoverOrders().length > 0}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id]);
+                                    setSelectedHandoverOrders(getFilteredHandoverOrders().map((o: any) => o.order_id));
                                   } else {
-                                    setSelectedHandoverOrders(selectedHandoverOrders.filter(id => id !== order.order_id));
+                                    setSelectedHandoverOrders([]);
                                   }
                                 }}
-                                onClick={(e) => e.stopPropagation()}
                                 className="w-4 h-4 cursor-pointer"
                               />
-                            </TableCell>
-                            <TableCell className="font-medium">{order.order_id}</TableCell>
-                            <TableCell>
-                              {order.order_date ? (
-                                <div className="flex flex-col">
-                                  <span className="text-sm font-medium">
-                                    {new Date(order.order_date).toLocaleDateString()}
-                                  </span>
-                                  <span className="text-xs text-gray-500">
-                                    {new Date(order.order_date).toLocaleTimeString()}
-                                  </span>
-                                </div>
-                              ) : "N/A"}
-                            </TableCell>
-                            <TableCell>
-                              <div className="space-y-2">
-                                {order.products && order.products.map((product: any, productIndex: number) => (
-                                  <div key={product.unique_id} className="flex items-center gap-3">
-                                    <TooltipProvider>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <img
-                                            src={product.image || product.product_image || "/placeholder.svg"}
-                                            alt={product.product_name}
-                                            className="w-10 h-10 rounded-md object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                            onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
-                                            onError={(e) => {
-                                              e.currentTarget.src = "/placeholder.svg";
-                                            }}
-                                          />
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                          <p>Click to view full image</p>
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    </TooltipProvider>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="font-medium text-sm break-words leading-relaxed">{product.product_name}</div>
-                                      <div className="text-xs text-gray-500 break-words">Code: {product.product_code}</div>
-                                    </div>
-                                    <div className="text-sm font-medium text-gray-700">
-                                      {product.quantity || 0}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="text-base font-bold text-blue-600">
-                                {order.total_quantity || 0}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              {(order.current_shipment_status || order.status) && (
-                                <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block whitespace-nowrap ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
-                                  {order.current_shipment_status || order.status}
-                                </div>
-                              )}
-                              {!(order.current_shipment_status || order.status) && (
-                                <span className="text-sm font-medium text-gray-800">N/A</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    // Get manifest_id from order (should be available in handover tab)
-                                    const manifestId = order.manifest_id;
-                                    if (manifestId) {
-                                      downloadManifestSummary([manifestId]);
+                            </TableHead>
+                            <TableHead>Order ID</TableHead>
+                            <TableHead>Order Date</TableHead>
+                            <TableHead>Products</TableHead>
+                            <TableHead>Count</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {getFilteredHandoverOrders().map((order, index) => (
+                            <TableRow key={`${order.order_id}-${index}`}>
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedHandoverOrders.includes(order.order_id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedHandoverOrders([...selectedHandoverOrders, order.order_id]);
                                     } else {
-                                      toast({
-                                        title: "Error",
-                                        description: "Manifest ID not found for this order",
-                                        variant: "destructive",
-                                      });
+                                      setSelectedHandoverOrders(selectedHandoverOrders.filter(id => id !== order.order_id));
                                     }
                                   }}
-                                  disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
-                                  className="text-xs px-3 py-1 h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                                >
-                                  {manifestDownloadLoading === order.manifest_id ? (
-                                    <>
-                                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                      Downloading...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Download className="w-3 h-3 mr-1" />
-                                      Manifest
-                                    </>
-                                  )}
-                                </Button>
-                                <Button 
-                                  size="sm" 
-                                  variant="destructive" 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
-                                  }}
-                                  disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
-                                  className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {reverseLoading[order.order_id] ? (
-                                    <>
-                                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                                      Loading...
-                                    </>
-                                  ) : (
-                                    'Unclaim'
-                                  )}
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                    
-                    {/* Loading More Indicator for Desktop Handover */}
-                    {isLoadingMoreHandover && (
-                      <div className="flex items-center justify-center p-6 border-t">
-                        <div className="text-center">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-2"></div>
-                          <p className="text-sm text-gray-500">Loading more orders...</p>
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-4 h-4 cursor-pointer"
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">{order.order_id}</TableCell>
+                              <TableCell>
+                                {order.order_date ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium">
+                                      {new Date(order.order_date).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      {new Date(order.order_date).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+                                ) : "N/A"}
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-2">
+                                  {order.products && order.products.map((product: any, productIndex: number) => (
+                                    <div key={product.unique_id} className="flex items-center gap-3">
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <img
+                                              src={product.image || product.product_image || "/placeholder.svg"}
+                                              alt={product.product_name}
+                                              className="w-10 h-10 rounded-md object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                              onClick={() => (product.image || product.product_image) && setSelectedImageProduct({ url: product.image || product.product_image, title: product.product_name || "Product Image" })}
+                                              onError={(e) => {
+                                                e.currentTarget.src = "/placeholder.svg";
+                                              }}
+                                            />
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p>Click to view full image</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-medium text-sm break-words leading-relaxed">{product.product_name}</div>
+                                        <div className="text-xs text-gray-500 break-words">Code: {product.product_code}</div>
+                                      </div>
+                                      <div className="text-sm font-medium text-gray-700">
+                                        {product.quantity || 0}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="text-base font-bold text-blue-600">
+                                  {order.total_quantity || 0}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {(order.current_shipment_status || order.status) && (
+                                  <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block whitespace-nowrap ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                    {getShipmentDisplayName(order.current_shipment_status || order.status)}
+                                  </div>
+                                )}
+                                {!(order.current_shipment_status || order.status) && (
+                                  <span className="text-sm font-medium text-gray-800">N/A</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      // Get manifest_id from order (should be available in handover tab)
+                                      const manifestId = order.manifest_id;
+                                      if (manifestId) {
+                                        downloadManifestSummary([manifestId]);
+                                      } else {
+                                        toast({
+                                          title: "Error",
+                                          description: "Manifest ID not found for this order",
+                                          variant: "destructive",
+                                        });
+                                      }
+                                    }}
+                                    disabled={order.is_handover === 1 || manifestDownloadLoading === order.manifest_id}
+                                    className="text-xs px-3 py-1 h-8 border-green-300 text-green-600 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                                  >
+                                    {manifestDownloadLoading === order.manifest_id ? (
+                                      <>
+                                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                        Downloading...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Download className="w-3 h-3 mr-1" />
+                                        Manifest
+                                      </>
+                                    )}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRequestReverse(order.order_id, order.products?.map((p: any) => p.unique_id));
+                                    }}
+                                    disabled={reverseLoading[order.order_id] || isUnclaimDisabled(order)}
+                                    className="text-xs px-3 py-1 h-8 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {reverseLoading[order.order_id] ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                                        Loading...
+                                      </>
+                                    ) : (
+                                      'Unclaim'
+                                    )}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+
+                      {/* Loading More Indicator for Desktop Handover */}
+                      {isLoadingMoreHandover && (
+                        <div className="flex items-center justify-center p-6 border-t">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-2"></div>
+                            <p className="text-sm text-gray-500">Loading more orders...</p>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    
-                    {/* End of List Indicator for Desktop Handover */}
-                    {!handoverOrdersHasMore && handoverOrders.length > 0 && (
-                      <div className="flex items-center justify-center p-4 border-t bg-gray-50">
-                        <p className="text-sm text-gray-500">All orders loaded ({handoverOrdersTotalCount} total)</p>
-                      </div>
-                    )}
-                  </div>
+                      )}
+
+                      {/* End of List Indicator for Desktop Handover */}
+                      {!handoverOrdersHasMore && handoverOrders.length > 0 && (
+                        <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                          <p className="text-sm text-gray-500">All orders loaded ({handoverOrdersTotalCount} total)</p>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </TabsContent>
               </div>
@@ -5123,11 +5212,11 @@ export function VendorDashboard() {
                     >
                       <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </Button>
-                    
+
                     {/* Bulk Claim Button */}
-                    <Button 
-                      onClick={() => handleBulkClaimOrders()} 
-                      disabled={selectedUnclaimedOrders.length === 0 || claimLoading} 
+                    <Button
+                      onClick={() => handleBulkClaimOrders()}
+                      disabled={selectedUnclaimedOrders.length === 0 || claimLoading}
                       className="flex-1 h-10 sm:h-12 text-base sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
                     >
                       {claimLoading ? (
@@ -5162,7 +5251,7 @@ export function VendorDashboard() {
                           <SelectItem value="four-in-one">Four in One</SelectItem>
                         </SelectContent>
                       </Select>
-                      
+
                       {/* Select All Checkbox */}
                       <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0">
                         <input
@@ -5184,7 +5273,7 @@ export function VendorDashboard() {
                         <span className="text-sm sm:text-base font-medium">All</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2 sm:gap-3">
                       {/* Move to Top Button */}
                       <Button
@@ -5195,9 +5284,9 @@ export function VendorDashboard() {
                       >
                         <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                       </Button>
-                      
+
                       {/* Download Label Button */}
-                      <Button 
+                      <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
                         disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
                         className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
@@ -5218,12 +5307,12 @@ export function VendorDashboard() {
                           </div>
                         )}
                       </Button>
-                      
+
                       {/* Mark Ready Button */}
-                      <Button 
+                      <Button
                         onClick={() => handleBulkMarkReady()}
                         disabled={
-                          getVisibleSelectedOrdersCount() === 0 || 
+                          getVisibleSelectedOrdersCount() === 0 ||
                           bulkMarkReadyLoading ||
                           getFilteredOrdersForTab("my-orders")
                             .filter(order => selectedMyOrders.includes(order.order_id))
@@ -5277,7 +5366,7 @@ export function VendorDashboard() {
                         <span className="text-sm sm:text-base font-medium">Select All</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2 sm:gap-3">
                       {/* Move to Top Button */}
                       <Button
@@ -5288,9 +5377,9 @@ export function VendorDashboard() {
                       >
                         <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                       </Button>
-                      
+
                       {/* Bulk Manifest Download Button */}
-                      <Button 
+                      <Button
                         onClick={handleBulkManifestDownload}
                         disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
                         className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
@@ -5323,7 +5412,7 @@ export function VendorDashboard() {
                   <ChevronUp className="w-5 h-5" />
                 </Button>
               )}
-              
+
               {/* Order Tracking Tab Content - Shows orders that have been in handover for 24+ hours */}
               <TabsContent value="order-tracking" className="mt-0">
                 {/* Progress Indicator */}
@@ -5366,8 +5455,8 @@ export function VendorDashboard() {
                       </div>
                     ) : (
                       getFilteredTrackingOrders().map((order, index) => (
-                        <Card 
-                          key={`${order.order_id}-${index}`} 
+                        <Card
+                          key={`${order.order_id}-${index}`}
                           className="p-2.5 sm:p-3 transition-colors"
                         >
                           <div className="space-y-1.5 sm:space-y-2">
@@ -5378,7 +5467,7 @@ export function VendorDashboard() {
                                   <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
                                   {(order.current_shipment_status || order.status) && (
                                     <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
-                                      {order.current_shipment_status || order.status}
+                                      {getShipmentDisplayName(order.current_shipment_status || order.status)}
                                     </div>
                                   )}
                                 </div>
@@ -5397,7 +5486,7 @@ export function VendorDashboard() {
                                 <div className="text-xl font-bold text-purple-600">{order.total_quantity || 0}</div>
                               </div>
                             </div>
-                            
+
                             {/* Products List */}
                             <div className="space-y-2">
                               {order.products && order.products.map((product: any) => (
@@ -5408,7 +5497,7 @@ export function VendorDashboard() {
                                     className="w-10 h-10 rounded-md object-cover cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})
+                                      (product.image || product.product_image) && setSelectedImageProduct({ url: product.image || product.product_image, title: product.product_name || "Product Image" })
                                     }}
                                     onError={(e) => {
                                       e.currentTarget.src = "/placeholder.svg";
@@ -5428,7 +5517,7 @@ export function VendorDashboard() {
                         </Card>
                       ))
                     )}
-                    
+
                     {/* Total count indicator for Order Tracking */}
                     {trackingOrders.length > 0 && (
                       <div className="flex items-center justify-center p-4">
@@ -5488,7 +5577,7 @@ export function VendorDashboard() {
                                               src={product.image || product.product_image || "/placeholder.svg"}
                                               alt={product.product_name}
                                               className="w-10 h-10 rounded-md object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                              onClick={() => (product.image || product.product_image) && setSelectedImageProduct({url: product.image || product.product_image, title: product.product_name || "Product Image"})}
+                                              onClick={() => (product.image || product.product_image) && setSelectedImageProduct({ url: product.image || product.product_image, title: product.product_name || "Product Image" })}
                                               onError={(e) => {
                                                 e.currentTarget.src = "/placeholder.svg";
                                               }}
@@ -5523,7 +5612,7 @@ export function VendorDashboard() {
                               <TableCell>
                                 {(order.current_shipment_status || order.status) ? (
                                   <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
-                                    {order.current_shipment_status || order.status}
+                                    {getShipmentDisplayName(order.current_shipment_status || order.status)}
                                   </div>
                                 ) : (
                                   <span className="text-sm font-medium text-gray-800">N/A</span>
@@ -5534,7 +5623,7 @@ export function VendorDashboard() {
                         )}
                       </TableBody>
                     </Table>
-                    
+
                     {/* Total count indicator for Desktop Order Tracking */}
                     {trackingOrders.length > 0 && (
                       <div className="flex items-center justify-center p-4 border-t bg-gray-50">
@@ -5599,11 +5688,11 @@ export function VendorDashboard() {
                 <div>
                   <Label htmlFor="upi-id" className={`${isMobile ? 'text-sm' : ''}`}>UPI ID for Settlement</Label>
                   <div className="relative">
-                  <Input
-                    id="upi-id"
+                    <Input
+                      id="upi-id"
                       placeholder={isMobile ? "Enter UPI ID" : "Enter your UPI ID (e.g., user@paytm)"}
-                    value={upiId}
-                    onChange={(e) => setUpiId(e.target.value)}
+                      value={upiId}
+                      onChange={(e) => setUpiId(e.target.value)}
                       className={`${isMobile ? 'text-sm' : ''} pr-10`}
                     />
                     {upiId && (
@@ -5617,9 +5706,9 @@ export function VendorDashboard() {
                     )}
                   </div>
                 </div>
-                <Button 
-                  onClick={handleClaimRevenue} 
-                  className="w-full" 
+                <Button
+                  onClick={handleClaimRevenue}
+                  className="w-full"
                   size={isMobile ? 'default' : 'default'}
                   disabled={!upiId.trim() || settlementLoading || !payments || payments.currentPayment <= 0}
                 >
@@ -5654,7 +5743,7 @@ export function VendorDashboard() {
                           <div className="flex items-center gap-2">
                             <p className="font-medium">₹{settlement.amount}</p>
                             {settlement.status === "approved" && (
-                              <Badge 
+                              <Badge
                                 variant="secondary"
                                 className={
                                   settlement.amountPaid && parseFloat(settlement.amountPaid) === parseFloat(settlement.amount)
@@ -5682,14 +5771,14 @@ export function VendorDashboard() {
                               settlement.status === "approved"
                                 ? "bg-green-100 text-green-800"
                                 : settlement.status === "rejected"
-                                ? "bg-red-100 text-red-800"
-                                : "bg-yellow-100 text-yellow-800"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-yellow-100 text-yellow-800"
                             }
                           >
                             {settlement.status.toUpperCase()}
                           </Badge>
-                          <Button 
-                            size="sm" 
+                          <Button
+                            size="sm"
                             variant="outline"
                             onClick={() => handleViewRequest(settlement)}
                           >
@@ -5697,8 +5786,8 @@ export function VendorDashboard() {
                             View Request
                           </Button>
                           {settlement.paymentProofPath && (
-                            <Button 
-                              size="sm" 
+                            <Button
+                              size="sm"
                               variant="outline"
                               onClick={() => handleViewProof(settlement.paymentProofPath)}
                             >
@@ -5734,8 +5823,8 @@ export function VendorDashboard() {
                                 {transaction.status.toUpperCase()}
                               </Badge>
                               {transaction.paymentProofPath && (
-                                <Button 
-                                  size="sm" 
+                                <Button
+                                  size="sm"
                                   variant="outline"
                                   onClick={() => handleViewProof(transaction.paymentProofPath)}
                                 >
@@ -5766,9 +5855,9 @@ export function VendorDashboard() {
           </DialogHeader>
           <div className="flex justify-center">
             {selectedProofUrl && (
-              <img 
-                src={selectedProofUrl} 
-                alt="Payment Proof" 
+              <img
+                src={selectedProofUrl}
+                alt="Payment Proof"
                 className="max-w-full max-h-96 object-contain"
                 onLoad={() => {
                   // Clean up object URL after image loads
@@ -5791,7 +5880,7 @@ export function VendorDashboard() {
             <DialogTitle className={`${isMobile ? 'text-base' : 'text-lg'}`}>Settlement Details</DialogTitle>
             {!isMobile && <DialogDescription>Complete details of the settlement request</DialogDescription>}
           </DialogHeader>
-          
+
           {selectedSettlementForView && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -5814,8 +5903,8 @@ export function VendorDashboard() {
                       selectedSettlementForView.status === "approved"
                         ? "bg-green-100 text-green-800"
                         : selectedSettlementForView.status === "rejected"
-                        ? "bg-red-100 text-red-800"
-                        : "bg-yellow-100 text-yellow-800"
+                          ? "bg-red-100 text-red-800"
+                          : "bg-yellow-100 text-yellow-800"
                     }
                   >
                     {selectedSettlementForView.status.toUpperCase()}
@@ -5833,7 +5922,7 @@ export function VendorDashboard() {
                   <>
                     <div>
                       <Label className="font-semibold">Payment Status</Label>
-                      <Badge 
+                      <Badge
                         className={
                           selectedSettlementForView.amountPaid && parseFloat(selectedSettlementForView.amountPaid) === parseFloat(selectedSettlementForView.amount)
                             ? "bg-green-100 text-green-800"
@@ -5898,7 +5987,7 @@ export function VendorDashboard() {
                   <DialogTitle className="text-sm font-semibold flex-1 pr-2 break-words">
                     {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
                   </DialogTitle>
-                  
+
                 </DialogHeader>
                 <div className="flex-1 flex items-center justify-center p-4 overflow-hidden bg-gray-50">
                   {selectedImageProduct ? (
@@ -5921,27 +6010,27 @@ export function VendorDashboard() {
           ) : (
             // Desktop view
             <>
-          <DialogHeader>
-            <DialogTitle>
-              {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
-            </DialogTitle>
-          </DialogHeader>
+              <DialogHeader>
+                <DialogTitle>
+                  {selectedImageProduct ? selectedImageProduct.title : "Image Preview"}
+                </DialogTitle>
+              </DialogHeader>
               <div className="flex items-center justify-center p-4">
-            {selectedImageProduct ? (
-              <img
-                src={selectedImageProduct.url}
-                alt={selectedImageProduct.title}
-                className="max-w-full max-h-[70vh] object-contain rounded-lg"
-                onError={(e) => {
-                  e.currentTarget.src = "/placeholder.svg";
-                }}
-              />
-            ) : (
+                {selectedImageProduct ? (
+                  <img
+                    src={selectedImageProduct.url}
+                    alt={selectedImageProduct.title}
+                    className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                    onError={(e) => {
+                      e.currentTarget.src = "/placeholder.svg";
+                    }}
+                  />
+                ) : (
                   <div className="flex items-center justify-center h-[60vh] text-gray-500">
-                No image available
+                    No image available
+                  </div>
+                )}
               </div>
-            )}
-          </div>
             </>
           )}
         </DialogContent>
@@ -5949,7 +6038,7 @@ export function VendorDashboard() {
 
       {/* Merge Confirmation Dialog */}
       <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
-        <DialogContent 
+        <DialogContent
           className={`${isMobile ? 'max-w-[95vw] p-4' : 'max-w-md'}`}
           onInteractOutside={(e) => {
             // Prevent closing when clicking outside the dialog
@@ -5970,7 +6059,7 @@ export function VendorDashboard() {
               Select a format to merge and download your labels
             </DialogDescription>
           </DialogHeader>
-          
+
           {mergeDialogData && (
             <div className="mt-2 space-y-2">
               <div className="flex items-center gap-2">
