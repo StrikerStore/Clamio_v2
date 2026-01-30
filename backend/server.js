@@ -47,29 +47,50 @@ app.use(helmet({
 
 /**
  * CORS Configuration
+ * Note: Added explicit OPTIONS handling and preflight caching for better mobile network support
  */
+
+// Define allowed origins
+const allowedOrigins = [
+  'https://frontend-dev-production-5a8c.up.railway.app',
+  'https://clamiofrontend-production.up.railway.app',
+  'https://clamio-frontend-nu.vercel.app',
+  "https://claimio.in",
+  "https://www.claimio.in",
+  "https://dev.claimio.in",
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001'
+];
+
+// Add environment variable origin if provided
+if (process.env.CORS_ORIGIN) {
+  allowedOrigins.push(process.env.CORS_ORIGIN);
+}
+
+// Handle OPTIONS preflight requests quickly (before other middleware)
+// This helps with slow mobile networks where preflight can timeout
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+
+  // Allow if origin matches or is a PWA (no origin)
+  if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Max-Age', '86400'); // Cache preflight for 24 hours
+    return res.status(204).send();
+  }
+
+  res.status(403).send('CORS not allowed');
+});
+
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
+    // Allow requests with no origin (like mobile apps, PWAs, or curl requests)
     if (!origin) return callback(null, true);
-
-    const allowedOrigins = [
-      'https://frontend-dev-production-5a8c.up.railway.app',
-      'https://clamiofrontend-production.up.railway.app',
-      'https://clamio-frontend-nu.vercel.app',
-      "https://claimio.in",
-      "https://www.claimio.in",
-      "https://dev.claimio.in",
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001'
-    ];
-
-    // Add environment variable origin if provided
-    if (process.env.CORS_ORIGIN) {
-      allowedOrigins.push(process.env.CORS_ORIGIN);
-    }
 
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
@@ -81,7 +102,8 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 204, // Some legacy browsers choke on 200
+  maxAge: 86400 // Cache preflight requests for 24 hours
 }));
 
 /**
@@ -130,8 +152,8 @@ if (process.env.NODE_ENV === 'development') {
  * Automatically reconnects if connection is lost after idle periods
  */
 app.use(async (req, res, next) => {
-  // Skip database check for health and test endpoints
-  if (req.path === '/health' || req.path === '/test' || req.path === '/env-check') {
+  // Skip database check for health, test endpoints, and OPTIONS preflight requests
+  if (req.path === '/health' || req.path === '/test' || req.path === '/env-check' || req.method === 'OPTIONS') {
     return next();
   }
 
@@ -691,12 +713,81 @@ app.listen(PORT, async () => {
     }
   });
 
-  // Run active orders tracking once immediately on startup (optional)
+  // RTO Inventory Processing - Process delivered RTO orders and update inventory at 4 AM daily
+  const rtoInventoryService = require('./services/rtoInventoryService');
+  cron.schedule('0 4 * * *', async () => {
+    try {
+      console.log('[RTO Inventory] Starting daily RTO inventory processing...');
+      const result = await rtoInventoryService.processDeliveredRTOOrders();
+      if (result.success) {
+        console.log(`[RTO Inventory] Processing completed. Processed: ${result.processedCount}, Errors: ${result.errorCount || 0}`);
+      } else {
+        console.log(`[RTO Inventory] Processing skipped: ${result.message}`);
+      }
+    } catch (err) {
+      console.error('[RTO Inventory] Processing failed:', err.message);
+    }
+  });
+
+  // RTO Inventory Cleanup - Delete zero-quantity records older than 48 hours at 6 AM daily
+  cron.schedule('0 6 * * *', async () => {
+    try {
+      console.log('[RTO Inventory Cleanup] Starting cleanup of zero-quantity records...');
+      const result = await database.cleanupZeroQuantityRTOInventory();
+      console.log(`[RTO Inventory Cleanup] Completed. Deleted: ${result.deletedCount} records`);
+    } catch (err) {
+      console.error('[RTO Inventory Cleanup] Failed:', err.message);
+    }
+  });
+
+  // Run one-time migration to update rto_wh from latest activity location
+  (async () => {
+    try {
+      const rtoWarehouseMigration = require('./migrations/updateRtoWarehouse');
+      console.log('[Migration] Running RTO warehouse migration...');
+      const result = await rtoWarehouseMigration.run();
+      if (result.skipped) {
+        console.log('[Migration] RTO warehouse migration already completed, skipped.');
+      } else if (result.success) {
+        console.log(`[Migration] RTO warehouse migration completed. Updated: ${result.updatedCount}/${result.processedCount}`);
+      } else {
+        console.log(`[Migration] RTO warehouse migration failed: ${result.message}`);
+      }
+    } catch (err) {
+      console.error('[Migration] RTO warehouse migration error:', err.message);
+    }
+  })();
+
+  // Run active orders tracking once immediately on startup, then process RTO inventory
   (async () => {
     try {
       console.log('[Order Tracking] Running initial active orders sync on startup...');
       await orderTrackingService.syncActiveOrderTracking();
       console.log('[Order Tracking] Initial active orders sync completed.');
+
+      // Process RTO inventory AFTER order tracking sync completes
+      // This ensures we have the latest delivered orders in rto_tracking table
+      try {
+        console.log('[RTO Inventory] Running RTO inventory processing after order sync...');
+        const result = await rtoInventoryService.processDeliveredRTOOrders();
+        if (result.success) {
+          console.log(`[RTO Inventory] Post-sync processing completed. Processed: ${result.processedCount}`);
+        } else {
+          console.log(`[RTO Inventory] Post-sync processing: ${result.message}`);
+        }
+      } catch (rtoErr) {
+        console.error('[RTO Inventory] Post-sync processing failed:', rtoErr.message);
+      }
+
+      // Update RTO days_since_initiated and is_focus on startup
+      // This ensures data is current immediately after deployment
+      try {
+        console.log('[RTO Tracking] Running days_since_initiated and is_focus update on startup...');
+        const rtoResult = await database.updateRTODaysAndFocus();
+        console.log(`[RTO Tracking] Startup update completed. Days updated: ${rtoResult.daysUpdated}, Focus updated: ${rtoResult.focusUpdated}`);
+      } catch (rtoUpdateErr) {
+        console.error('[RTO Tracking] Startup update failed:', rtoUpdateErr.message);
+      }
     } catch (err) {
       console.error('[Order Tracking] Initial active orders sync failed:', err.message);
     }

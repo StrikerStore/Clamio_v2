@@ -986,7 +986,9 @@ class Database {
           days_since_initiated INT DEFAULT 0,
           is_focus TINYINT(1) DEFAULT 0,
           is_delivered TINYINT(1) DEFAULT 0,
+          is_fetched TINYINT(1) DEFAULT 0,
           rto_wh VARCHAR(255) NULL,
+          activity_date DATETIME NULL,
           account_code VARCHAR(50) NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -997,16 +999,131 @@ class Database {
           INDEX idx_instance_number (instance_number),
           INDEX idx_is_focus (is_focus),
           INDEX idx_is_delivered (is_delivered),
+          INDEX idx_is_fetched (is_fetched),
           INDEX idx_account_code (account_code),
           INDEX idx_created_at (created_at),
+          INDEX idx_activity_date (activity_date),
           UNIQUE KEY uk_order_status_instance (order_id, order_status, account_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
 
       await this.mysqlConnection.execute(createRTOTrackingTableQuery);
       console.log('✅ RTO tracking table created/verified');
+
+      // Add is_fetched column if it doesn't exist (for existing tables)
+      await this.addIsFetchedToRTOTrackingIfNotExists();
+
+      // Add activity_date column if it doesn't exist (for existing tables)
+      await this.addActivityDateToRTOTrackingIfNotExists();
+
+      // Create RTO inventory table
+      await this.createRTOInventoryTable();
     } catch (error) {
       console.error('❌ Error creating RTO tracking table:', error.message);
+    }
+  }
+
+  /**
+   * Add is_fetched column to existing rto_tracking table if it doesn't exist (migration)
+   */
+  async addIsFetchedToRTOTrackingIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if is_fetched column exists in rto_tracking table
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM rto_tracking LIKE 'is_fetched'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding is_fetched column to existing rto_tracking table...');
+
+        // Add is_fetched column
+        await this.mysqlConnection.execute(
+          `ALTER TABLE rto_tracking ADD COLUMN is_fetched TINYINT(1) DEFAULT 0 AFTER is_delivered`
+        );
+
+        // Add index for is_fetched
+        await this.mysqlConnection.execute(
+          `ALTER TABLE rto_tracking ADD INDEX idx_is_fetched (is_fetched)`
+        );
+
+        console.log('✅ is_fetched column added to rto_tracking table');
+      } else {
+        console.log('✅ is_fetched column already exists in rto_tracking table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding is_fetched column to rto_tracking table:', error.message);
+    }
+  }
+
+  /**
+   * Add activity_date column to existing rto_tracking table if it doesn't exist (migration)
+   */
+  async addActivityDateToRTOTrackingIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if activity_date column exists in rto_tracking table
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM rto_tracking LIKE 'activity_date'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding activity_date column to existing rto_tracking table...');
+
+        // Add activity_date column after rto_wh
+        await this.mysqlConnection.execute(
+          `ALTER TABLE rto_tracking ADD COLUMN activity_date DATETIME NULL AFTER rto_wh`
+        );
+
+        // Add index for activity_date
+        await this.mysqlConnection.execute(
+          `ALTER TABLE rto_tracking ADD INDEX idx_activity_date (activity_date)`
+        );
+
+        console.log('✅ activity_date column added to rto_tracking table');
+      } else {
+        console.log('✅ activity_date column already exists in rto_tracking table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding activity_date column to rto_tracking table:', error.message);
+    }
+  }
+
+  /**
+   * Create RTO inventory table for aggregating returned products at RTO warehouses
+   */
+  async createRTOInventoryTable() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      console.log('🔄 Creating rto_inventory table...');
+
+      const createRTOInventoryTableQuery = `
+        CREATE TABLE IF NOT EXISTS rto_inventory (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          rto_wh VARCHAR(255) NOT NULL,
+          product_code VARCHAR(100) NOT NULL,
+          size VARCHAR(20),
+          quantity INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          
+          -- Composite unique key for upsert logic
+          UNIQUE KEY uk_rto_wh_product_size (rto_wh, product_code, size),
+          
+          -- Indexes for performance
+          INDEX idx_rto_wh (rto_wh),
+          INDEX idx_product_code (product_code),
+          INDEX idx_size (size)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+
+      await this.mysqlConnection.execute(createRTOInventoryTableQuery);
+      console.log('✅ RTO inventory table created/verified');
+    } catch (error) {
+      console.error('❌ Error creating RTO inventory table:', error.message);
     }
   }
 
@@ -4131,6 +4248,52 @@ class Database {
   }
 
   /**
+   * Get all distinct statuses currently present in the system
+   * This combines statuses from claims table and labels table
+   */
+  async getDistinctOrderStatuses() {
+    // Use pool if available
+    const db = this.mysqlPool || this.mysqlConnection;
+    if (!db) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      // Query 1: Get distinct statuses from claims table
+      const claimsQuery = `SELECT DISTINCT status FROM claims WHERE status IS NOT NULL AND status != ''`;
+
+      // Query 2: Get distinct shipment statuses from labels table
+      const labelsQuery = `SELECT DISTINCT current_shipment_status as status FROM labels WHERE current_shipment_status IS NOT NULL AND current_shipment_status != ''`;
+
+      const [claimsResult, labelsResult] = await Promise.all([
+        db.execute(claimsQuery),
+        db.execute(labelsQuery)
+      ]);
+
+      const statusSet = new Set();
+
+      // Add statuses from claims
+      claimsResult[0].forEach(row => {
+        if (row.status) statusSet.add(row.status);
+      });
+
+      // Add statuses from labels
+      labelsResult[0].forEach(row => {
+        if (row.status) statusSet.add(row.status);
+      });
+
+      // Sort and return as array
+      const distinctStatuses = Array.from(statusSet).sort();
+
+      console.log(`📊 Found ${distinctStatuses.length} distinct statuses in the system`);
+      return distinctStatuses;
+    } catch (error) {
+      console.error('Error getting distinct statuses:', error);
+      throw new Error('Failed to get distinct statuses from database');
+    }
+  }
+
+  /**
    * Get admin dashboard statistics (total counts for cards)
    * @param {Object} options - Filter options
    * @param {string} options.search - Search term
@@ -4717,6 +4880,10 @@ class Database {
       const labelValues = [];
 
       // Orders table fields
+      // Note: Financial fields (selling_price, order_total, payment_type, is_partial_paid, prepaid_amount,
+      // order_total_ratio, order_total_split, collectable_amount) are FROZEN at the shipwayService level.
+      // They are only updated when payment_type or is_partial_paid changes during sync.
+      // They are still allowed here so the sync can update them when needed.
       const allowedOrderFields = [
         'order_id', 'customer_name', 'order_date',
         'product_name', 'product_code', 'selling_price', 'order_total',
@@ -6609,9 +6776,10 @@ class Database {
    * @param {string} orderId - The order ID
    * @param {string} orderStatus - The RTO status (e.g., "RTO Initiated", "RTO In Transit")
    * @param {string} accountCode - The account code for the store
-   * @param {string|null} rtoWh - The RTO warehouse from Shipway API (delivered_to field)
+   * @param {string|null} rtoWh - The RTO warehouse from latest tracking activity location
+   * @param {string|null} activityDate - The date of the latest tracking activity (YYYY-MM-DD HH:MM:SS format)
    */
-  async storeRTOTracking(orderId, orderStatus, accountCode, rtoWh = null) {
+  async storeRTOTracking(orderId, orderStatus, accountCode, rtoWh = null, activityDate = null) {
     if (!this.mysqlConnection) {
       throw new Error('MySQL connection not available');
     }
@@ -6630,11 +6798,18 @@ class Database {
       );
 
       if (existing.length > 0) {
-        // Same status exists - just update updated_at timestamp
-        await this.mysqlConnection.execute(
-          `UPDATE rto_tracking SET updated_at = NOW() WHERE id = ?`,
-          [existing[0].id]
-        );
+        // Same status exists - update updated_at timestamp and activity_date if provided
+        if (activityDate) {
+          await this.mysqlConnection.execute(
+            `UPDATE rto_tracking SET updated_at = NOW(), activity_date = ?, rto_wh = ? WHERE id = ?`,
+            [activityDate, rtoWh, existing[0].id]
+          );
+        } else {
+          await this.mysqlConnection.execute(
+            `UPDATE rto_tracking SET updated_at = NOW() WHERE id = ?`,
+            [existing[0].id]
+          );
+        }
         console.log(`✅ [RTO] Updated existing RTO record (same status: ${orderStatus}) for order ${orderId}`);
         return { action: 'updated', id: existing[0].id };
       }
@@ -6650,15 +6825,14 @@ class Database {
       const newInstanceNumber = maxInstance[0].max_instance + 1;
 
       // Check if status indicates delivery
-      const isDelivered = orderStatus.toLowerCase().includes('del') ||
-        orderStatus.toLowerCase().includes('delivered') ? 1 : 0;
+      const isDelivered = orderStatus.toLowerCase().includes('delivered') ? 1 : 0;
 
-      // Insert new RTO tracking record
+      // Insert new RTO tracking record with activity_date
       const [result] = await this.mysqlConnection.execute(
         `INSERT INTO rto_tracking 
-         (order_id, order_status, instance_number, days_since_initiated, is_focus, is_delivered, rto_wh, account_code)
-         VALUES (?, ?, ?, 0, 0, ?, ?, ?)`,
-        [orderId, orderStatus, newInstanceNumber, isDelivered, rtoWh, accountCode]
+         (order_id, order_status, instance_number, days_since_initiated, is_focus, is_delivered, rto_wh, activity_date, account_code)
+         VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?)`,
+        [orderId, orderStatus, newInstanceNumber, isDelivered, rtoWh, activityDate, accountCode]
       );
 
       console.log(`✅ [RTO] Stored new RTO tracking record (status: ${orderStatus}, instance: ${newInstanceNumber}) for order ${orderId}`);
@@ -6725,8 +6899,11 @@ class Database {
    * Update days_since_initiated and is_focus for all RTO records
    * This should be called daily via cron job
    * Logic:
-   * - days_since_initiated: DATEDIFF(CURRENT_DATE, DATE(created_at))
-   * - is_focus: 1 if (status contains 'RTO Initiated') AND (days > 7) AND (order not delivered)
+   * - days_since_initiated: DATEDIFF(CURRENT_DATE, DATE(activity_date))
+   * - is_focus: 1 for ALL instances of an order if:
+   *   - The FIRST instance (instance_number = 1) has days_since_initiated > 7
+   *   - AND the order is NOT delivered (is_delivered = 0)
+   * - When RTO is delivered, ALL instances get is_focus = 0 and is_delivered = 1
    */
   async updateRTODaysAndFocus() {
     if (!this.mysqlConnection) {
@@ -6736,57 +6913,46 @@ class Database {
     try {
       console.log('🔄 [RTO] Starting daily update for days_since_initiated and is_focus...');
 
-      // Step 1: Update days_since_initiated for all records
+      // Step 1: Update days_since_initiated for all records (using activity_date)
+      // If activity_date is NULL, fall back to created_at
       const [daysResult] = await this.mysqlConnection.execute(`
         UPDATE rto_tracking 
-        SET days_since_initiated = DATEDIFF(CURRENT_DATE, DATE(created_at))
+        SET days_since_initiated = DATEDIFF(CURRENT_DATE, DATE(COALESCE(activity_date, created_at)))
       `);
       console.log(`✅ [RTO] Updated days_since_initiated for ${daysResult.affectedRows} records`);
 
-      // Step 2: Mark is_delivered for any order that has a delivered status
+      // Step 2: Mark is_delivered = 1 for ALL instances of orders that have a delivered status
       const [deliveredResult] = await this.mysqlConnection.execute(`
         UPDATE rto_tracking rt
         SET is_delivered = 1
         WHERE rt.order_id IN (
           SELECT DISTINCT order_id 
           FROM (SELECT order_id FROM rto_tracking 
-                WHERE order_status LIKE '%DEL%' 
-                   OR order_status LIKE '%Delivered%'
+                WHERE order_status LIKE '%Delivered%'
                    OR order_status LIKE '%delivered%') as delivered_orders
         )
       `);
       console.log(`✅ [RTO] Updated is_delivered for ${deliveredResult.affectedRows} records`);
 
-      // Step 3: Reset is_focus to 0 first
+      // Step 3: Reset is_focus to 0 for all records first
       await this.mysqlConnection.execute(`UPDATE rto_tracking SET is_focus = 0`);
 
-      // Step 4: Set is_focus = 1 for records meeting criteria:
-      // Criteria 1: Status contains 'RTO Initiated' or 'RTO_Initiated' AND days > 7 AND order not delivered
-      // Criteria 2: Status is undelivered (RTONDR5, RTOUND, RTO Undelivered, UND, Undelivered) AND order not delivered
+      // Step 4: Set is_focus = 1 for ALL instances of orders where:
+      // - The FIRST instance (instance_number = 1) has days_since_initiated > 7
+      // - AND the order is NOT delivered (is_delivered = 0)
       const [focusResult] = await this.mysqlConnection.execute(`
-        UPDATE rto_tracking 
+        UPDATE rto_tracking rt
         SET is_focus = 1
-        WHERE (
-          -- Criteria 1: RTO Initiated > 7 days
-          (
-            (order_status LIKE '%RTO Initiated%' OR order_status LIKE '%RTO_Initiated%')
-            AND days_since_initiated > 7
+        WHERE rt.is_delivered = 0
+          AND rt.order_id IN (
+            SELECT order_id FROM (
+              SELECT order_id 
+              FROM rto_tracking 
+              WHERE instance_number = 1 
+                AND days_since_initiated > 7
+                AND is_delivered = 0
+            ) as focus_orders
           )
-          OR
-          -- Criteria 2: Undelivered statuses (immediate focus regardless of days)
-          (
-            order_status IN ('RTONDR5', 'RTOUND', 'RTO Undelivered', 'UND', 'Undelivered')
-            OR order_status LIKE '%RTONDR%'
-            OR order_status LIKE '%RTOUND%'
-            OR order_status LIKE '%RTO Undelivered%'
-            OR order_status LIKE '%Undelivered%'
-          )
-        )
-        AND order_id NOT IN (
-          SELECT DISTINCT order_id FROM (
-            SELECT order_id FROM rto_tracking WHERE is_delivered = 1
-          ) as delivered_orders
-        )
       `);
       console.log(`✅ [RTO] Updated is_focus for ${focusResult.affectedRows} records`);
 
@@ -6859,13 +7025,14 @@ class Database {
           rt.days_since_initiated,
           rt.rto_wh,
           rt.account_code,
+          rt.activity_date,
           rt.created_at,
           rt.updated_at,
           l.awb,
           l.carrier_name
         FROM rto_tracking rt
         LEFT JOIN labels l ON rt.order_id = l.order_id AND rt.account_code = l.account_code
-        WHERE rt.is_focus = 1
+        WHERE rt.is_focus = 1 AND rt.instance_number = 1
       `;
       const params = [];
 
@@ -6880,6 +7047,570 @@ class Database {
       return rows;
     } catch (error) {
       console.error('❌ [RTO] Error getting RTO focus orders:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update RTO focus orders status
+   * Updates order_status and sets is_focus = 0 for the given order_ids
+   * @param {string[]} orderIds - Array of order IDs to update
+   * @param {string} newStatus - New status to set
+   * @param {string} accountCode - Optional account code filter
+   * @returns {Promise<{affectedRows: number}>} Number of affected rows
+   */
+  async updateRTOFocusStatus(orderIds, newStatus, accountCode = null) {
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    if (!orderIds || orderIds.length === 0) {
+      throw new Error('No order IDs provided');
+    }
+
+    try {
+      const placeholders = orderIds.map(() => '?').join(',');
+      let query = `
+        UPDATE rto_tracking 
+        SET order_status = ?, is_focus = 0, updated_at = NOW()
+        WHERE order_id IN (${placeholders}) AND instance_number = 1
+      `;
+      const params = [newStatus, ...orderIds];
+
+      if (accountCode) {
+        query += ` AND account_code = ?`;
+        params.push(accountCode);
+      }
+
+      const [result] = await this.mysqlConnection.execute(query, params);
+      console.log(`✅ [RTO] Updated ${result.affectedRows} RTO focus orders to status: ${newStatus}`);
+      return { affectedRows: result.affectedRows };
+    } catch (error) {
+      console.error('❌ [RTO] Error updating RTO focus status:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get unprocessed delivered RTO orders with product details from orders table
+   * Filters: order_status in ('DEL', 'Delivered', 'RTO Delivered', 'RTO_Delivered'), is_delivered = 1, is_fetched = 0
+   * @returns {Promise<Array>} Array of unprocessed RTO orders with product details
+   */
+  async getUnprocessedRTODeliveredOrders() {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const query = `
+        SELECT 
+          rt.id as rto_tracking_id,
+          rt.order_id,
+          rt.order_status,
+          rt.rto_wh,
+          o.product_code,
+          o.size,
+          o.quantity
+        FROM rto_tracking rt
+        INNER JOIN orders o ON rt.order_id = o.order_id AND rt.account_code = o.account_code
+        WHERE rt.order_status IN ('Delivered', 'RTO Delivered', 'RTO_Delivered')
+          AND rt.is_delivered = 1
+          AND rt.is_fetched = 0
+          AND rt.rto_wh IS NOT NULL
+          AND rt.rto_wh != ''
+        ORDER BY rt.order_id
+      `;
+
+      const [rows] = await this.mysqlConnection.execute(query);
+      console.log(`📦 [RTO Inventory] Found ${rows.length} unprocessed delivered RTO orders`);
+      return rows;
+    } catch (error) {
+      console.error('❌ [RTO Inventory] Error getting unprocessed RTO delivered orders:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Upsert RTO inventory - insert new record or add to existing quantity
+   * @param {string} rtoWh - RTO warehouse name
+   * @param {string} productCode - Product code/SKU
+   * @param {string} size - Product size
+   * @param {number} quantity - Quantity to add
+   * @returns {Promise<Object>} Result of the upsert operation
+   */
+  async upsertRTOInventory(rtoWh, productCode, size, quantity) {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      // Use INSERT ... ON DUPLICATE KEY UPDATE for atomic upsert
+      const query = `
+        INSERT INTO rto_inventory (rto_wh, product_code, size, quantity)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE 
+          quantity = quantity + VALUES(quantity),
+          updated_at = CURRENT_TIMESTAMP
+      `;
+
+      const [result] = await this.mysqlConnection.execute(query, [
+        rtoWh,
+        productCode,
+        size || '',
+        quantity
+      ]);
+
+      console.log(`✅ [RTO Inventory] Upserted: rto_wh=${rtoWh}, product_code=${productCode}, size=${size}, qty=${quantity}`);
+      return result;
+    } catch (error) {
+      console.error('❌ [RTO Inventory] Error upserting RTO inventory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Mark RTO tracking records as fetched after successful inventory processing
+   * @param {Array<number>} rtoTrackingIds - Array of rto_tracking IDs to mark as fetched
+   * @returns {Promise<Object>} Result of the update operation
+   */
+  async markRTOTrackingAsFetched(rtoTrackingIds) {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    if (!rtoTrackingIds || rtoTrackingIds.length === 0) {
+      return { affectedRows: 0 };
+    }
+
+    try {
+      const placeholders = rtoTrackingIds.map(() => '?').join(', ');
+      const query = `
+        UPDATE rto_tracking 
+        SET is_fetched = 1, updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (${placeholders})
+      `;
+
+      const [result] = await this.mysqlConnection.execute(query, rtoTrackingIds);
+      console.log(`✅ [RTO Inventory] Marked ${result.affectedRows} RTO tracking records as fetched`);
+      return result;
+    } catch (error) {
+      console.error('❌ [RTO Inventory] Error marking RTO tracking as fetched:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get RTO inventory summary
+   * @returns {Promise<Array>} Array of RTO inventory records
+   */
+  async getRTOInventory() {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const query = `
+        SELECT 
+          id,
+          rto_wh,
+          product_code,
+          size,
+          quantity,
+          created_at,
+          updated_at
+        FROM rto_inventory
+        ORDER BY rto_wh, product_code, size
+      `;
+
+      const [rows] = await this.mysqlConnection.execute(query);
+      return rows;
+    } catch (error) {
+      console.error('❌ [RTO Inventory] Error getting RTO inventory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get RTO inventory with product names from products table
+   * Matches rto_inventory.product_code (without size suffix) to products.sku_id
+   * Uses account_code priority: STRI > DRIB > JERS for product name selection
+   * @returns {Promise<Array>} RTO inventory with product names
+   */
+  async getRTOInventoryWithProductNames() {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      console.log('📦 [RTO Inventory] Fetching RTO inventory with product names...');
+
+      // Query that:
+      // 1. Strips size suffix from product_code to match sku_id
+      //    (product_code = "CLU-KRM-TH-25/26-16-18", size = "16-18" → base_sku = "CLU-KRM-TH-25/26")
+      // 2. Joins with products table
+      // 3. Uses account_code priority for product name selection when multiple matches exist
+      const query = `
+        WITH rto_with_base_sku AS (
+          SELECT 
+            ri.id,
+            ri.rto_wh,
+            ri.product_code,
+            ri.size,
+            ri.quantity,
+            -- Remove "-{size}" suffix from product_code to get base SKU
+            CASE 
+              WHEN ri.size IS NOT NULL AND ri.size != '' 
+                   AND ri.product_code LIKE CONCAT('%-', ri.size)
+              THEN LEFT(ri.product_code, LENGTH(ri.product_code) - LENGTH(CONCAT('-', ri.size)))
+              ELSE ri.product_code
+            END as base_sku
+          FROM rto_inventory ri
+          WHERE ri.quantity > 0
+        ),
+        rto_with_products AS (
+          SELECT 
+            r.id,
+            r.rto_wh,
+            r.product_code,
+            r.size,
+            r.quantity,
+            r.base_sku,
+            p.name as product_name,
+            p.account_code,
+            -- Priority ranking: STRI=1, DRIB=2, JERS=3, others=4
+            CASE p.account_code
+              WHEN 'STRI' THEN 1
+              WHEN 'DRIB' THEN 2
+              WHEN 'JERS' THEN 3
+              ELSE 4
+            END as priority_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY r.id 
+              ORDER BY 
+                CASE p.account_code
+                  WHEN 'STRI' THEN 1
+                  WHEN 'DRIB' THEN 2
+                  WHEN 'JERS' THEN 3
+                  ELSE 4
+                END
+            ) as rn
+          FROM rto_with_base_sku r
+          LEFT JOIN products p ON r.base_sku = p.sku_id
+        )
+        SELECT 
+          id,
+          rto_wh as Location,
+          COALESCE(product_name, product_code) as Product_Name,
+          size as Size,
+          CAST(quantity AS SIGNED) as Quantity,
+          product_code,
+          base_sku
+        FROM rto_with_products
+        WHERE rn = 1
+        ORDER BY rto_wh, Product_Name, size
+      `;
+
+      const [rows] = await this.mysqlConnection.execute(query);
+      console.log(`📦 [RTO Inventory] Found ${rows.length} RTO entries with product names`);
+      return rows;
+    } catch (error) {
+      console.error('❌ [RTO Inventory] Error getting RTO inventory with product names:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process delivered RTO orders and update inventory
+   * This is the main function that orchestrates the RTO inventory update process
+   * @returns {Promise<Object>} Processing result with stats
+   */
+  async processRTOInventory() {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      console.log('🚀 [RTO Inventory] Starting RTO inventory processing...');
+
+      // Get unprocessed delivered RTO orders
+      const unprocessedOrders = await this.getUnprocessedRTODeliveredOrders();
+
+      if (unprocessedOrders.length === 0) {
+        console.log('✅ [RTO Inventory] No unprocessed RTO orders found');
+        return {
+          success: true,
+          processedCount: 0,
+          message: 'No unprocessed RTO orders found'
+        };
+      }
+
+      // Track processed IDs for marking as fetched
+      const processedIds = [];
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Process each order
+      for (const order of unprocessedOrders) {
+        try {
+          await this.upsertRTOInventory(
+            order.rto_wh,
+            order.product_code,
+            order.size,
+            order.quantity || 1
+          );
+          processedIds.push(order.rto_tracking_id);
+          successCount++;
+        } catch (error) {
+          console.error(`❌ [RTO Inventory] Failed to process order ${order.order_id}:`, error.message);
+          errorCount++;
+        }
+      }
+
+      // Mark processed orders as fetched
+      if (processedIds.length > 0) {
+        await this.markRTOTrackingAsFetched(processedIds);
+      }
+
+      console.log(`✅ [RTO Inventory] Processing completed: ${successCount} success, ${errorCount} errors`);
+
+      return {
+        success: true,
+        processedCount: successCount,
+        errorCount: errorCount,
+        totalFound: unprocessedOrders.length,
+        message: `Processed ${successCount} RTO orders into inventory`
+      };
+    } catch (error) {
+      console.error('❌ [RTO Inventory] Error processing RTO inventory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Batch update RTO inventory quantities
+   * @param {Array} updates - Array of {id, quantity} objects
+   * @returns {Promise<Object>} Update result with count
+   */
+  async updateRTOInventoryBatch(updates) {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    if (!updates || !Array.isArray(updates) || updates.length === 0) {
+      return { success: true, updatedCount: 0, message: 'No updates provided' };
+    }
+
+    try {
+      console.log(`📦 [RTO Inventory] Batch updating ${updates.length} items...`);
+
+      let updatedCount = 0;
+      let errorCount = 0;
+
+      // Process each update individually (each UPDATE is atomic)
+      for (const update of updates) {
+        if (update.id === undefined || update.quantity === undefined) {
+          console.warn(`⚠️ [RTO Inventory] Skipping invalid update:`, update);
+          continue;
+        }
+
+        try {
+          const quantity = Math.max(0, parseInt(update.quantity) || 0);
+
+          const [result] = await this.mysqlConnection.execute(
+            `UPDATE rto_inventory SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [quantity, update.id]
+          );
+
+          if (result.affectedRows > 0) {
+            updatedCount++;
+          }
+        } catch (updateError) {
+          console.error(`⚠️ [RTO Inventory] Failed to update id ${update.id}:`, updateError.message);
+          errorCount++;
+        }
+      }
+
+      console.log(`✅ [RTO Inventory] Batch update completed: ${updatedCount} items updated, ${errorCount} errors`);
+
+      return {
+        success: true,
+        updatedCount: updatedCount,
+        errorCount: errorCount,
+        message: `Successfully updated ${updatedCount} items`
+      };
+    } catch (error) {
+      console.error('❌ [RTO Inventory] Error batch updating inventory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cleanup zero-quantity RTO inventory records older than 48 hours
+   * This should be called daily via cron job at 6 AM
+   * Deletes rows where quantity = 0 AND updated_at < NOW() - 48 hours
+   * @returns {Promise<Object>} Cleanup result with deleted count
+   */
+  async cleanupZeroQuantityRTOInventory() {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      console.log('🧹 [RTO Inventory] Starting cleanup of zero-quantity records older than 48 hours...');
+
+      const [result] = await this.mysqlConnection.execute(`
+        DELETE FROM rto_inventory 
+        WHERE quantity = 0 
+          AND updated_at < DATE_SUB(NOW(), INTERVAL 48 HOUR)
+      `);
+
+      console.log(`✅ [RTO Inventory] Cleanup completed: ${result.affectedRows} records deleted`);
+
+      return {
+        success: true,
+        deletedCount: result.affectedRows,
+        message: `Deleted ${result.affectedRows} zero-quantity records older than 48 hours`
+      };
+    } catch (error) {
+      console.error('❌ [RTO Inventory] Error cleaning up zero-quantity inventory:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get distinct RTO warehouse locations for dropdown
+   * @returns {Promise<Array>} Array of unique rto_wh values
+   */
+  async getDistinctRTOLocations() {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      const query = `
+        SELECT DISTINCT rto_wh as location
+        FROM rto_inventory
+        WHERE rto_wh IS NOT NULL AND rto_wh != ''
+        ORDER BY rto_wh
+      `;
+
+      const [rows] = await this.mysqlConnection.execute(query);
+      console.log(`📍 [RTO Manual] Found ${rows.length} distinct locations`);
+      return rows.map(row => row.location);
+    } catch (error) {
+      console.error('❌ [RTO Manual] Error getting distinct RTO locations:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get products for RTO dropdown with name and sku_id
+   * @returns {Promise<Array>} Array of products with name and sku_id
+   */
+  async getProductsForRTODropdown() {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      // Get distinct product names with their sku_id
+      // Using priority: STRI > DRIB > JERS when same product appears with different account_codes
+      const query = `
+        WITH ranked_products AS (
+          SELECT 
+            name,
+            sku_id,
+            account_code,
+            ROW_NUMBER() OVER (
+              PARTITION BY sku_id 
+              ORDER BY 
+                CASE account_code
+                  WHEN 'STRI' THEN 1
+                  WHEN 'DRIB' THEN 2
+                  WHEN 'JERS' THEN 3
+                  ELSE 4
+                END
+            ) as rn
+          FROM products
+          WHERE name IS NOT NULL AND name != ''
+            AND sku_id IS NOT NULL AND sku_id != ''
+        )
+        SELECT name, sku_id
+        FROM ranked_products
+        WHERE rn = 1
+        ORDER BY name
+      `;
+
+      const [rows] = await this.mysqlConnection.execute(query);
+      console.log(`📦 [RTO Manual] Found ${rows.length} products for dropdown`);
+      return rows;
+    } catch (error) {
+      console.error('❌ [RTO Manual] Error getting products for dropdown:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get distinct sizes for a product based on product_code pattern
+   * Looks up sizes from orders table where product_code matches the sku_id pattern
+   * @param {string} skuId - The base SKU ID from products table
+   * @returns {Promise<Array>} Array of unique sizes
+   */
+  async getSizesForProduct(skuId) {
+    await this.waitForMySQLInitialization();
+
+    if (!this.mysqlConnection) {
+      throw new Error('MySQL connection not available');
+    }
+
+    try {
+      // Get sizes from orders where product_code starts with the sku_id
+      const query = `
+        SELECT DISTINCT size
+        FROM orders
+        WHERE product_code LIKE CONCAT(?, '%')
+          AND size IS NOT NULL 
+          AND size != ''
+        ORDER BY 
+          CASE size
+            WHEN 'S' THEN 1
+            WHEN 'M' THEN 2
+            WHEN 'L' THEN 3
+            WHEN 'XL' THEN 4
+            WHEN '2XL' THEN 5
+            WHEN '3XL' THEN 6
+            WHEN '4XL' THEN 7
+            WHEN '5XL' THEN 8
+            ELSE 9
+          END,
+          size
+      `;
+
+      const [rows] = await this.mysqlConnection.execute(query, [skuId]);
+      console.log(`📏 [RTO Manual] Found ${rows.length} sizes for sku_id: ${skuId}`);
+      return rows.map(row => row.size);
+    } catch (error) {
+      console.error('❌ [RTO Manual] Error getting sizes for product:', error);
       throw error;
     }
   }

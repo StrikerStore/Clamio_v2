@@ -17,26 +17,26 @@ const SIZE_ORDER = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
  */
 function sortSizeQuantities(sizeQuantityStr) {
   if (!sizeQuantityStr) return '';
-  
+
   // Split by comma
   const pairs = sizeQuantityStr.split(',').map(p => p.trim()).filter(p => p);
-  
+
   // Sort by SIZE_ORDER
   const sorted = pairs.sort((a, b) => {
     const sizeA = a.split('-')[0].trim().toUpperCase();
     const sizeB = b.split('-')[0].trim().toUpperCase();
-    
+
     const indexA = SIZE_ORDER.indexOf(sizeA);
     const indexB = SIZE_ORDER.indexOf(sizeB);
-    
+
     // If size not in SIZE_ORDER, put at end
     if (indexA === -1 && indexB === -1) return 0;
     if (indexA === -1) return 1;
     if (indexB === -1) return -1;
-    
+
     return indexA - indexB;
   });
-  
+
   return sorted.join(', ');
 }
 
@@ -47,11 +47,11 @@ function sortSizeQuantities(sizeQuantityStr) {
  */
 function detectProductPrefix(productName) {
   if (!productName) return '';
-  
+
   const lowerName = productName.toLowerCase();
   if (lowerName.includes('player')) return 'Player';
   if (lowerName.includes('fan')) return 'Fan';
-  
+
   return '';
 }
 
@@ -90,7 +90,7 @@ async function getAggregatedInventory(req, res) {
     `;
 
     const orders = await database.query(query);
-    
+
     console.log(`📦 Found ${orders.length} unclaimed order items`);
 
     // Group by base product (using cleaned SKU)
@@ -99,12 +99,12 @@ async function getAggregatedInventory(req, res) {
     for (const order of orders) {
       // Get base SKU (clean product_code)
       const baseSku = database.cleanSkuId(order.product_code) || order.base_sku || order.product_code;
-      
+
       if (!productMap.has(baseSku)) {
         // Initialize product entry
         const productName = order.product_display_name || order.product_name;
         const prefix = detectProductPrefix(productName);
-        
+
         productMap.set(baseSku, {
           productName: productName,
           baseProductName: database.removeSizeFromProductName(productName),
@@ -116,7 +116,7 @@ async function getAggregatedInventory(req, res) {
       }
 
       const product = productMap.get(baseSku);
-      
+
       // Aggregate quantities by size
       const size = (order.size || 'Unknown').toUpperCase();
       const currentQty = product.sizes.get(size) || 0;
@@ -128,12 +128,12 @@ async function getAggregatedInventory(req, res) {
       // Build size-quantity string
       const sizeQuantityPairs = Array.from(product.sizes.entries())
         .map(([size, qty]) => `${size}-${qty}`);
-      
+
       // Sort sizes
       const sortedSizeQuantity = sortSizeQuantities(sizeQuantityPairs.join(', '));
-      
+
       // Add prefix (Player/Fan) if detected
-      const finalSizeQuantity = product.prefix 
+      const finalSizeQuantity = product.prefix
         ? `${product.prefix} ${sortedSizeQuantity}`
         : sortedSizeQuantity;
 
@@ -188,32 +188,32 @@ async function uploadRTODetails(req, res) {
     }
 
     const csvData = req.file.buffer.toString('utf-8');
-    
+
     // Parse CSV (simple parsing - handle both \n and \r\n line endings)
     const lines = csvData
       .split(/\r?\n/)
       .map(line => line.trim())
       .filter(line => line.length > 0); // Remove empty lines
-    
+
     if (lines.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'CSV file is empty'
       });
     }
-    
+
     const headers = lines[0].split(',').map(h => h.trim());
-    
+
     // Map column indices based on CSV structure
     const productNameIndex = headers.findIndex(h => h.toLowerCase().includes('product_n'));
     const variantSkuIndex = headers.findIndex(h => h.toLowerCase().includes('variant_sk'));
     const sizeIndex = headers.findIndex(h => h.toLowerCase() === 'size');
     const quantityIndex = headers.findIndex(h => h.toLowerCase() === 'quantity');
     const locationIndex = headers.findIndex(h => h.toLowerCase() === 'location');
-    
+
     console.log('📋 CSV Headers:', headers);
     console.log('📋 Column indices:', { productNameIndex, variantSkuIndex, sizeIndex, quantityIndex, locationIndex });
-    
+
     // Validate required columns
     if (productNameIndex < 0 || sizeIndex < 0 || quantityIndex < 0 || locationIndex < 0) {
       return res.status(400).json({
@@ -221,24 +221,24 @@ async function uploadRTODetails(req, res) {
         error: 'Missing required columns. Expected: Product_Name, Size, Quantity, Location'
       });
     }
-    
+
     const rtoData = [];
-    
+
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim());
-      
+
       // Skip empty rows
       if (values.length < 4 || values.every(v => !v)) {
         continue;
       }
-      
+
       const row = {
         Product_Name: values[productNameIndex] || '',
         Location: values[locationIndex] || '',
         Size: values[sizeIndex] || '',
         Quantity: values[quantityIndex] || ''
       };
-      
+
       // Only add row if it has at least Product_Name and Location
       if (row.Product_Name || row.Location) {
         rtoData.push(row);
@@ -265,8 +265,354 @@ async function uploadRTODetails(req, res) {
   }
 }
 
+/**
+ * Get RTO inventory from database with product names
+ * @param {Object} req - Express request
+ * @param {Object} res - Express response
+ */
+async function getRTOInventory(req, res) {
+  try {
+    console.log('📊 Fetching RTO inventory from database...');
+
+    const rtoData = await database.getRTOInventoryWithProductNames();
+
+    console.log(`✅ Fetched ${rtoData.length} RTO entries`);
+
+    res.json({
+      success: true,
+      data: {
+        totalEntries: rtoData.length,
+        rtoData: rtoData
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching RTO inventory:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch RTO inventory',
+      message: error.message
+    });
+  }
+}
+
+/**
+ * Update RTO inventory quantities (batch update)
+ * @param {Object} req - Express request with updates array
+ * @param {Object} res - Express response
+ */
+async function updateRTOInventory(req, res) {
+  try {
+    console.log('📝 Processing RTO inventory batch update...');
+
+    const { updates } = req.body;
+
+    if (!updates || !Array.isArray(updates)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request. Expected updates array in body.'
+      });
+    }
+
+    // Validate each update
+    for (const update of updates) {
+      if (update.id === undefined || update.id === null) {
+        return res.status(400).json({
+          success: false,
+          error: 'Each update must have an id field'
+        });
+      }
+      if (update.quantity === undefined || update.quantity === null || update.quantity < 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Each update must have a valid quantity (>= 0)'
+        });
+      }
+    }
+
+    const result = await database.updateRTOInventoryBatch(updates);
+
+    console.log(`✅ Updated ${result.updatedCount} RTO inventory items`);
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating RTO inventory:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update RTO inventory',
+      message: error.message
+    });
+  }
+}
+
+/**
+ * Get RTO focus orders (is_focus = 1, instance_number = 1)
+ * These are orders that need attention (RTO Initiated > 7 days and not delivered)
+ * @param {Object} req - Express request
+ * @param {Object} res - Express response
+ */
+async function getRTOFocusOrders(req, res) {
+  try {
+    console.log('📊 Fetching RTO focus orders...');
+
+    const { account_code } = req.query;
+    const orders = await database.getRTOFocusOrders(account_code || null);
+
+    console.log(`✅ Fetched ${orders.length} RTO focus orders`);
+
+    res.json({
+      success: true,
+      data: {
+        totalOrders: orders.length,
+        orders: orders
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching RTO focus orders:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch RTO focus orders',
+      message: error.message
+    });
+  }
+}
+
+/**
+ * Update RTO focus orders status (batch update)
+ * Updates order_status and sets is_focus = 0
+ * @param {Object} req - Express request with orderIds and newStatus
+ * @param {Object} res - Express response
+ */
+async function updateRTOFocusStatus(req, res) {
+  try {
+    console.log('📝 Processing RTO focus status update...');
+
+    const { orderIds, newStatus, accountCode } = req.body;
+
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request. Expected orderIds array in body.'
+      });
+    }
+
+    if (!newStatus || typeof newStatus !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request. Expected newStatus string in body.'
+      });
+    }
+
+    const result = await database.updateRTOFocusStatus(orderIds, newStatus, accountCode || null);
+
+    console.log(`✅ Updated ${result.affectedRows} RTO focus orders to status: ${newStatus}`);
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating RTO focus status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update RTO focus status',
+      message: error.message
+    });
+  }
+}
+
+/**
+ * Get distinct RTO warehouse locations for dropdown
+ * @param {Object} req - Express request
+ * @param {Object} res - Express response
+ */
+async function getRTOLocations(req, res) {
+  try {
+    console.log('📍 Fetching distinct RTO locations...');
+
+    const locations = await database.getDistinctRTOLocations();
+
+    console.log(`✅ Fetched ${locations.length} distinct locations`);
+
+    res.json({
+      success: true,
+      data: {
+        locations: locations
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching RTO locations:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch RTO locations',
+      message: error.message
+    });
+  }
+}
+
+/**
+ * Get products for RTO dropdown with name and sku_id
+ * @param {Object} req - Express request
+ * @param {Object} res - Express response
+ */
+async function getRTOProducts(req, res) {
+  try {
+    console.log('📦 Fetching products for RTO dropdown...');
+
+    const products = await database.getProductsForRTODropdown();
+
+    console.log(`✅ Fetched ${products.length} products for dropdown`);
+
+    res.json({
+      success: true,
+      data: {
+        products: products
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching products for RTO:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch products',
+      message: error.message
+    });
+  }
+}
+
+/**
+ * Get sizes for a specific product
+ * @param {Object} req - Express request with product sku_id in params
+ * @param {Object} res - Express response
+ */
+async function getSizesForProduct(req, res) {
+  try {
+    const { skuId } = req.params;
+
+    if (!skuId) {
+      return res.status(400).json({
+        success: false,
+        error: 'skuId parameter is required'
+      });
+    }
+
+    console.log(`📏 Fetching sizes for product: ${skuId}`);
+
+    const sizes = await database.getSizesForProduct(skuId);
+
+    console.log(`✅ Fetched ${sizes.length} sizes for ${skuId}`);
+
+    res.json({
+      success: true,
+      data: {
+        sizes: sizes
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching sizes for product:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch sizes',
+      message: error.message
+    });
+  }
+}
+
+/**
+ * Add manual RTO inventory entry
+ * Uses upsert logic - adds to existing quantity if row exists
+ * @param {Object} req - Express request with location, product_code, size, quantity
+ * @param {Object} res - Express response
+ */
+async function addManualRTOEntry(req, res) {
+  try {
+    console.log('📝 Processing manual RTO entry...');
+
+    const { location, sku_id, size, quantity } = req.body;
+
+    // Validate required fields
+    if (!location || typeof location !== 'string' || location.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Location is required'
+      });
+    }
+
+    if (!sku_id || typeof sku_id !== 'string' || sku_id.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Product SKU is required'
+      });
+    }
+
+    if (!size || typeof size !== 'string' || size.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Size is required'
+      });
+    }
+
+    const qty = parseInt(quantity);
+    if (isNaN(qty) || qty <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Quantity must be a positive number'
+      });
+    }
+
+    // Build the product_code by combining sku_id and size
+    const product_code = `${sku_id.trim()}-${size.trim()}`;
+
+    console.log(`📦 Adding RTO entry: location=${location}, product_code=${product_code}, size=${size}, qty=${qty}`);
+
+    // Use upsertRTOInventory - adds to existing if row exists
+    await database.upsertRTOInventory(
+      location.trim(),
+      product_code,
+      size.trim(),
+      qty
+    );
+
+    console.log(`✅ Manual RTO entry added successfully`);
+
+    res.json({
+      success: true,
+      message: 'RTO entry added successfully',
+      data: {
+        location: location.trim(),
+        product_code: product_code,
+        size: size.trim(),
+        quantity: qty
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error adding manual RTO entry:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to add RTO entry',
+      message: error.message
+    });
+  }
+}
+
 module.exports = {
   getAggregatedInventory,
-  uploadRTODetails
+  uploadRTODetails,
+  getRTOInventory,
+  updateRTOInventory,
+  getRTOFocusOrders,
+  updateRTOFocusStatus,
+  getRTOLocations,
+  getRTOProducts,
+  getSizesForProduct,
+  addManualRTOEntry
 };
-

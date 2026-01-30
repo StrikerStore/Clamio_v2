@@ -11,6 +11,103 @@ if (DEBUG_API) {
   console.log('  Environment:', process.env.NODE_ENV);
 }
 
+// Network resilience configuration for slow mobile networks
+const NETWORK_CONFIG = {
+  // Timeout for API requests (60 seconds for slow 3G/4G networks)
+  REQUEST_TIMEOUT_MS: 60000,
+  // Number of retry attempts for failed requests
+  MAX_RETRIES: 3,
+  // Base delay between retries (exponential backoff)
+  RETRY_BASE_DELAY_MS: 1000,
+  // Maximum delay between retries
+  RETRY_MAX_DELAY_MS: 10000,
+};
+
+/**
+ * Creates an AbortController with a timeout
+ * Returns the controller and a cleanup function
+ */
+function createTimeoutController(timeoutMs: number = NETWORK_CONFIG.REQUEST_TIMEOUT_MS): {
+  controller: AbortController;
+  timeoutId: NodeJS.Timeout;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    controller,
+    timeoutId,
+    cleanup: () => clearTimeout(timeoutId),
+  };
+}
+
+/**
+ * Delay helper for retry logic with exponential backoff
+ */
+function getRetryDelay(attempt: number): number {
+  const delay = Math.min(
+    NETWORK_CONFIG.RETRY_BASE_DELAY_MS * Math.pow(2, attempt),
+    NETWORK_CONFIG.RETRY_MAX_DELAY_MS
+  );
+  // Add some jitter to prevent thundering herd
+  return delay + Math.random() * 1000;
+}
+
+/**
+ * Check if an error is retryable (network issues, timeouts, etc.)
+ */
+function isRetryableError(error: any): boolean {
+  // Abort errors (timeouts)
+  if (error.name === 'AbortError') return true;
+  // Network errors - these are the main "Failed to fetch" cases
+  if (error.message?.includes('Failed to fetch')) return true;
+  if (error.message?.includes('Network request failed')) return true;
+  if (error.message?.includes('net::ERR_')) return true;
+  if (error.message?.includes('NetworkError')) return true;
+  if (error.message?.includes('fetch failed')) return true;
+  if (error.message?.includes('Load failed')) return true; // Safari
+  // Connection errors
+  if (error.message?.includes('ECONNRESET')) return true;
+  if (error.message?.includes('ECONNREFUSED')) return true;
+  if (error.message?.includes('ETIMEDOUT')) return true;
+  if (error.message?.includes('ENOTFOUND')) return true;
+  if (error.message?.includes('ERR_CONNECTION')) return true;
+  // Check TypeError which sometimes wraps network errors
+  if (error.name === 'TypeError' && error.message?.includes('fetch')) return true;
+  return false;
+}
+
+/**
+ * Get a user-friendly error message for network errors
+ */
+function getNetworkErrorMessage(error: any, endpoint: string): string {
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+
+  if (!isOnline) {
+    return 'You appear to be offline. Please check your internet connection and try again.';
+  }
+
+  if (error.name === 'AbortError') {
+    return 'The request took too long. Please check your internet connection and try again.';
+  }
+
+  if (error.message?.includes('Failed to fetch') || error.message?.includes('fetch failed')) {
+    return 'Unable to connect to the server. Please check your internet connection or try again later.';
+  }
+
+  return error.message || 'An unexpected network error occurred. Please try again.';
+}
+
+/**
+ * Sleep helper for delays between retries
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 interface ApiResponse<T = any> {
   success: boolean
   message: string
@@ -48,7 +145,6 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const authHeader = this.getAuthHeader()
 
-
     const config: RequestInit = {
       headers: {
         'Content-Type': 'application/json',
@@ -58,96 +154,146 @@ class ApiClient {
       ...options,
     }
 
-    try {
-      if (DEBUG_API) {
-        console.log(`🚀 API Request: ${config.method || 'GET'} ${API_BASE_URL}${endpoint}`);
-        console.log('  Headers:', config.headers);
-        if (config.body) console.log('  Body:', config.body);
-      }
+    // Retry loop for network resilience
+    let lastError: Error | null = null;
 
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, config)
-
-      // Check if response is JSON
-      const contentType = response.headers.get('content-type')
-      let data: any;
-
-      if (!contentType || !contentType.includes('application/json')) {
-        // If not JSON, read as text to get the actual error
-        const text = await response.text()
-        console.error('Non-JSON response received:', {
-          status: response.status,
-          statusText: response.statusText,
-          url: `${API_BASE_URL}${endpoint}`,
-          contentType,
-          responseText: text.substring(0, 200) // First 200 chars
-        })
-
-        if (response.status === 404) {
-          throw new Error(`API endpoint not found: ${endpoint}. Please ensure the backend server is running and has been restarted to register new endpoints.`)
-        } else if (response.status >= 500) {
-          throw new Error(`Server error: ${response.status} ${response.statusText}`)
-        } else {
-          throw new Error(`Invalid response format: Expected JSON, got ${contentType || 'unknown'}. Status: ${response.status}`)
-        }
-      }
+    for (let attempt = 0; attempt < NETWORK_CONFIG.MAX_RETRIES; attempt++) {
+      // Create timeout controller for this attempt
+      const { controller, cleanup } = createTimeoutController();
 
       try {
-        data = await response.json()
-      } catch (jsonError) {
-        // If JSON parsing fails, it's not a valid JSON response
-        console.error('Failed to parse JSON response:', jsonError)
-        throw new Error(`Invalid JSON response from server. Status: ${response.status}. The endpoint may not exist or the server may need to be restarted.`)
-      }
+        if (DEBUG_API) {
+          console.log(`🚀 API Request (attempt ${attempt + 1}/${NETWORK_CONFIG.MAX_RETRIES}): ${config.method || 'GET'} ${API_BASE_URL}${endpoint}`);
+          console.log('  Headers:', config.headers);
+          if (config.body) console.log('  Body:', config.body);
+        }
 
-      if (!response.ok) {
-        // Don't log errors for verification endpoint - it's optional and non-critical
-        const isVerificationEndpoint = endpoint.includes('/verify-status');
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          ...config,
+          signal: controller.signal,
+        });
 
-        if (!isVerificationEndpoint) {
-          // Log detailed error information for debugging (except for verification)
-          console.error('❌ API Error Response:', {
+        // Clear timeout since request completed
+        cleanup();
+
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type')
+        let data: any;
+
+        if (!contentType || !contentType.includes('application/json')) {
+          // If not JSON, read as text to get the actual error
+          const text = await response.text()
+          console.error('Non-JSON response received:', {
             status: response.status,
             statusText: response.statusText,
-            endpoint: endpoint,
-            data: data || 'No data received'
+            url: `${API_BASE_URL}${endpoint}`,
+            contentType,
+            responseText: text.substring(0, 200) // First 200 chars
           })
+
+          if (response.status === 404) {
+            throw new Error(`API endpoint not found: ${endpoint}. Please ensure the backend server is running and has been restarted to register new endpoints.`)
+          } else if (response.status >= 500) {
+            throw new Error(`Server error: ${response.status} ${response.statusText}`)
+          } else {
+            throw new Error(`Invalid response format: Expected JSON, got ${contentType || 'unknown'}. Status: ${response.status}`)
+          }
         }
 
-        // Log detailed validation errors for debugging
-        if (data && data.errors && Array.isArray(data.errors)) {
+        try {
+          data = await response.json()
+        } catch (jsonError) {
+          // If JSON parsing fails, it's not a valid JSON response
+          console.error('Failed to parse JSON response:', jsonError)
+          throw new Error(`Invalid JSON response from server. Status: ${response.status}. The endpoint may not exist or the server may need to be restarted.`)
+        }
+
+        if (!response.ok) {
+          // Don't log errors for verification endpoint - it's optional and non-critical
+          const isVerificationEndpoint = endpoint.includes('/verify-status');
+
           if (!isVerificationEndpoint) {
-            console.error('Validation errors:', data.errors)
+            // Log detailed error information for debugging (except for verification)
+            console.error('❌ API Error Response:', {
+              status: response.status,
+              statusText: response.statusText,
+              endpoint: endpoint,
+              data: data || 'No data received'
+            })
           }
-          const errorMessages = data.errors.map((err: any) => `${err.field}: ${err.message}`).join(', ')
-          throw new Error(`${data.message || 'Validation error'}: ${errorMessages}`)
+
+          // Log detailed validation errors for debugging
+          if (data && data.errors && Array.isArray(data.errors)) {
+            if (!isVerificationEndpoint) {
+              console.error('Validation errors:', data.errors)
+            }
+            const errorMessages = data.errors.map((err: any) => `${err.field}: ${err.message}`).join(', ')
+            throw new Error(`${data.message || 'Validation error'}: ${errorMessages}`)
+          }
+
+          // For 404 errors, provide more specific message
+          if (response.status === 404) {
+            if (isVerificationEndpoint) {
+              // Silent 404 for verification - endpoint may not exist yet
+              throw new Error(`Endpoint not found`)
+            }
+            throw new Error(`API endpoint not found: ${endpoint}. Please ensure the backend server is running and has been restarted to register new endpoints.`)
+          }
+
+          // For other errors, use the message from the response, or provide a default
+          const errorMessage = data?.message || `HTTP error! status: ${response.status} ${response.statusText}`
+          throw new Error(errorMessage)
         }
 
-        // For 404 errors, provide more specific message
-        if (response.status === 404) {
-          if (isVerificationEndpoint) {
-            // Silent 404 for verification - endpoint may not exist yet
-            throw new Error(`Endpoint not found`)
-          }
-          throw new Error(`API endpoint not found: ${endpoint}. Please ensure the backend server is running and has been restarted to register new endpoints.`)
+        if (DEBUG_API) {
+          console.log(`✅ API Response: ${response.status} ${response.statusText}`);
+          console.log('  Data:', data);
         }
 
-        // For other errors, use the message from the response, or provide a default
-        const errorMessage = data?.message || `HTTP error! status: ${response.status} ${response.statusText}`
-        throw new Error(errorMessage)
-      }
+        return data
+      } catch (error: any) {
+        cleanup(); // Ensure timeout is cleared
+        lastError = error;
 
-      if (DEBUG_API) {
-        console.log(`✅ API Response: ${response.status} ${response.statusText}`);
-        console.log('  Data:', data);
-      }
+        // Check if we should retry
+        if (isRetryableError(error) && attempt < NETWORK_CONFIG.MAX_RETRIES - 1) {
+          const delay = getRetryDelay(attempt);
+          console.warn(`⚠️ Network error on attempt ${attempt + 1}/${NETWORK_CONFIG.MAX_RETRIES}. Retrying in ${Math.round(delay)}ms...`, {
+            endpoint,
+            error: error.message,
+          });
+          await sleep(delay);
+          continue; // Retry
+        }
 
-      return data
-    } catch (error) {
-      if (DEBUG_API) {
-        console.error('❌ API request failed:', error);
+        // If it's a timeout, provide a user-friendly message
+        if (error.name === 'AbortError') {
+          console.error('❌ Request timed out:', {
+            endpoint,
+            timeout: `${NETWORK_CONFIG.REQUEST_TIMEOUT_MS / 1000}s`,
+            attempts: attempt + 1,
+          });
+          throw new Error('Request timed out. Please check your internet connection and try again.');
+        }
+
+        if (DEBUG_API) {
+          console.error('❌ API request failed:', error);
+        }
+
+        // Provide user-friendly message for network errors
+        if (isRetryableError(error)) {
+          throw new Error(getNetworkErrorMessage(error, endpoint));
+        }
+
+        throw error
       }
-      throw error
     }
+
+    // If we've exhausted all retries, throw the last error with a user-friendly message
+    if (lastError && isRetryableError(lastError)) {
+      throw new Error(getNetworkErrorMessage(lastError, endpoint));
+    }
+    throw lastError || new Error('Request failed after maximum retries');
   }
 
   // Authentication methods
@@ -504,6 +650,10 @@ class ApiClient {
   async getAdminVendors(): Promise<ApiResponse> {
     // Prefer enriched vendors report for admin auditing table
     return this.makeRequest('/users/vendors-report');
+  }
+
+  async getDistinctOrderStatuses(): Promise<ApiResponse> {
+    return this.makeRequest('/orders/distinct-statuses')
   }
 
   async getVendorStats(): Promise<ApiResponse> {
@@ -1549,6 +1699,67 @@ class ApiClient {
     return this.makeRequest('/notifications/push-preference', {
       method: 'PATCH',
       body: JSON.stringify({ enabled })
+    })
+  }
+
+  // ==================== RTO FOCUS METHODS ====================
+
+  /**
+   * Get RTO focus orders (is_focus = 1, instance_number = 1)
+   * These are orders that need attention (RTO Initiated > 7 days and not delivered)
+   */
+  async getRTOFocusOrders(accountCode?: string): Promise<ApiResponse> {
+    const queryParams = accountCode ? `?account_code=${encodeURIComponent(accountCode)}` : '';
+    return this.makeRequest(`/admin/inventory/rto-focus${queryParams}`)
+  }
+
+  /**
+   * Update RTO focus orders status (batch update)
+   * Updates order_status and sets is_focus = 0
+   */
+  async updateRTOFocusStatus(orderIds: string[], newStatus: string, accountCode?: string): Promise<ApiResponse> {
+    return this.makeRequest('/admin/inventory/rto-focus/status', {
+      method: 'PUT',
+      body: JSON.stringify({ orderIds, newStatus, accountCode })
+    })
+  }
+
+  // ==================== RTO MANUAL ENTRY METHODS ====================
+
+  /**
+   * Get distinct RTO warehouse locations for dropdown
+   */
+  async getRTOLocations(): Promise<ApiResponse> {
+    return this.makeRequest('/admin/inventory/rto-locations')
+  }
+
+  /**
+   * Get products for RTO dropdown
+   */
+  async getRTOProducts(): Promise<ApiResponse> {
+    return this.makeRequest('/admin/inventory/rto-products')
+  }
+
+  /**
+   * Get sizes for a specific product
+   */
+  async getRTOSizesForProduct(skuId: string): Promise<ApiResponse> {
+    return this.makeRequest(`/admin/inventory/rto-sizes/${encodeURIComponent(skuId)}`)
+  }
+
+  /**
+   * Add manual RTO inventory entry
+   * Uses upsert logic - adds to existing quantity if row exists
+   */
+  async addManualRTOEntry(data: {
+    location: string
+    sku_id: string
+    size: string
+    quantity: number
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/admin/inventory/rto-manual', {
+      method: 'POST',
+      body: JSON.stringify(data)
     })
   }
 }

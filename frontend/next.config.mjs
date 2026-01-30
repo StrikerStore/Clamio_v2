@@ -159,16 +159,16 @@ export default withPWA({
         const isSameOrigin = self.origin === url.origin;
         if (!isSameOrigin) return false;
         const pathname = url.pathname;
-        
+
         // NEVER cache these authentication-sensitive routes
-        if (pathname === '/' || 
-            pathname.startsWith('/api/') ||
-            pathname.startsWith('/vendor/') ||
-            pathname.startsWith('/admin/') ||
-            pathname.startsWith('/superadmin/')) {
+        if (pathname === '/' ||
+          pathname.startsWith('/api/') ||
+          pathname.startsWith('/vendor/') ||
+          pathname.startsWith('/admin/') ||
+          pathname.startsWith('/superadmin/')) {
           return false;
         }
-        
+
         return true;
       },
       handler: 'NetworkFirst',
@@ -178,21 +178,21 @@ export default withPWA({
           maxEntries: 32,
           maxAgeSeconds: 24 * 60 * 60 // 24 hours
         },
-        networkTimeoutSeconds: 10
+        networkTimeoutSeconds: 30 // Increased from 10s for slow networks
       }
     },
     // Special handling for authenticated pages - always use network first
     {
       urlPattern: ({ url }) => {
         const pathname = url.pathname;
-        return pathname.startsWith('/vendor/') || 
-               pathname.startsWith('/admin/') || 
-               pathname.startsWith('/superadmin/');
+        return pathname.startsWith('/vendor/') ||
+          pathname.startsWith('/admin/') ||
+          pathname.startsWith('/superadmin/');
       },
       handler: 'NetworkFirst',
       options: {
         cacheName: 'authenticated-pages',
-        networkTimeoutSeconds: 3,
+        networkTimeoutSeconds: 30, // Increased from 3s for slow mobile networks
         expiration: {
           maxEntries: 10,
           maxAgeSeconds: 60 // Only cache for 1 minute
