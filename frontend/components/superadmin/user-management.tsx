@@ -723,6 +723,7 @@ export function UserManagement() {
   }
 
   const handleDeleteStoreClick = (store: any) => {
+    console.log('handleDeleteStoreClick called', store)
     setStoreToDelete(store)
     setIsDeleteStoreConfirmOpen(true)
   }
@@ -1631,11 +1632,26 @@ export function UserManagement() {
                             <h4 className="text-base font-medium text-gray-900 truncate">{store.store_name}</h4>
                             <p className="text-xs text-gray-600 truncate">Code: {store.account_code}</p>
                           </div>
-                          <div className="flex space-x-1 flex-shrink-0">
-                            <Button size="sm" variant="outline" onClick={() => handleEditStore(store)} className="h-8 w-8 p-0">
+                          <div className="flex space-x-1 flex-shrink-0 relative z-10">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleEditStore(store)}
+                              className="h-8 w-8 p-0"
+                            >
                               <Edit className="w-3.5 h-3.5" />
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => handleDeleteStoreClick(store)} className="h-8 w-8 p-0">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                console.log('Delete button clicked', store.store_name)
+                                handleDeleteStoreClick(store)
+                              }}
+                              className="h-8 w-8 p-0"
+                            >
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
@@ -2146,6 +2162,42 @@ export function UserManagement() {
             </form>
           </DialogContent>
         </Dialog>
+
+        {/* Delete Store Confirmation Dialog - Mobile */}
+        <AlertDialog open={isDeleteStoreConfirmOpen} onOpenChange={setIsDeleteStoreConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete {storeToDelete?.store_name}? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setIsDeleteStoreConfirmOpen(false)}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmDeleteStore} className="bg-red-600 hover:bg-red-700">
+                Delete Store
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Delete Warehouse Mapping Confirmation Dialog - Mobile */}
+        <AlertDialog open={isDeleteMappingConfirmOpen} onOpenChange={setIsDeleteMappingConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete this warehouse mapping? This action will deactivate the mapping and cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setIsDeleteMappingConfirmOpen(false)}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteMapping} className="bg-red-600 hover:bg-red-700">
+                Delete Mapping
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     )
   }

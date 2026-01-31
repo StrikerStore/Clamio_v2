@@ -465,6 +465,7 @@ export function SuperAdminPanel() {
   }
 
   const handleDeleteStoreClick = (store: any) => {
+    console.log('handleDeleteStoreClick called', store)
     setStoreToDelete(store)
     setIsDeleteStoreConfirmOpen(true)
   }
@@ -1395,11 +1396,26 @@ export function SuperAdminPanel() {
                               <h4 className="text-sm sm:text-base font-medium text-gray-900 truncate">{store.store_name}</h4>
                               <p className="text-xs sm:text-sm text-gray-600 truncate">Code: {store.account_code}</p>
                             </div>
-                            <div className="flex space-x-1 flex-shrink-0">
-                              <Button size="sm" variant="outline" onClick={() => handleEditStore(store)} className="h-8 w-8 p-0">
+                            <div className="flex space-x-1 flex-shrink-0 relative z-10">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleEditStore(store)}
+                                className="h-8 w-8 p-0 touch-manipulation"
+                              >
                                 <Edit className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                               </Button>
-                              <Button size="sm" variant="outline" onClick={() => handleDeleteStoreClick(store)} className="h-8 w-8 p-0">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  console.log('Delete button clicked for store:', store.store_name)
+                                  handleDeleteStoreClick(store)
+                                }}
+                                className="h-8 w-8 p-0 touch-manipulation"
+                              >
                                 <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                               </Button>
                             </div>
