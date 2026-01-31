@@ -1708,16 +1708,28 @@ class ApiClient {
    * Get admin analytics overview
    */
   async getAdminAnalyticsOverview(filters?: {
-    vendorId?: string,
+    vendorId?: string | string[],
     dateFrom?: string,
     dateTo?: string,
-    store?: string
+    store?: string | string[]
   }): Promise<ApiResponse> {
     const params = new URLSearchParams()
-    if (filters?.vendorId) params.append('vendorId', filters.vendorId)
+    if (filters?.vendorId) {
+      if (Array.isArray(filters.vendorId)) {
+        filters.vendorId.forEach(v => params.append('vendorId', v))
+      } else {
+        params.append('vendorId', filters.vendorId)
+      }
+    }
     if (filters?.dateFrom) params.append('dateFrom', filters.dateFrom)
     if (filters?.dateTo) params.append('dateTo', filters.dateTo)
-    if (filters?.store) params.append('store', filters.store)
+    if (filters?.store) {
+      if (Array.isArray(filters.store)) {
+        filters.store.forEach(s => params.append('store', s))
+      } else {
+        params.append('store', filters.store)
+      }
+    }
 
     return this.makeRequest(`/analytics/admin/overview?${params.toString()}`)
   }
@@ -1726,16 +1738,28 @@ class ApiClient {
    * Get vendor analytics
    */
   async getVendorAnalytics(filters?: {
-    vendorId?: string,
+    vendorId?: string | string[],
     dateFrom?: string,
     dateTo?: string,
-    store?: string
+    store?: string | string[]
   }): Promise<ApiResponse> {
     const params = new URLSearchParams()
-    if (filters?.vendorId) params.append('vendorId', filters.vendorId)
+    if (filters?.vendorId) {
+      if (Array.isArray(filters.vendorId)) {
+        filters.vendorId.forEach(v => params.append('vendorId', v))
+      } else {
+        params.append('vendorId', filters.vendorId)
+      }
+    }
     if (filters?.dateFrom) params.append('dateFrom', filters.dateFrom)
     if (filters?.dateTo) params.append('dateTo', filters.dateTo)
-    if (filters?.store) params.append('store', filters.store)
+    if (filters?.store) {
+      if (Array.isArray(filters.store)) {
+        filters.store.forEach(s => params.append('store', s))
+      } else {
+        params.append('store', filters.store)
+      }
+    }
 
     // Using /analytics/vendor matches the backend router.get('/vendor/:vendorId?', ...)
     const endpoint = filters?.vendorId
