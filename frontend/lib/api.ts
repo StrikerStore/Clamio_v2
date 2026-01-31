@@ -1702,6 +1702,49 @@ class ApiClient {
     })
   }
 
+  // ==================== ANALYTICS METHODS ====================
+
+  /**
+   * Get admin analytics overview
+   */
+  async getAdminAnalyticsOverview(filters?: {
+    vendorId?: string,
+    dateFrom?: string,
+    dateTo?: string,
+    store?: string
+  }): Promise<ApiResponse> {
+    const params = new URLSearchParams()
+    if (filters?.vendorId) params.append('vendorId', filters.vendorId)
+    if (filters?.dateFrom) params.append('dateFrom', filters.dateFrom)
+    if (filters?.dateTo) params.append('dateTo', filters.dateTo)
+    if (filters?.store) params.append('store', filters.store)
+
+    return this.makeRequest(`/analytics/admin/overview?${params.toString()}`)
+  }
+
+  /**
+   * Get vendor analytics
+   */
+  async getVendorAnalytics(filters?: {
+    vendorId?: string,
+    dateFrom?: string,
+    dateTo?: string,
+    store?: string
+  }): Promise<ApiResponse> {
+    const params = new URLSearchParams()
+    if (filters?.vendorId) params.append('vendorId', filters.vendorId)
+    if (filters?.dateFrom) params.append('dateFrom', filters.dateFrom)
+    if (filters?.dateTo) params.append('dateTo', filters.dateTo)
+    if (filters?.store) params.append('store', filters.store)
+
+    // Using /analytics/vendor matches the backend router.get('/vendor/:vendorId?', ...)
+    const endpoint = filters?.vendorId
+      ? `/analytics/vendor/${filters.vendorId}?${params.toString()}`
+      : `/analytics/vendor?${params.toString()}`;
+
+    return this.makeRequest(endpoint)
+  }
+
   // ==================== RTO FOCUS METHODS ====================
 
   /**
