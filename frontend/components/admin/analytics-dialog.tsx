@@ -323,7 +323,7 @@ export function AnalyticsDialog({
                                                         </Button>
                                                     </PopoverTrigger>
                                                     <PopoverContent className="w-[calc(100vw-64px)] p-0">
-                                                        <div className="max-h-60 overflow-y-auto p-1">
+                                                        <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
                                                             <div className="p-2 border-b bg-slate-50 flex items-center justify-between">
                                                                 <span className="text-xs font-bold uppercase text-slate-500">Pick Vendors</span>
                                                                 <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => setSelectedVendorFilters([])}>Clear</Button>
@@ -352,7 +352,7 @@ export function AnalyticsDialog({
                                                     </Button>
                                                 </PopoverTrigger>
                                                 <PopoverContent className="w-[calc(100vw-64px)] p-0">
-                                                    <div className="max-h-60 overflow-y-auto p-1">
+                                                    <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
                                                         <div className="p-2 border-b bg-slate-50 flex items-center justify-between">
                                                             <span className="text-xs font-bold uppercase text-slate-500">Pick Stores</span>
                                                             <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => setSelectedStoreFilters([])}>Clear</Button>
@@ -411,13 +411,13 @@ export function AnalyticsDialog({
                                                     </Button>
                                                 </PopoverTrigger>
                                                 <PopoverContent className="w-64 p-0" align="start">
-                                                    <div className="p-2 border-b bg-slate-50 flex items-center justify-between">
+                                                    <div className="p-2 border-b bg-slate-50 flex items-center justify-between" onWheel={(e) => e.stopPropagation()}>
                                                         <span className="text-xs font-bold uppercase text-slate-500">Select Vendors</span>
                                                         {selectedVendorFilters.length > 0 && (
                                                             <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => setSelectedVendorFilters([])}>Clear</Button>
                                                         )}
                                                     </div>
-                                                    <div className="max-h-60 overflow-y-auto p-1">
+                                                    <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
                                                         {vendorsLoading ? (
                                                             <div className="flex items-center justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-slate-400" /></div>
                                                         ) : (
@@ -473,13 +473,13 @@ export function AnalyticsDialog({
                                                 </Button>
                                             </PopoverTrigger>
                                             <PopoverContent className="w-64 p-0" align="start">
-                                                <div className="p-2 border-b bg-slate-50 flex items-center justify-between">
+                                                <div className="p-2 border-b bg-slate-50 flex items-center justify-between" onWheel={(e) => e.stopPropagation()}>
                                                     <span className="text-xs font-bold uppercase text-slate-500">Select Stores</span>
                                                     {selectedStoreFilters.length > 0 && (
                                                         <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => setSelectedStoreFilters([])}>Clear</Button>
                                                     )}
                                                 </div>
-                                                <div className="max-h-60 overflow-y-auto p-1">
+                                                <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
                                                     {storesLoading ? (
                                                         <div className="flex items-center justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-slate-400" /></div>
                                                     ) : (
@@ -611,10 +611,10 @@ export function AnalyticsDialog({
                                     <CardContent className={`${isMobile ? 'h-[300px] p-2' : 'h-[350px]'}`}>
                                         {processedDistribution.length > 0 ? (
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={processedDistribution} layout="vertical" margin={{ left: 10, right: 60, top: 10, bottom: 10 }}>
+                                                <BarChart data={processedDistribution} layout="vertical" margin={{ left: -20, right: 60, top: 10, bottom: 10 }}>
                                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                                                     <XAxis type="number" hide />
-                                                    <YAxis dataKey="status" type="category" width={90} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 500 }} axisLine={false} tickLine={false} />
+                                                    <YAxis dataKey="status" type="category" width={85} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 500 }} axisLine={false} tickLine={false} />
                                                     <Tooltip cursor={{ fill: '#f8fafc' }} content={({ active, payload }) => {
                                                         if (active && payload && payload.length) {
                                                             const entry = payload[0].payload;
