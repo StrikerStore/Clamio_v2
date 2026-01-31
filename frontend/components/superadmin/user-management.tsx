@@ -2198,6 +2198,202 @@ export function UserManagement() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Edit Store Dialog - Mobile */}
+        <Dialog open={isEditStoreOpen} onOpenChange={(open) => {
+          setIsEditStoreOpen(open)
+          if (!open) {
+            setError("")
+            setSuccess("")
+            setEditingStore(null)
+          }
+        }}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit Store</DialogTitle>
+              <DialogDescription>
+                Update store information and credentials
+              </DialogDescription>
+            </DialogHeader>
+            {editingStore && (
+              <div className="space-y-4">
+                {error && (
+                  <Alert variant="destructive" className="border-red-200 bg-red-50">
+                    <AlertDescription className="text-red-800">{error}</AlertDescription>
+                  </Alert>
+                )}
+                {success && (
+                  <Alert className="border-green-200 bg-green-50">
+                    <AlertDescription className="text-green-800">{success}</AlertDescription>
+                  </Alert>
+                )}
+                <div>
+                  <Label htmlFor="edit-store-name-mobile">Store Name *</Label>
+                  <Input
+                    id="edit-store-name-mobile"
+                    value={editingStore.store_name || ''}
+                    onChange={(e) => setEditingStore({ ...editingStore, store_name: e.target.value })}
+                    placeholder="e.g., Striker Store"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Shipway Credentials</Label>
+                  <div>
+                    <Label htmlFor="edit-shipway-username-mobile">Shipway Username *</Label>
+                    <Input
+                      id="edit-shipway-username-mobile"
+                      value={editingStore.username || ''}
+                      onChange={(e) => setEditingStore({ ...editingStore, username: e.target.value })}
+                      placeholder="Enter Shipway username"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-shipway-password-mobile">Shipway Password (leave blank to keep current)</Label>
+                    <div className="relative">
+                      <Input
+                        id="edit-shipway-password-mobile"
+                        type={showPassword ? "text" : "password"}
+                        value={editingStore.password || ''}
+                        onChange={(e) => setEditingStore({ ...editingStore, password: e.target.value })}
+                        placeholder="Enter new password or leave blank"
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => handleTestShipway(editingStore.username, editingStore.password || '')}
+                    disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                  >
+                    {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                      <>
+                        <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                        Testing...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-3 h-3 mr-2" />
+                        Test Shipway Connection
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Shopify Credentials</Label>
+                  <div>
+                    <Label htmlFor="edit-shopify-url-mobile">Shopify Store URL *</Label>
+                    <Input
+                      id="edit-shopify-url-mobile"
+                      value={editingStore.shopify_store_url || ''}
+                      onChange={(e) => setEditingStore({ ...editingStore, shopify_store_url: e.target.value })}
+                      placeholder="https://your-store.myshopify.com"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-shopify-token-mobile">Shopify Token *</Label>
+                    <div className="relative">
+                      <Input
+                        id="edit-shopify-token-mobile"
+                        type={showShopifyToken ? "text" : "password"}
+                        value={editingStore.shopify_token || ''}
+                        onChange={(e) => setEditingStore({ ...editingStore, shopify_token: e.target.value })}
+                        placeholder="Enter Shopify access token"
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowShopifyToken(!showShopifyToken)}
+                      >
+                        {showShopifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => handleTestShopify(editingStore.shopify_store_url || '', editingStore.shopify_token || '')}
+                    disabled={testingConnection.loading && testingConnection.type === 'shopify'}
+                  >
+                    {testingConnection.loading && testingConnection.type === 'shopify' ? (
+                      <>
+                        <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                        Testing...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-3 h-3 mr-2" />
+                        Test Shopify Connection
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                <div>
+                  <Label htmlFor="edit-status-mobile">Status *</Label>
+                  <Select
+                    value={editingStore.status || 'active'}
+                    onValueChange={(value: "active" | "inactive") => setEditingStore({ ...editingStore, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsEditStoreOpen(false)
+                  setEditingStore(null)
+                  setError("")
+                  setSuccess("")
+                }}
+                disabled={updatingStore}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleUpdateStore}
+                disabled={updatingStore}
+              >
+                {updatingStore ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  "Update Store"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
