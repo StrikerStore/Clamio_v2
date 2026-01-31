@@ -2397,55 +2397,9 @@ export function AdminDashboard() {
               </div>
             )}
 
-            {/* Mobile: Notification Bell, Inventory Icon and Menu Button */}
+            {/* Mobile: Menu Button */}
             {isMobile && (
               <div className="flex items-center space-x-2">
-                {/* Notification Bell */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setShowNotificationPanel(true);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className="p-2 relative"
-                >
-                  <Bell className="w-5 h-5" />
-                  {notificationStats && notificationStats.pending > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-semibold">
-                      {notificationStats.pending > 99 ? '99+' : notificationStats.pending}
-                    </span>
-                  )}
-                </Button>
-
-                {/* RTO Focus Button */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setShowRTOFocusDialog(true);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className="p-2"
-                  title="RTO Focus Orders"
-                >
-                  <Target className="w-5 h-5 text-orange-500" />
-                </Button>
-
-                {/* Inventory Icon */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setActiveTab('inventory');
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={`p-2 ${activeTab === 'inventory' ? 'bg-blue-50 text-blue-600' : ''}`}
-                  title="Inventory"
-                >
-                  <Package className="w-5 h-5" />
-                </Button>
-
                 {/* Menu Button */}
                 <Button
                   variant="ghost"
@@ -2461,21 +2415,76 @@ export function AdminDashboard() {
 
           {/* Mobile Menu */}
           {isMobile && isMobileMenuOpen && (
-            <div className="border-t bg-white py-3">
-              <div className="space-y-2">
-                <div className="px-2">
-                  <p className="text-sm sm:text-base text-gray-600 truncate">Welcome, {user?.name}</p>
-                  <p className="text-xs sm:text-sm text-gray-400 truncate break-all">{user?.email}</p>
+            <div className="border-t bg-white py-3 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="space-y-4 px-2">
+                {/* Quick Actions Section */}
+                <div className="grid grid-cols-3 gap-2 pb-2 border-b">
+                  {/* Notifications */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowNotificationPanel(true);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="flex flex-col items-center gap-1 h-auto py-2 relative"
+                  >
+                    <div className="relative">
+                      <Bell className="w-5 h-5 text-gray-600" />
+                      {notificationStats && notificationStats.pending > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
+                          {notificationStats.pending > 9 ? '9+' : notificationStats.pending}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-medium">Alerts</span>
+                  </Button>
+
+                  {/* RTO Focus */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowRTOFocusDialog(true);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="flex flex-col items-center gap-1 h-auto py-2"
+                  >
+                    <Target className="w-5 h-5 text-orange-500" />
+                    <span className="text-[10px] font-medium">Focus</span>
+                  </Button>
+
+                  {/* Inventory Link */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setActiveTab('inventory');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`flex flex-col items-center gap-1 h-auto py-2 ${activeTab === 'inventory' ? 'bg-blue-50 text-blue-600' : ''}`}
+                  >
+                    <Package className="w-5 h-5 text-blue-500" />
+                    <span className="text-[10px] font-medium">Inventory</span>
+                  </Button>
                 </div>
 
-                <Button
-                  variant="outline"
-                  onClick={logout}
-                  className="w-full flex items-center justify-center gap-2 text-sm"
-                >
-                  <LogOut className="w-3 h-3 sm:w-4 sm:h-4" />
-                  Logout
-                </Button>
+                {/* User Info & Logout */}
+                <div className="space-y-3">
+                  <div className="px-2">
+                    <p className="text-sm font-semibold text-gray-900 truncate">Welcome, {user?.name}</p>
+                    <p className="text-xs text-gray-500 truncate break-all">{user?.email}</p>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    onClick={logout}
+                    className="w-full flex items-center justify-center gap-2 text-sm border-red-100 text-red-600 hover:bg-red-50"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Logout
+                  </Button>
+                </div>
               </div>
             </div>
           )}
