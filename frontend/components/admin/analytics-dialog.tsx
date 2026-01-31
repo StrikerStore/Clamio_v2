@@ -94,6 +94,8 @@ export function AnalyticsDialog({
     // UI States
     const [vendorPopoverOpen, setVendorPopoverOpen] = useState(false)
     const [storePopoverOpen, setStorePopoverOpen] = useState(false)
+    const [vendorMobileScrollOpen, setVendorMobileScrollOpen] = useState(false)
+    const [storeMobileScrollOpen, setStoreMobileScrollOpen] = useState(false)
     const [visibleLines, setVisibleLines] = useState<Record<string, boolean>>({
         claimed_count: true,
         count: true
@@ -315,60 +317,82 @@ export function AnalyticsDialog({
                                         {isAdmin && (
                                             <div className="space-y-1.5">
                                                 <label className="text-[10px] font-bold text-slate-500 uppercase">Vendors</label>
-                                                <Popover open={vendorPopoverOpen} onOpenChange={setVendorPopoverOpen}>
-                                                    <PopoverTrigger asChild>
-                                                        <Button variant="outline" className="w-full h-10 justify-between bg-white">
-                                                            <span className="truncate">{selectedVendorFilters.length === 0 ? "All Vendors" : `${selectedVendorFilters.length} selected`}</span>
-                                                            <ChevronDown className="w-4 h-4 opacity-50" />
-                                                        </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-[calc(100vw-64px)] p-0">
-                                                        <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
-                                                            <div className="p-2 border-b bg-slate-50 flex items-center justify-between">
-                                                                <span className="text-xs font-bold uppercase text-slate-500">Pick Vendors</span>
+                                                <Button
+                                                    variant="outline"
+                                                    className="w-full h-10 justify-between bg-white text-left font-normal"
+                                                    onClick={() => setVendorMobileScrollOpen(!vendorMobileScrollOpen)}
+                                                >
+                                                    <span className="truncate">
+                                                        {selectedVendorFilters.length === 0 ? "All Vendors" : `${selectedVendorFilters.length} selected`}
+                                                    </span>
+                                                    <ChevronDown className={`w-4 h-4 opacity-50 transition-transform ${vendorMobileScrollOpen ? 'rotate-180' : ''}`} />
+                                                </Button>
+
+                                                {vendorMobileScrollOpen && (
+                                                    <div className="mt-2 border rounded-lg bg-white overflow-hidden shadow-inner touch-pan-y" onTouchMove={(e) => e.stopPropagation()}>
+                                                        <div className="p-2 border-b bg-slate-50 flex items-center justify-between">
+                                                            <span className="text-[10px] font-bold uppercase text-slate-500">Pick Vendors</span>
+                                                            {selectedVendorFilters.length > 0 && (
                                                                 <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => setSelectedVendorFilters([])}>Clear</Button>
-                                                            </div>
-                                                            {vendors.map((v) => (
-                                                                <div key={v.warehouseId} className="flex items-center space-x-2 p-3 hover:bg-slate-100 rounded" onClick={() => {
-                                                                    if (selectedVendorFilters.includes(v.warehouseId)) setSelectedVendorFilters(selectedVendorFilters.filter(id => id !== v.warehouseId))
-                                                                    else setSelectedVendorFilters([...selectedVendorFilters, v.warehouseId])
-                                                                }}>
-                                                                    <input type="checkbox" checked={selectedVendorFilters.includes(v.warehouseId)} readOnly className="w-4 h-4" />
-                                                                    <span className="text-sm">{v.name}</span>
-                                                                </div>
-                                                            ))}
+                                                            )}
                                                         </div>
-                                                    </PopoverContent>
-                                                </Popover>
+                                                        <div className="max-h-48 overflow-y-auto p-1 bg-white">
+                                                            {vendorsLoading ? (
+                                                                <div className="flex items-center justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-slate-400" /></div>
+                                                            ) : (
+                                                                vendors.map((v) => (
+                                                                    <div key={v.warehouseId} className="flex items-center space-x-3 p-3 hover:bg-slate-50 rounded border-b border-slate-50" onClick={() => {
+                                                                        if (selectedVendorFilters.includes(v.warehouseId)) setSelectedVendorFilters(selectedVendorFilters.filter(id => id !== v.warehouseId))
+                                                                        else setSelectedVendorFilters([...selectedVendorFilters, v.warehouseId])
+                                                                    }}>
+                                                                        <input type="checkbox" checked={selectedVendorFilters.includes(v.warehouseId)} readOnly className="w-4 h-4 rounded border-slate-300" />
+                                                                        <span className="text-sm font-medium">{v.name}</span>
+                                                                    </div>
+                                                                ))
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                         <div className="space-y-1.5">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase">Stores</label>
-                                            <Popover open={storePopoverOpen} onOpenChange={setStorePopoverOpen}>
-                                                <PopoverTrigger asChild>
-                                                    <Button variant="outline" className="w-full h-10 justify-between bg-white">
-                                                        <span className="truncate">{selectedStoreFilters.length === 0 ? "All Stores" : `${selectedStoreFilters.length} selected`}</span>
-                                                        <ChevronDown className="w-4 h-4 opacity-50" />
-                                                    </Button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-[calc(100vw-64px)] p-0">
-                                                    <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
-                                                        <div className="p-2 border-b bg-slate-50 flex items-center justify-between">
-                                                            <span className="text-xs font-bold uppercase text-slate-500">Pick Stores</span>
+                                            <Button
+                                                variant="outline"
+                                                className="w-full h-10 justify-between bg-white text-left font-normal"
+                                                onClick={() => setStoreMobileScrollOpen(!storeMobileScrollOpen)}
+                                            >
+                                                <span className="truncate">
+                                                    {selectedStoreFilters.length === 0 ? "All Stores" : `${selectedStoreFilters.length} selected`}
+                                                </span>
+                                                <ChevronDown className={`w-4 h-4 opacity-50 transition-transform ${storeMobileScrollOpen ? 'rotate-180' : ''}`} />
+                                            </Button>
+
+                                            {storeMobileScrollOpen && (
+                                                <div className="mt-2 border rounded-lg bg-white overflow-hidden shadow-inner touch-pan-y" onTouchMove={(e) => e.stopPropagation()}>
+                                                    <div className="p-2 border-b bg-slate-50 flex items-center justify-between">
+                                                        <span className="text-[10px] font-bold uppercase text-slate-500">Pick Stores</span>
+                                                        {selectedStoreFilters.length > 0 && (
                                                             <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => setSelectedStoreFilters([])}>Clear</Button>
-                                                        </div>
-                                                        {stores.map((s) => (
-                                                            <div key={s.account_code} className="flex items-center space-x-2 p-3 hover:bg-slate-100 rounded" onClick={() => {
-                                                                if (selectedStoreFilters.includes(s.account_code)) setSelectedStoreFilters(selectedStoreFilters.filter(id => id !== s.account_code))
-                                                                else setSelectedStoreFilters([...selectedStoreFilters, s.account_code])
-                                                            }}>
-                                                                <input type="checkbox" checked={selectedStoreFilters.includes(s.account_code)} readOnly className="w-4 h-4" />
-                                                                <span className="text-sm">{s.store_name}</span>
-                                                            </div>
-                                                        ))}
+                                                        )}
                                                     </div>
-                                                </PopoverContent>
-                                            </Popover>
+                                                    <div className="max-h-48 overflow-y-auto p-1 bg-white">
+                                                        {storesLoading ? (
+                                                            <div className="flex items-center justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-slate-400" /></div>
+                                                        ) : (
+                                                            stores.map((s) => (
+                                                                <div key={s.account_code} className="flex items-center space-x-3 p-3 hover:bg-slate-50 rounded border-b border-slate-50" onClick={() => {
+                                                                    if (selectedStoreFilters.includes(s.account_code)) setSelectedStoreFilters(selectedStoreFilters.filter(id => id !== s.account_code))
+                                                                    else setSelectedStoreFilters([...selectedStoreFilters, s.account_code])
+                                                                }}>
+                                                                    <input type="checkbox" checked={selectedStoreFilters.includes(s.account_code)} readOnly className="w-4 h-4 rounded border-slate-300" />
+                                                                    <span className="text-sm font-medium">{s.store_name}</span>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-bold text-slate-500 uppercase">Date Range</label>
@@ -417,7 +441,7 @@ export function AnalyticsDialog({
                                                             <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => setSelectedVendorFilters([])}>Clear</Button>
                                                         )}
                                                     </div>
-                                                    <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
+                                                    <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()}>
                                                         {vendorsLoading ? (
                                                             <div className="flex items-center justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-slate-400" /></div>
                                                         ) : (
@@ -479,7 +503,7 @@ export function AnalyticsDialog({
                                                         <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => setSelectedStoreFilters([])}>Clear</Button>
                                                     )}
                                                 </div>
-                                                <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
+                                                <div className="max-h-60 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()}>
                                                     {storesLoading ? (
                                                         <div className="flex items-center justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-slate-400" /></div>
                                                     ) : (
