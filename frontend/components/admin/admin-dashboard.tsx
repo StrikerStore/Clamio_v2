@@ -2418,7 +2418,7 @@ export function AdminDashboard() {
             <div className="border-t bg-white py-3 animate-in fade-in slide-in-from-top-2 duration-200">
               <div className="space-y-4 px-2">
                 {/* Quick Actions Section */}
-                <div className="grid grid-cols-3 gap-2 pb-2 border-b">
+                <div className="grid grid-cols-4 gap-2 pb-2 border-b">
                   {/* Notifications */}
                   <Button
                     variant="ghost"
@@ -2466,6 +2466,23 @@ export function AdminDashboard() {
                   >
                     <Package className="w-5 h-5 text-blue-500" />
                     <span className="text-[10px] font-medium">Inventory</span>
+                  </Button>
+
+                  {/* Critical Orders Placeholder */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      toast({
+                        title: "Critical Orders",
+                        description: "This feature is coming soon!",
+                      });
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="flex flex-col items-center gap-1 h-auto py-2"
+                  >
+                    <AlertTriangle className="w-5 h-5 text-red-500" />
+                    <span className="text-[10px] font-medium">Critical</span>
                   </Button>
                 </div>
 

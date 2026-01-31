@@ -1314,11 +1314,13 @@ class Database {
           label_downloaded BOOLEAN DEFAULT FALSE,
           priority_carrier TEXT,
           account_code VARCHAR(50) NOT NULL,
+          is_critical TINYINT(1) DEFAULT 0,
           INDEX idx_order_unique_id (order_unique_id),
           INDEX idx_order_id (order_id),
           INDEX idx_claimed_by (claimed_by),
           INDEX idx_status (status),
-          INDEX idx_account_code (account_code)
+          INDEX idx_account_code (account_code),
+          INDEX idx_is_critical (is_critical)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `;
 
@@ -1330,6 +1332,9 @@ class Database {
 
       // Add account_code column if it doesn't exist (for existing tables)
       await this.addAccountCodeToClaimsIfNotExists();
+
+      // Add is_critical column if it doesn't exist (migration for existing tables)
+      await this.addIsCriticalToClaims();
 
       // Migrate existing claims data from orders table if claims table is empty
       await this.migrateClaimsData();
@@ -1423,6 +1428,40 @@ class Database {
       }
     } catch (error) {
       console.error('❌ Error adding priority_carrier column to claims:', error.message);
+    }
+  }
+
+  /**
+   * Add is_critical column to existing claims table if it doesn't exist (migration)
+   */
+  async addIsCriticalToClaims() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // Check if is_critical column exists
+      const [columns] = await this.mysqlConnection.execute(
+        `SHOW COLUMNS FROM claims LIKE 'is_critical'`
+      );
+
+      if (columns.length === 0) {
+        console.log('🔄 Adding is_critical column to existing claims table...');
+
+        // Add is_critical column
+        await this.mysqlConnection.execute(
+          `ALTER TABLE claims ADD COLUMN is_critical TINYINT(1) DEFAULT 0`
+        );
+
+        // Add index for is_critical
+        await this.mysqlConnection.execute(
+          `ALTER TABLE claims ADD INDEX idx_is_critical (is_critical)`
+        );
+
+        console.log('✅ is_critical column added to claims table');
+      } else {
+        console.log('✅ is_critical column already exists in claims table');
+      }
+    } catch (error) {
+      console.error('❌ Error adding is_critical column to claims:', error.message);
     }
   }
 

@@ -740,6 +740,35 @@ app.listen(PORT, async () => {
     }
   });
 
+  // Auto-Reversal & Criticality Cron Job - Every day at 2 AM
+  const autoReversalService = require('./services/autoReversalService');
+  cron.schedule('0 2 * * *', async () => {
+    try {
+      console.log('\n[Daily Maintenance] Starting scheduled tasks (Auto-Reversal & Criticality)...');
+
+      // Run Auto-Reversal
+      console.log('[Auto-Reversal] Processing expired claims...');
+      const reversalResult = await autoReversalService.executeAutoReversal();
+      if (reversalResult.success) {
+        console.log(`[Auto-Reversal] Completed! Auto-reversed: ${reversalResult.data.auto_reversed} order(s).`);
+      } else {
+        console.log(`[Auto-Reversal] Failed: ${reversalResult.message}`);
+      }
+
+      // Run Criticality Update
+      console.log('[Claims Criticality] Updating is_critical flags (15-day rule)...');
+      const criticalityResult = await autoReversalService.updateClaimsCriticality();
+      if (criticalityResult.success) {
+        console.log(`[Claims Criticality] Completed! Affected rows: ${criticalityResult.data.affected_rows}.`);
+      } else {
+        console.log(`[Claims Criticality] Failed: ${criticalityResult.message}`);
+      }
+
+    } catch (err) {
+      console.error('[Daily Maintenance] Scheduled run failed:', err.message);
+    }
+  });
+
   // Run one-time migration to update rto_wh from latest activity location
   (async () => {
     try {
@@ -755,6 +784,22 @@ app.listen(PORT, async () => {
       }
     } catch (err) {
       console.error('[Migration] RTO warehouse migration error:', err.message);
+    }
+  })();
+
+  // Run Claims Criticality update once on startup
+  (async () => {
+    try {
+      console.log('[Claims Criticality] Running initial criticality update on startup...');
+      const autoReversalService = require('./services/autoReversalService');
+      const result = await autoReversalService.updateClaimsCriticality();
+      if (result.success) {
+        console.log(`[Claims Criticality] Startup update completed. Affected rows: ${result.data.affected_rows}`);
+      } else {
+        console.log(`[Claims Criticality] Startup update failed: ${result.message}`);
+      }
+    } catch (err) {
+      console.error('[Claims Criticality] Startup update error:', err.message);
     }
   })();
 
