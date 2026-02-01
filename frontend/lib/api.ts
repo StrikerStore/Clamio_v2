@@ -1791,6 +1791,17 @@ class ApiClient {
     })
   }
 
+  // ==================== CRITICAL ORDERS METHODS ====================
+
+  /**
+   * Get critical orders (claims.is_critical = 1)
+   * These are orders that need urgent attention
+   */
+  async getCriticalOrders(accountCode?: string): Promise<ApiResponse> {
+    const queryParams = accountCode ? `?account_code=${encodeURIComponent(accountCode)}` : '';
+    return this.makeRequest(`/admin/inventory/critical-orders${queryParams}`)
+  }
+
   // ==================== RTO MANUAL ENTRY METHODS ====================
 
   /**

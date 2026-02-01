@@ -78,6 +78,7 @@ import { useDeviceType } from "@/hooks/use-mobile"
 import { InventoryAggregation, InventoryAggregationRef } from "@/components/admin/inventory/inventory-aggregation"
 import { NotificationDialog } from "./notification-dialog"
 import { RTOFocusDialog } from "./inventory/rto-focus-dialog"
+import { CriticalOrdersDialog } from "./inventory/critical-orders-dialog"
 import { AnalyticsDialog } from "./analytics-dialog"
 
 // Mock data for admin dashboard
@@ -341,6 +342,9 @@ export function AdminDashboard() {
 
   // RTO Focus dialog state
   const [showRTOFocusDialog, setShowRTOFocusDialog] = useState(false)
+  
+  // Critical Orders dialog state
+  const [showCriticalOrdersDialog, setShowCriticalOrdersDialog] = useState(false)
 
   // Image modal state
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null)
@@ -2351,7 +2355,7 @@ export function AdminDashboard() {
               </div>
               <div className="min-w-0">
                 <h1 className={`font-bold text-gray-900 truncate ${isMobile ? 'text-base sm:text-xl' : 'text-2xl'}`}>CLAIMIO - Admin</h1>
-                {!isMobile && <p className="text-sm sm:text-base text-gray-600 truncate">Welcome back, {user?.name}</p>}
+                {!isMobile && <p className="text-sm sm:text-base text-gray-600 truncate">Welcome back, {user?.name} ({user?.email})</p>}
               </div>
             </div>
 
@@ -2363,14 +2367,17 @@ export function AdminDashboard() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setShowNotificationPanel(true)}
-                  className="p-2 relative"
+                  className="flex flex-col items-center gap-1 h-auto py-1.5 px-2 relative"
                 >
-                  <Bell className="w-5 h-5" />
-                  {notificationStats && notificationStats.pending > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-semibold">
-                      {notificationStats.pending > 99 ? '99+' : notificationStats.pending}
-                    </span>
-                  )}
+                  <div className="relative">
+                    <Bell className="w-5 h-5 text-gray-600" />
+                    {notificationStats && notificationStats.pending > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-semibold">
+                        {notificationStats.pending > 99 ? '99+' : notificationStats.pending}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] font-medium text-gray-600">Alerts</span>
                 </Button>
 
                 {/* RTO Focus Button */}
@@ -2378,16 +2385,25 @@ export function AdminDashboard() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setShowRTOFocusDialog(true)}
-                  className="p-2 relative"
+                  className="flex flex-col items-center gap-1 h-auto py-1.5 px-2 relative"
                   title="RTO Focus Orders"
                 >
                   <Target className="w-5 h-5 text-orange-500" />
+                  <span className="text-[10px] font-medium text-gray-600">Focus</span>
                 </Button>
 
-                <div className="text-right">
-                  <p className="text-sm sm:text-base font-medium text-gray-900 truncate max-w-[120px]">{user?.name}</p>
-                  <p className="text-sm text-gray-500 break-all max-w-[200px]">{user?.email}</p>
-                </div>
+                {/* Critical Orders Button */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowCriticalOrdersDialog(true)}
+                  className="flex flex-col items-center gap-1 h-auto py-1.5 px-2 relative"
+                  title="Critical Orders"
+                >
+                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                  <span className="text-[10px] font-medium text-gray-600">Critical</span>
+                </Button>
+
                 <Button
                   variant="outline"
                   onClick={logout}
@@ -2487,15 +2503,12 @@ export function AdminDashboard() {
                     <span className="text-[10px] font-medium">Inventory</span>
                   </Button>
 
-                  {/* Critical Orders Placeholder */}
+                  {/* Critical Orders Button */}
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      toast({
-                        title: "Critical Orders",
-                        description: "This feature is coming soon!",
-                      });
+                      setShowCriticalOrdersDialog(true);
                       setIsMobileMenuOpen(false);
                     }}
                     className="flex flex-col items-center gap-1 h-auto py-2"
@@ -6603,6 +6616,12 @@ export function AdminDashboard() {
       <RTOFocusDialog
         isOpen={showRTOFocusDialog}
         onClose={() => setShowRTOFocusDialog(false)}
+      />
+
+      {/* Critical Orders Dialog */}
+      <CriticalOrdersDialog
+        isOpen={showCriticalOrdersDialog}
+        onClose={() => setShowCriticalOrdersDialog(false)}
       />
     </div>
   )
