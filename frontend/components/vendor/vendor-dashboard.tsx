@@ -278,6 +278,11 @@ export function VendorDashboard() {
   const [selectedMergeFormat, setSelectedMergeFormat] = useState<string>("thermal")
   const [mergeLoading, setMergeLoading] = useState(false)
 
+  // Manifest download dialog state
+  const [showManifestDialog, setShowManifestDialog] = useState(false)
+  const [manifestDialogData, setManifestDialogData] = useState<string[] | null>(null)
+  const [selectedManifestFormat, setSelectedManifestFormat] = useState<string>("a4")
+
   // Loading states for reverse operations
   const [reverseLoading, setReverseLoading] = useState<{ [key: string]: boolean }>({})
 
@@ -1686,7 +1691,7 @@ export function VendorDashboard() {
     }
   }
 
-  const downloadManifestSummary = async (manifestIds: string[]) => {
+  const downloadManifestSummary = async (manifestIds: string[], format: string = 'a4') => {
     const manifestKey = manifestIds.join(',');
     try {
       setManifestDownloadLoading(manifestKey);
@@ -1704,7 +1709,7 @@ export function VendorDashboard() {
           'Content-Type': 'application/json',
           'Authorization': vendorToken,
         },
-        body: JSON.stringify({ manifest_ids: manifestIds }),
+        body: JSON.stringify({ manifest_ids: manifestIds, format: format }),
       });
 
       if (!response.ok) {
@@ -1717,7 +1722,7 @@ export function VendorDashboard() {
       const link = document.createElement('a');
       link.href = url;
       const timestamp = new Date().toISOString().split('T')[0];
-      link.download = `manifest-summary-${timestamp}.pdf`;
+      link.download = `manifest-summary-${timestamp}-${format}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1725,7 +1730,7 @@ export function VendorDashboard() {
 
       toast({
         title: "Manifest Downloaded",
-        description: "Manifest summary PDF has been downloaded successfully",
+        description: `Manifest summary PDF (${format.toUpperCase()}) has been downloaded successfully`,
       });
     } catch (error) {
       console.error('Error downloading manifest summary:', error);
@@ -1774,10 +1779,11 @@ export function VendorDashboard() {
         return;
       }
 
-      console.log('📥 Bulk downloading manifests:', manifestIdsArray);
+      console.log('📥 Opening manifest format dialog:', manifestIdsArray);
 
-      // Download all manifests in single PDF
-      await downloadManifestSummary(manifestIdsArray);
+      // Open dialog instead of direct download
+      setManifestDialogData(manifestIdsArray);
+      setShowManifestDialog(true);
 
       // Clear selection after successful download
       setSelectedHandoverOrders([]);
@@ -1844,8 +1850,9 @@ export function VendorDashboard() {
 
         // Auto-download manifest summary PDF
         if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
-          console.log('📥 Auto-downloading manifest summary PDF...', data.data.manifest_ids);
-          await downloadManifestSummary(data.data.manifest_ids);
+          console.log('📥 Opening manifest format dialog after bulk mark ready...');
+          setManifestDialogData(data.data.manifest_ids);
+          setShowManifestDialog(true);
         }
 
         // Clear selection and refresh orders
@@ -4015,7 +4022,6 @@ export function VendorDashboard() {
                   >
                     Handover ({getTotalCountForTab("handover")})
                   </TabsTrigger>
-                  {/* Order Tracking Tab - Desktop Only (Mobile users use the tracking icon in header) */}
                   {!isMobile && (
                     <TabsTrigger
                       value="order-tracking"
@@ -4066,7 +4072,6 @@ export function VendorDashboard() {
                     </div>
                   </div>
 
-                  {/* Status Filter - Desktop Only for Handover Tab */}
                   {!isMobile && activeTab === "handover" && (
                     <div className="w-[180px] flex-shrink-0">
                       <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
@@ -4091,7 +4096,6 @@ export function VendorDashboard() {
                     </div>
                   )}
 
-                  {/* Status Filter - Desktop Only for Order Tracking Tab */}
                   {!isMobile && activeTab === "order-tracking" && (
                     <div className="w-[280px] flex-shrink-0">
                       <Select value={selectedTrackingStatuses.length > 0 ? selectedTrackingStatuses.join(',') : 'all'} onValueChange={(value) => {
@@ -4116,9 +4120,7 @@ export function VendorDashboard() {
                     </div>
                   )}
 
-
                   <div className={`flex gap-2 items-center ${isMobile ? 'w-full' : ''}`}>
-                    {/* Date Range Container - Responsive width */}
                     <div className={`flex gap-2 items-center ${isMobile ? 'flex-1' : ''}`}>
                       <DatePicker
                         date={getCurrentTabFilters().dateFrom}
@@ -4135,10 +4137,8 @@ export function VendorDashboard() {
                       />
                     </div>
 
-                    {/* Filter Icons - Mobile View - Fixed width on right */}
                     {isMobile && (
                       <div className="flex items-center flex-shrink-0">
-                        {/* Status Filter for Handover */}
                         {activeTab === "handover" && (
                           <div className="relative">
                             <Select value={selectedStatuses.length > 0 ? selectedStatuses.join(',') : 'all'} onValueChange={(value) => {
@@ -4165,7 +4165,6 @@ export function VendorDashboard() {
                           </div>
                         )}
 
-                        {/* Status Filter for Order Tracking */}
                         {activeTab === "order-tracking" && (
                           <div className="relative">
                             <Select value={selectedTrackingStatuses.length > 0 ? selectedTrackingStatuses.join(',') : 'all'} onValueChange={(value) => {
@@ -4189,14 +4188,12 @@ export function VendorDashboard() {
                                 ))}
                               </SelectContent>
                             </Select>
-                            {/* Blue dot indicator when filter is active */}
                             {selectedTrackingStatuses.length > 0 && (
                               <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
                             )}
                           </div>
                         )}
 
-                        {/* Label Download Filter for My Orders */}
                         {activeTab === "my-orders" && (
                           <div className="relative">
                             <Select value={selectedLabelFilter} onValueChange={setSelectedLabelFilter}>
@@ -4211,7 +4208,6 @@ export function VendorDashboard() {
                                 <SelectItem value="not_downloaded">Label Not Downloaded</SelectItem>
                               </SelectContent>
                             </Select>
-                            {/* Blue dot indicator when filter is active */}
                             {selectedLabelFilter !== 'all' && (
                               <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
                             )}
@@ -4221,7 +4217,6 @@ export function VendorDashboard() {
                     )}
                   </div>
 
-                  {/* Bulk Manifest Download Button - Desktop Only for Handover Tab */}
                   {!isMobile && activeTab === "handover" && (
                     <Button
                       onClick={handleBulkManifestDownload}
@@ -4242,7 +4237,6 @@ export function VendorDashboard() {
                     </Button>
                   )}
 
-                  {/* Tab-specific Actions */}
                   {activeTab === "all-orders" && !isMobile && (
                     <Button
                       onClick={() => handleBulkClaimOrders()}
@@ -4265,18 +4259,6 @@ export function VendorDashboard() {
 
                   {activeTab === "my-orders" && !isMobile && (
                     <div className="flex gap-2 items-center">
-                      <Select value={labelFormat} onValueChange={setLabelFormat}>
-                        <SelectTrigger className="h-10 text-sm w-36">
-                          <SelectValue placeholder="Label Format" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="thermal">Thermal (4x6)</SelectItem>
-                          <SelectItem value="a4">A4 Format</SelectItem>
-                          <SelectItem value="four-in-one">Four in One</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      {/* Label Download Filter - Desktop Only for My Orders Tab */}
                       <div className="relative">
                         <Select value={selectedLabelFilter} onValueChange={setSelectedLabelFilter}>
                           <SelectTrigger className="w-12 h-10 px-2 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 flex items-center justify-center">
@@ -4290,7 +4272,6 @@ export function VendorDashboard() {
                             <SelectItem value="not_downloaded">Label Not Downloaded</SelectItem>
                           </SelectContent>
                         </Select>
-                        {/* Blue dot indicator when filter is active */}
                         {selectedLabelFilter !== 'all' && (
                           <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
                         )}
@@ -4345,8 +4326,6 @@ export function VendorDashboard() {
                     </div>
                   )}
                 </div>
-
-
               </div>
 
               {/* Scrollable Content Section */}
@@ -4971,7 +4950,8 @@ export function VendorDashboard() {
                                   e.stopPropagation();
                                   const manifestId = order.manifest_id;
                                   if (manifestId) {
-                                    downloadManifestSummary([manifestId]);
+                                    setManifestDialogData([manifestId]);
+                                    setShowManifestDialog(true);
                                   } else {
                                     toast({
                                       title: "Error",
@@ -5153,7 +5133,8 @@ export function VendorDashboard() {
                                       // Get manifest_id from order (should be available in handover tab)
                                       const manifestId = order.manifest_id;
                                       if (manifestId) {
-                                        downloadManifestSummary([manifestId]);
+                                        setManifestDialogData([manifestId]);
+                                        setShowManifestDialog(true);
                                       } else {
                                         toast({
                                           title: "Error",
@@ -5222,63 +5203,49 @@ export function VendorDashboard() {
                     </div>
                   )}
                 </TabsContent>
-              </div>
 
-              {/* Fixed Bottom Bulk Claim Button for Mobile All Orders */}
-              {isMobile && activeTab === "all-orders" && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    {/* Move to Top Button */}
-                    <Button
-                      onClick={scrollToTop}
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
-                    >
-                      <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    </Button>
-
-                    {/* Bulk Claim Button */}
-                    <Button
-                      onClick={() => handleBulkClaimOrders()}
-                      disabled={selectedUnclaimedOrders.length === 0 || claimLoading}
-                      className="flex-1 h-10 sm:h-12 text-base sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
-                    >
-                      {claimLoading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
-                          <span className="truncate">Claiming...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                          <span className="truncate">Claim ({selectedUnclaimedOrders.length})</span>
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Fixed Bottom Buttons for Mobile My Orders */}
-              {isMobile && activeTab === "my-orders" && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
-                  <div className="flex flex-col gap-2 sm:gap-3">
-                    {/* Label Format Selector and Select All */}
+                {/* Fixed Bottom Bulk Claim Button for Mobile All Orders */}
+                {isMobile && activeTab === "all-orders" && (
+                  <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
                     <div className="flex items-center gap-2 sm:gap-3">
-                      <Select value={labelFormat} onValueChange={setLabelFormat}>
-                        <SelectTrigger className="h-9 sm:h-10 text-sm sm:text-base flex-1">
-                          <SelectValue placeholder="Label Format" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="thermal">Thermal (4x6)</SelectItem>
-                          <SelectItem value="a4">A4 Format</SelectItem>
-                          <SelectItem value="four-in-one">Four in One</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      {/* Move to Top Button */}
+                      <Button
+                        onClick={scrollToTop}
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                      >
+                        <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      </Button>
 
+                      {/* Bulk Claim Button */}
+                      <Button
+                        onClick={() => handleBulkClaimOrders()}
+                        disabled={selectedUnclaimedOrders.length === 0 || claimLoading}
+                        className="flex-1 h-10 sm:h-12 text-base sm:text-lg font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0"
+                      >
+                        {claimLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
+                            <span className="truncate">Claiming...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Package className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                            <span className="truncate">Claim ({selectedUnclaimedOrders.length})</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Fixed Bottom Buttons for Mobile My Orders */}
+                {isMobile && activeTab === "my-orders" && (
+                  <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                    <div className="flex flex-col gap-2 sm:gap-3">
                       {/* Select All Checkbox */}
-                      <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0">
+                      <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap ml-auto">
                         <input
                           type="checkbox"
                           onChange={(e) => {
@@ -5297,367 +5264,367 @@ export function VendorDashboard() {
                         />
                         <span className="text-sm sm:text-base font-medium">All</span>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2 sm:gap-3">
-                      {/* Move to Top Button */}
-                      <Button
-                        onClick={scrollToTop}
-                        variant="outline"
-                        size="sm"
-                        className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
-                      >
-                        <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      </Button>
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        {/* Move to Top Button */}
+                        <Button
+                          onClick={scrollToTop}
+                          variant="outline"
+                          size="sm"
+                          className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
+                        >
+                          <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        </Button>
 
-                      {/* Download Label Button */}
-                      <Button
-                        onClick={() => handleBulkDownloadLabels("my-orders")}
-                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
-                        className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
-                      >
-                        {bulkDownloadLoading ? (
-                          <>
-                            <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
-                            <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Generating...'}</span>
-                          </>
-                        ) : (
-                          <div className="flex items-center justify-center w-full">
-                            <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
-                            <span className="whitespace-nowrap flex items-center">
-                              <span className="hidden min-[360px]:inline">Download</span>
-                              <span className="inline min-[360px]:hidden">DL</span>
-                              <span className="ml-1">({getVisibleSelectedOrdersCount()})</span>
-                            </span>
-                          </div>
-                        )}
-                      </Button>
+                        {/* Download Label Button */}
+                        <Button
+                          onClick={() => handleBulkDownloadLabels("my-orders")}
+                          disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
+                          className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
+                        >
+                          {bulkDownloadLoading ? (
+                            <>
+                              <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
+                              <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Generating...'}</span>
+                            </>
+                          ) : (
+                            <div className="flex items-center justify-center w-full">
+                              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
+                              <span className="whitespace-nowrap flex items-center">
+                                <span className="hidden min-[360px]:inline">Download</span>
+                                <span className="inline min-[360px]:hidden">DL</span>
+                                <span className="ml-1">({getVisibleSelectedOrdersCount()})</span>
+                              </span>
+                            </div>
+                          )}
+                        </Button>
 
-                      {/* Mark Ready Button */}
-                      <Button
-                        onClick={() => handleBulkMarkReady()}
-                        disabled={
-                          getVisibleSelectedOrdersCount() === 0 ||
-                          bulkMarkReadyLoading ||
-                          getFilteredOrdersForTab("my-orders")
-                            .filter(order => selectedMyOrders.includes(order.order_id))
-                            .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
-                        }
-                        className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
-                      >
-                        {bulkMarkReadyLoading ? (
-                          <>
-                            <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
-                            <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Processing...'}</span>
-                          </>
-                        ) : (
-                          <div className="flex items-center justify-center w-full">
-                            <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
-                            <span className="whitespace-nowrap flex items-center">
-                              <span>Ready</span>
-                              <span className="ml-1">({getVisibleSelectedOrdersCount()})</span>
-                            </span>
-                          </div>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Fixed Bottom Buttons for Mobile Handover */}
-              {isMobile && activeTab === "handover" && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
-                  <div className="flex flex-col gap-2 sm:gap-3">
-                    {/* Select All Checkbox */}
-                    <div className="flex items-center gap-2 sm:gap-3 justify-end">
-                      <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0">
-                        <input
-                          type="checkbox"
-                          onChange={(e) => {
-                            const handoverOrders = getFilteredHandoverOrders()
-                            if (e.target.checked) {
-                              setSelectedHandoverOrders(handoverOrders.map((o) => o.order_id))
-                            } else {
-                              setSelectedHandoverOrders([])
-                            }
-                          }}
-                          checked={
-                            selectedHandoverOrders.length > 0 &&
-                            selectedHandoverOrders.length === getFilteredHandoverOrders().length
+                        {/* Mark Ready Button */}
+                        <Button
+                          onClick={() => handleBulkMarkReady()}
+                          disabled={
+                            getVisibleSelectedOrdersCount() === 0 ||
+                            bulkMarkReadyLoading ||
+                            getFilteredOrdersForTab("my-orders")
+                              .filter(order => selectedMyOrders.includes(order.order_id))
+                              .some(order => !order.label_downloaded || order.label_downloaded === 0 || order.label_downloaded === '0' || order.label_downloaded === false)
                           }
-                          className="w-3.5 h-3.5 sm:w-4 sm:h-4"
-                        />
-                        <span className="text-sm sm:text-base font-medium">Select All</span>
+                          className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
+                        >
+                          {bulkMarkReadyLoading ? (
+                            <>
+                              <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
+                              <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Processing...'}</span>
+                            </>
+                          ) : (
+                            <div className="flex items-center justify-center w-full">
+                              <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 md:w-5 md:h-5 mr-1 sm:mr-1.5 flex-shrink-0" />
+                              <span className="whitespace-nowrap flex items-center">
+                                <span>Ready</span>
+                                <span className="ml-1">({getVisibleSelectedOrdersCount()})</span>
+                              </span>
+                            </div>
+                          )}
+                        </Button>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2 sm:gap-3">
-                      {/* Move to Top Button */}
-                      <Button
-                        onClick={scrollToTop}
-                        variant="outline"
-                        size="sm"
-                        className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
-                      >
-                        <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      </Button>
-
-                      {/* Bulk Manifest Download Button */}
-                      <Button
-                        onClick={handleBulkManifestDownload}
-                        disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
-                        className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
-                      >
-                        {manifestDownloadLoading !== null ? (
-                          <>
-                            <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
-                            <span className="truncate">{isMobile ? 'Loading' : 'Downloading...'}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
-                            <span className="truncate">Manifest Download ({selectedHandoverOrders.length})</span>
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Fixed Move to Top Button for Desktop All Orders, My Orders, Handover, and Order Tracking */}
-              {!isMobile && (activeTab === "all-orders" || activeTab === "my-orders" || activeTab === "handover" || activeTab === "order-tracking") && (
-                <Button
-                  onClick={scrollToTop}
-                  variant="outline"
-                  size="sm"
-                  className="fixed bottom-6 right-6 h-12 w-12 p-0 rounded-full border-gray-300 hover:bg-gray-50 shadow-lg z-50"
-                >
-                  <ChevronUp className="w-5 h-5" />
-                </Button>
-              )}
-
-              {/* Order Tracking Tab Content - Shows orders that have been in handover for 24+ hours */}
-              <TabsContent value="order-tracking" className="mt-0">
-                {/* Progress Indicator */}
-                {loadingProgress['order-tracking'] && (
-                  <div className="text-sm text-gray-500 text-center py-2 mb-2">
-                    {loadingProgress['order-tracking'].isLoading ? (
-                      <>
-                        <Loader2 className="inline animate-spin mr-2 h-4 w-4" />
-                        Loading {Math.min(loadingProgress['order-tracking'].loaded + 50, loadingProgress['order-tracking'].total)} of {loadingProgress['order-tracking'].total}...
-                      </>
-                    ) : loadingProgress['order-tracking'].loaded < loadingProgress['order-tracking'].total ? (
-                      `Showing ${loadingProgress['order-tracking'].loaded} of ${loadingProgress['order-tracking'].total}`
-                    ) : null}
                   </div>
                 )}
-                {trackingOrdersLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="text-center">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-                      <p className="text-gray-600">Loading order tracking data...</p>
-                    </div>
-                  </div>
-                ) : trackingOrdersError ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="text-center">
-                      <p className="text-red-600">{trackingOrdersError}</p>
-                      <Button onClick={() => fetchOrderTrackingOrders()} className="mt-4">
-                        Retry
-                      </Button>
-                    </div>
-                  </div>
-                ) : isMobile ? (
-                  /* Mobile Card Layout */
-                  <div className="space-y-2.5 sm:space-y-3 pb-32 mt-4">
-                    {getFilteredTrackingOrders().length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-12">
-                        <Truck className="w-16 h-16 text-gray-300 mb-4" />
-                        <p className="text-gray-600 font-medium">No orders in tracking yet</p>
-                        <p className="text-sm text-gray-500 mt-2">Orders will appear here 24 hours after handover</p>
+
+                {/* Fixed Bottom Buttons for Mobile Handover */}
+                {isMobile && activeTab === "handover" && (
+                  <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 sm:p-4 shadow-lg z-50">
+                    <div className="flex flex-col gap-2 sm:gap-3">
+                      {/* Select All Checkbox */}
+                      <div className="flex items-center gap-2 sm:gap-3 justify-end">
+                        <div className="flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0">
+                          <input
+                            type="checkbox"
+                            onChange={(e) => {
+                              const handoverOrders = getFilteredHandoverOrders()
+                              if (e.target.checked) {
+                                setSelectedHandoverOrders(handoverOrders.map((o) => o.order_id))
+                              } else {
+                                setSelectedHandoverOrders([])
+                              }
+                            }}
+                            checked={
+                              selectedHandoverOrders.length > 0 &&
+                              selectedHandoverOrders.length === getFilteredHandoverOrders().length
+                            }
+                            className="w-3.5 h-3.5 sm:w-4 sm:h-4"
+                          />
+                          <span className="text-sm sm:text-base font-medium">Select All</span>
+                        </div>
                       </div>
-                    ) : (
-                      getFilteredTrackingOrders().map((order, index) => (
-                        <Card
-                          key={`${order.order_id}-${index}`}
-                          className="p-2.5 sm:p-3 transition-colors"
+
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        {/* Move to Top Button */}
+                        <Button
+                          onClick={scrollToTop}
+                          variant="outline"
+                          size="sm"
+                          className="h-9 w-9 sm:h-10 sm:w-10 p-0 rounded-full border-gray-300 hover:bg-gray-50 flex-shrink-0"
                         >
-                          <div className="space-y-1.5 sm:space-y-2">
-                            {/* Top Row: Order Info | Total */}
-                            <div className="flex items-center justify-between gap-1.5 sm:gap-2">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
-                                  {(order.current_shipment_status || order.status) && (
-                                    <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
-                                      {getShipmentDisplayName(order.current_shipment_status || order.status)}
-                                    </div>
+                          <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        </Button>
+
+                        {/* Bulk Manifest Download Button */}
+                        <Button
+                          onClick={handleBulkManifestDownload}
+                          disabled={selectedHandoverOrders.length === 0 || manifestDownloadLoading !== null}
+                          className="flex-1 h-10 sm:h-12 text-sm sm:text-lg font-medium bg-gradient-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 border-0 shadow-lg min-w-0"
+                        >
+                          {manifestDownloadLoading !== null ? (
+                            <>
+                              <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0 animate-spin" />
+                              <span className="truncate">{isMobile ? 'Loading' : 'Downloading...'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-4 h-4 sm:w-5 sm:h-5 mr-1 sm:mr-2 flex-shrink-0" />
+                              <span className="truncate">Manifest Download ({selectedHandoverOrders.length})</span>
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Fixed Move to Top Button for Desktop All Orders, My Orders, Handover, and Order Tracking */}
+                {!isMobile && (activeTab === "all-orders" || activeTab === "my-orders" || activeTab === "handover" || activeTab === "order-tracking") && (
+                  <Button
+                    onClick={scrollToTop}
+                    variant="outline"
+                    size="sm"
+                    className="fixed bottom-6 right-6 h-12 w-12 p-0 rounded-full border-gray-300 hover:bg-gray-50 shadow-lg z-50"
+                  >
+                    <ChevronUp className="w-5 h-5" />
+                  </Button>
+                )}
+
+                {/* Order Tracking Tab Content - Shows orders that have been in handover for 24+ hours */}
+                <TabsContent value="order-tracking" className="mt-0">
+                  {/* Progress Indicator */}
+                  {loadingProgress['order-tracking'] && (
+                    <div className="text-sm text-gray-500 text-center py-2 mb-2">
+                      {loadingProgress['order-tracking'].isLoading ? (
+                        <>
+                          <Loader2 className="inline animate-spin mr-2 h-4 w-4" />
+                          Loading {Math.min(loadingProgress['order-tracking'].loaded + 50, loadingProgress['order-tracking'].total)} of {loadingProgress['order-tracking'].total}...
+                        </>
+                      ) : loadingProgress['order-tracking'].loaded < loadingProgress['order-tracking'].total ? (
+                        `Showing ${loadingProgress['order-tracking'].loaded} of ${loadingProgress['order-tracking'].total}`
+                      ) : null}
+                    </div>
+                  )}
+                  {trackingOrdersLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                        <p className="text-gray-600">Loading order tracking data...</p>
+                      </div>
+                    </div>
+                  ) : trackingOrdersError ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="text-center">
+                        <p className="text-red-600">{trackingOrdersError}</p>
+                        <Button onClick={() => fetchOrderTrackingOrders()} className="mt-4">
+                          Retry
+                        </Button>
+                      </div>
+                    </div>
+                  ) : isMobile ? (
+                    /* Mobile Card Layout */
+                    <div className="space-y-2.5 sm:space-y-3 pb-32 mt-4">
+                      {getFilteredTrackingOrders().length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                          <Truck className="w-16 h-16 text-gray-300 mb-4" />
+                          <p className="text-gray-600 font-medium">No orders in tracking yet</p>
+                          <p className="text-sm text-gray-500 mt-2">Orders will appear here 24 hours after handover</p>
+                        </div>
+                      ) : (
+                        getFilteredTrackingOrders().map((order, index) => (
+                          <Card
+                            key={`${order.order_id}-${index}`}
+                            className="p-2.5 sm:p-3 transition-colors"
+                          >
+                            <div className="space-y-1.5 sm:space-y-2">
+                              {/* Top Row: Order Info | Total */}
+                              <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className="font-medium text-sm sm:text-base truncate">{order.order_id}</h4>
+                                    {(order.current_shipment_status || order.status) && (
+                                      <div className={`text-xs font-medium px-2 py-1 rounded-full ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                        {getShipmentDisplayName(order.current_shipment_status || order.status)}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <p className="text-xs sm:text-sm text-gray-500 truncate">
+                                    {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
+                                  </p>
+                                  {order.products?.[0]?.awb && (
+                                    <p className="text-xs font-mono text-purple-600 truncate">
+                                      AWB: {order.products[0].awb}
+                                    </p>
                                   )}
                                 </div>
-                                <p className="text-xs sm:text-sm text-gray-500 truncate">
-                                  {order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}
-                                </p>
-                                {order.products?.[0]?.awb && (
-                                  <p className="text-xs font-mono text-purple-600 truncate">
-                                    AWB: {order.products[0].awb}
-                                  </p>
-                                )}
-                              </div>
-                              {/* Total Count - Right aligned */}
-                              <div className="text-right flex-shrink-0">
-                                <div className="text-sm text-gray-500">Total</div>
-                                <div className="text-xl font-bold text-purple-600">{order.total_quantity || 0}</div>
-                              </div>
-                            </div>
-
-                            {/* Products List */}
-                            <div className="space-y-2">
-                              {order.products && order.products.map((product: any) => (
-                                <div key={product.unique_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
-                                  <img
-                                    src={product.image || product.product_image || "/placeholder.svg"}
-                                    alt={product.product_name}
-                                    className="w-10 h-10 rounded-md object-cover cursor-pointer"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      (product.image || product.product_image) && setSelectedImageProduct({ url: product.image || product.product_image, title: product.product_name || "Product Image" })
-                                    }}
-                                    onError={(e) => {
-                                      e.currentTarget.src = "/placeholder.svg";
-                                    }}
-                                  />
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
-                                    <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code}</p>
-                                  </div>
-                                  <div className="text-right flex-shrink-0">
-                                    <p className="text-xs font-medium">{product.quantity || 0}</p>
-                                  </div>
+                                {/* Total Count - Right aligned */}
+                                <div className="text-right flex-shrink-0">
+                                  <div className="text-sm text-gray-500">Total</div>
+                                  <div className="text-xl font-bold text-purple-600">{order.total_quantity || 0}</div>
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-                        </Card>
-                      ))
-                    )}
-
-                    {/* Total count indicator for Order Tracking */}
-                    {trackingOrders.length > 0 && (
-                      <div className="flex items-center justify-center p-4">
-                        <p className="text-xs text-gray-400">Showing all {trackingOrdersTotalCount} orders</p>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  /* Desktop Table Layout */
-                  <div className="border rounded-lg overflow-hidden">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
-                        <TableRow>
-                          <TableHead className="font-semibold">Order ID</TableHead>
-                          <TableHead className="font-semibold">Order Date</TableHead>
-                          <TableHead className="font-semibold">Products</TableHead>
-                          <TableHead className="font-semibold">AWB Number</TableHead>
-                          <TableHead className="font-semibold text-center">Count</TableHead>
-                          <TableHead className="font-semibold">Shipment Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {getFilteredTrackingOrders().length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={6} className="h-64 text-center">
-                              <div className="flex flex-col items-center justify-center">
-                                <Truck className="w-16 h-16 text-gray-300 mb-4" />
-                                <p className="text-gray-600 font-medium">No orders in tracking yet</p>
-                                <p className="text-sm text-gray-500 mt-2">Orders will appear here 24 hours after handover</p>
                               </div>
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          getFilteredTrackingOrders().map((order, index) => (
-                            <TableRow key={`${order.order_id}-${index}`} className="hover:bg-gray-50">
-                              <TableCell className="font-medium">{order.order_id}</TableCell>
-                              <TableCell>
-                                {order.order_date ? (
-                                  <div className="flex flex-col">
-                                    <span className="text-sm font-medium">
-                                      {new Date(order.order_date).toLocaleDateString()}
-                                    </span>
-                                    <span className="text-xs text-gray-500">
-                                      {new Date(order.order_date).toLocaleTimeString()}
-                                    </span>
-                                  </div>
-                                ) : "N/A"}
-                              </TableCell>
-                              <TableCell>
-                                <div className="space-y-2">
-                                  {order.products && order.products.map((product: any, productIndex: number) => (
-                                    <div key={product.unique_id || productIndex} className="flex items-center gap-3">
-                                      <TooltipProvider>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <img
-                                              src={product.image || product.product_image || "/placeholder.svg"}
-                                              alt={product.product_name}
-                                              className="w-10 h-10 rounded-md object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                              onClick={() => (product.image || product.product_image) && setSelectedImageProduct({ url: product.image || product.product_image, title: product.product_name || "Product Image" })}
-                                              onError={(e) => {
-                                                e.currentTarget.src = "/placeholder.svg";
-                                              }}
-                                            />
-                                          </TooltipTrigger>
-                                          <TooltipContent>
-                                            <p>Click to view full image</p>
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-                                      <div className="flex-1 min-w-0">
-                                        <div className="font-medium text-sm break-words leading-relaxed">{product.product_name}</div>
-                                        <div className="text-xs text-gray-500 break-words">Code: {product.product_code}</div>
-                                      </div>
-                                      <div className="text-sm font-medium text-gray-700">
-                                        {product.quantity || 0}
-                                      </div>
+
+                              {/* Products List */}
+                              <div className="space-y-2">
+                                {order.products && order.products.map((product: any) => (
+                                  <div key={product.unique_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+                                    <img
+                                      src={product.image || product.product_image || "/placeholder.svg"}
+                                      alt={product.product_name}
+                                      className="w-10 h-10 rounded-md object-cover cursor-pointer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        (product.image || product.product_image) && setSelectedImageProduct({ url: product.image || product.product_image, title: product.product_name || "Product Image" })
+                                      }}
+                                      onError={(e) => {
+                                        e.currentTarget.src = "/placeholder.svg";
+                                      }}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-medium break-words leading-relaxed">{product.product_name}</p>
+                                      <p className="text-xs text-gray-500 break-words leading-relaxed">Code: {product.product_code}</p>
                                     </div>
-                                  ))}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="font-mono text-sm text-purple-600">
-                                  {order.products?.[0]?.awb || 'N/A'}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-center">
-                                <div className="text-base font-bold text-purple-600">
-                                  {order.total_quantity || 0}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                {(order.current_shipment_status || order.status) ? (
-                                  <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
-                                    {getShipmentDisplayName(order.current_shipment_status || order.status)}
+                                    <div className="text-right flex-shrink-0">
+                                      <p className="text-xs font-medium">{product.quantity || 0}</p>
+                                    </div>
                                   </div>
-                                ) : (
-                                  <span className="text-sm font-medium text-gray-800">N/A</span>
-                                )}
+                                ))}
+                              </div>
+                            </div>
+                          </Card>
+                        ))
+                      )}
+
+                      {/* Total count indicator for Order Tracking */}
+                      {trackingOrders.length > 0 && (
+                        <div className="flex items-center justify-center p-4">
+                          <p className="text-xs text-gray-400">Showing all {trackingOrdersTotalCount} orders</p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Desktop Table Layout */
+                    <div className="border rounded-lg overflow-hidden">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-white z-30 shadow-sm border-b">
+                          <TableRow>
+                            <TableHead className="font-semibold">Order ID</TableHead>
+                            <TableHead className="font-semibold">Order Date</TableHead>
+                            <TableHead className="font-semibold">Products</TableHead>
+                            <TableHead className="font-semibold">AWB Number</TableHead>
+                            <TableHead className="font-semibold text-center">Count</TableHead>
+                            <TableHead className="font-semibold">Shipment Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {getFilteredTrackingOrders().length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={6} className="h-64 text-center">
+                                <div className="flex flex-col items-center justify-center">
+                                  <Truck className="w-16 h-16 text-gray-300 mb-4" />
+                                  <p className="text-gray-600 font-medium">No orders in tracking yet</p>
+                                  <p className="text-sm text-gray-500 mt-2">Orders will appear here 24 hours after handover</p>
+                                </div>
                               </TableCell>
                             </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
+                          ) : (
+                            getFilteredTrackingOrders().map((order, index) => (
+                              <TableRow key={`${order.order_id}-${index}`} className="hover:bg-gray-50">
+                                <TableCell className="font-medium">{order.order_id}</TableCell>
+                                <TableCell>
+                                  {order.order_date ? (
+                                    <div className="flex flex-col">
+                                      <span className="text-sm font-medium">
+                                        {new Date(order.order_date).toLocaleDateString()}
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        {new Date(order.order_date).toLocaleTimeString()}
+                                      </span>
+                                    </div>
+                                  ) : "N/A"}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="space-y-2">
+                                    {order.products && order.products.map((product: any, productIndex: number) => (
+                                      <div key={product.unique_id || productIndex} className="flex items-center gap-3">
+                                        <TooltipProvider>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <img
+                                                src={product.image || product.product_image || "/placeholder.svg"}
+                                                alt={product.product_name}
+                                                className="w-10 h-10 rounded-md object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                                onClick={() => (product.image || product.product_image) && setSelectedImageProduct({ url: product.image || product.product_image, title: product.product_name || "Product Image" })}
+                                                onError={(e) => {
+                                                  e.currentTarget.src = "/placeholder.svg";
+                                                }}
+                                              />
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                              <p>Click to view full image</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                        </TooltipProvider>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="font-medium text-sm break-words leading-relaxed">{product.product_name}</div>
+                                          <div className="text-xs text-gray-500 break-words">Code: {product.product_code}</div>
+                                        </div>
+                                        <div className="text-sm font-medium text-gray-700">
+                                          {product.quantity || 0}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="font-mono text-sm text-purple-600">
+                                    {order.products?.[0]?.awb || 'N/A'}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <div className="text-base font-bold text-purple-600">
+                                    {order.total_quantity || 0}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {(order.current_shipment_status || order.status) ? (
+                                    <div className={`text-xs font-medium px-2 py-1 rounded-full inline-block ${getShipmentBadgeClasses(order.current_shipment_status || order.status)}`}>
+                                      {getShipmentDisplayName(order.current_shipment_status || order.status)}
+                                    </div>
+                                  ) : (
+                                    <span className="text-sm font-medium text-gray-800">N/A</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
 
-                    {/* Total count indicator for Desktop Order Tracking */}
-                    {trackingOrders.length > 0 && (
-                      <div className="flex items-center justify-center p-4 border-t bg-gray-50">
-                        <p className="text-sm text-gray-500">Showing all {trackingOrdersTotalCount} orders</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </TabsContent>
+                      {/* Total count indicator for Desktop Order Tracking */}
+                      {trackingOrders.length > 0 && (
+                        <div className="flex items-center justify-center p-4 border-t bg-gray-50">
+                          <p className="text-sm text-gray-500">Showing all {trackingOrdersTotalCount} orders</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </TabsContent>
+              </div>
             </Tabs>
           </CardContent>
         </Card>
@@ -6187,6 +6154,87 @@ export function VendorDashboard() {
                   Merge & Download
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manifest Format Selection Dialog */}
+      <Dialog open={showManifestDialog} onOpenChange={setShowManifestDialog}>
+        <DialogContent
+          className={`${isMobile ? 'max-w-[95vw] p-4' : 'max-w-md'}`}
+        >
+          <DialogHeader>
+            <DialogTitle className={isMobile ? 'text-lg' : 'text-xl'}>
+              Download Manifest
+            </DialogTitle>
+            <DialogDescription className={isMobile ? 'text-sm' : ''}>
+              Select a format for your manifest summary
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-base font-semibold mb-3 block">
+                Select Format:
+              </Label>
+              <div className="space-y-2">
+                <label className="flex items-center space-x-3 cursor-pointer p-3 rounded-lg border hover:bg-gray-50 transition-colors">
+                  <input
+                    type="radio"
+                    name="manifestFormat"
+                    value="a4"
+                    checked={selectedManifestFormat === "a4"}
+                    onChange={(e) => setSelectedManifestFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <div className="flex-1">
+                    <span className="font-semibold block">A4 Format</span>
+                    <p className="text-xs text-gray-500">Standard A4 page with order details and barcodes</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center space-x-3 cursor-pointer p-3 rounded-lg border hover:bg-gray-50 transition-colors">
+                  <input
+                    type="radio"
+                    name="manifestFormat"
+                    value="thermal"
+                    checked={selectedManifestFormat === "thermal"}
+                    onChange={(e) => setSelectedManifestFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                  />
+                  <div className="flex-1">
+                    <span className="font-semibold block">Thermal Format (4x6)</span>
+                    <p className="text-xs text-gray-500">Compact format for thermal printers, including manifest QR</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className={isMobile ? 'flex-col gap-2' : ''}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowManifestDialog(false);
+                setManifestDialogData(null);
+              }}
+              className={isMobile ? 'w-full' : ''}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (manifestDialogData) {
+                  await downloadManifestSummary(manifestDialogData, selectedManifestFormat);
+                  setShowManifestDialog(false);
+                  setManifestDialogData(null);
+                }
+              }}
+              className={`${isMobile ? 'w-full' : ''} bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700`}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Download
             </Button>
           </DialogFooter>
         </DialogContent>
