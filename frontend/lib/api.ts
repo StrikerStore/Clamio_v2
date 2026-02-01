@@ -510,32 +510,14 @@ class ApiClient {
   }
 
   async refreshOrders(): Promise<ApiResponse> {
-    // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
-
-    const config: RequestInit = {
+    return this.makeRequest('/orders/refresh', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       }
-    }
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/orders/refresh`, config)
-      const data = await response.json()
-
-
-      if (!response.ok) {
-        throw new Error(data.message || `HTTP error! status: ${response.status}`)
-      }
-
-      return data
-    } catch (error) {
-      console.error('Refresh orders API request failed:', error)
-      throw error
-    }
+    });
   }
 
   // Admin orders API
