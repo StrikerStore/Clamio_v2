@@ -144,7 +144,22 @@ Or use the database method:
 await database.setUtilityValue('OrderStatusWebhookUrl', 'https://your-webhook-endpoint.com/status-update', 'admin');
 ```
 
-### 2. Restart Server
+### 2. Configure Retry Count (Optional)
+
+Set the number of retry attempts for failed webhooks (default: 3):
+
+```sql
+INSERT INTO utility (parameter, value, created_by)
+VALUES ('WebhookRetryCount', '3', 'admin')
+ON DUPLICATE KEY UPDATE value = '3';
+```
+
+**Retry Behavior:**
+- **Timeout:** 30 seconds per attempt
+- **Exponential Backoff:** 1s, 2s, 4s... between retries
+- **Default Retry Count:** 3 (if not configured)
+
+### 3. Restart Server
 
 The `customer_message_tracking` table will be created automatically on server startup.
 
@@ -216,6 +231,8 @@ POST to webhook URL configured in utility table
 ✅ **Webhook URL configurable** via utility table  
 ✅ **Bulk data fetching** for efficiency  
 ✅ **Status change detection** - only sends updates when status changes  
+✅ **Retry with exponential backoff** - configurable retry count (default: 3)  
+✅ **30-second timeout** per webhook attempt  
 ✅ **Graceful error handling** - webhook failures don't break sync  
 ✅ **Manual testing endpoint** for development  
 ✅ **Basic auth** on message tracking API  

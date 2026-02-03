@@ -129,39 +129,78 @@ class WebhookService {
 
             console.log(`📤 [Webhook] Sending payload with ${orders.length} orders...`);
 
-            // Send webhook with timeout
-            const response = await axios.post(this.webhookUrl, payload, {
-                timeout: 10000, // 10 second timeout
-                headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'Claimio-Webhook/1.0'
+            // Get retry count from utility table (default: 3)
+            let maxRetries = 3;
+            try {
+                const retryCount = await database.getUtilityValue('WebhookRetryCount');
+                if (retryCount && !isNaN(parseInt(retryCount))) {
+                    maxRetries = parseInt(retryCount);
                 }
-            });
-
-            console.log(`✅ [Webhook] Successfully sent to ${this.webhookUrl}`);
-            console.log(`📊 [Webhook] Response status: ${response.status}`);
-
-            return {
-                success: true,
-                message: 'Webhook sent successfully',
-                sent: orders.length,
-                response_status: response.status
-            };
-
-        } catch (error) {
-            console.error('❌ [Webhook] Failed to send webhook:', error.message);
-
-            // Log error details but don't throw - webhook failures shouldn't break the sync
-            if (error.response) {
-                console.error(`   Response status: ${error.response.status}`);
-                console.error(`   Response data:`, error.response.data);
-            } else if (error.request) {
-                console.error('   No response received from webhook endpoint');
+            } catch (e) {
+                console.log('⚠️ [Webhook] Could not fetch WebhookRetryCount, using default: 3');
             }
+
+            // Attempt webhook with retry logic
+            let lastError = null;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    console.log(`📤 [Webhook] Attempt ${attempt}/${maxRetries}...`);
+
+                    const response = await axios.post(this.webhookUrl, payload, {
+                        timeout: 30000, // 30 second timeout
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'User-Agent': 'Claimio-Webhook/1.0'
+                        }
+                    });
+
+                    console.log(`✅ [Webhook] Successfully sent to ${this.webhookUrl} on attempt ${attempt}`);
+                    console.log(`📊 [Webhook] Response status: ${response.status}`);
+
+                    return {
+                        success: true,
+                        message: `Webhook sent successfully on attempt ${attempt}`,
+                        sent: orders.length,
+                        response_status: response.status,
+                        attempts: attempt
+                    };
+
+                } catch (attemptError) {
+                    lastError = attemptError;
+                    console.error(`❌ [Webhook] Attempt ${attempt}/${maxRetries} failed:`, attemptError.message);
+
+                    if (attemptError.response) {
+                        console.error(`   Response status: ${attemptError.response.status}`);
+                    } else if (attemptError.request) {
+                        console.error('   No response received from webhook endpoint');
+                    }
+
+                    // If not the last attempt, wait with exponential backoff
+                    if (attempt < maxRetries) {
+                        const delayMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s, 8s...
+                        console.log(`⏳ [Webhook] Waiting ${delayMs / 1000}s before retry...`);
+                        await new Promise(resolve => setTimeout(resolve, delayMs));
+                    }
+                }
+            }
+
+            // All retries exhausted
+            console.error(`❌ [Webhook] All ${maxRetries} attempts failed. Giving up.`);
 
             return {
                 success: false,
-                message: `Webhook failed: ${error.message}`,
+                message: `Webhook failed after ${maxRetries} attempts: ${lastError?.message}`,
+                sent: 0,
+                error: lastError?.message,
+                attempts: maxRetries
+            };
+
+        } catch (error) {
+            console.error('❌ [Webhook] Failed to prepare webhook data:', error.message);
+
+            return {
+                success: false,
+                message: `Webhook preparation failed: ${error.message}`,
                 sent: 0,
                 error: error.message
             };
