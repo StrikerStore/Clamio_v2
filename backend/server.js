@@ -25,6 +25,7 @@ const { fetchAndSaveShopifyProducts } = require('./services/shopifyProductFetche
 const cron = require('node-cron');
 const { runMultiStoreMigration } = require('./utils/migrationRunner');
 const { runCarriersMigration } = require('./scripts/migrate-carriers-table');
+const { runConsolidatedMigration } = require('./utils/consolidatedMigrationRunner');
 
 // Import vendor error tracking middleware
 const { trackVendorErrors, handleVendorErrors } = require('./middleware/vendorErrorTracking');
@@ -504,6 +505,20 @@ app.listen(PORT, async () => {
     }
   } else {
     console.log('⚠️ Automatic migrations disabled (RUN_MIGRATIONS=false)');
+  }
+
+  // Run consolidated migration (one-time, tracks completion)
+  // Set RUN_CONSOLIDATED_MIGRATION=false in .env to disable
+  // This migration runs once and tracks completion in utility table
+  const runConsolidated = process.env.RUN_CONSOLIDATED_MIGRATION !== 'false';
+  if (runConsolidated) {
+    try {
+      await runConsolidatedMigration();
+    } catch (error) {
+      console.error('⚠️ Consolidated migration warning (server will continue):', error.message);
+    }
+  } else {
+    console.log('⚠️ Consolidated migration disabled (RUN_CONSOLIDATED_MIGRATION=false)');
   }
 
   // Start periodic database health check (every 15 minutes)

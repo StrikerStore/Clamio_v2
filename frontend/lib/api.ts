@@ -218,8 +218,14 @@ class ApiClient {
               status: response.status,
               statusText: response.statusText,
               endpoint: endpoint,
-              data: data || 'No data received'
+              data: data || 'No data received',
+              url: `${API_BASE_URL}${endpoint}`
             })
+            
+            // If data exists but is empty object, log the raw response
+            if (data && typeof data === 'object' && Object.keys(data).length === 0) {
+              console.error('⚠️ Empty error response received. This might indicate a server-side error.');
+            }
           }
 
           // Log detailed validation errors for debugging
@@ -272,8 +278,19 @@ class ApiClient {
             endpoint,
             timeout: `${NETWORK_CONFIG.REQUEST_TIMEOUT_MS / 1000}s`,
             attempts: attempt + 1,
+            apiBaseUrl: API_BASE_URL,
           });
-          throw new Error('Request timed out. Please check your internet connection and try again.');
+          
+          // Check if backend is reachable
+          const isConnectionError = error.message?.includes('Failed to fetch') || 
+                                    error.message?.includes('NetworkError') ||
+                                    error.message?.includes('ECONNREFUSED');
+          
+          if (isConnectionError) {
+            throw new Error(`Cannot connect to backend server at ${API_BASE_URL}. Please ensure the backend server is running on port 5000.`);
+          }
+          
+          throw new Error('Request timed out. The server may be slow or overloaded. Please try again.');
         }
 
         if (DEBUG_API) {
@@ -1268,11 +1285,16 @@ class ApiClient {
     vendor_wh_id: string;
     account_code: string;
     return_warehouse_id?: string;
+    pickup_location?: string;
   }): Promise<ApiResponse> {
     return this.makeRequest('/warehouse-mapping', {
       method: 'POST',
       body: JSON.stringify(mappingData)
     });
+  }
+
+  async getShiprocketPickupLocations(accountCode: string): Promise<ApiResponse> {
+    return this.makeRequest(`/warehouse-mapping/shiprocket-pickups/${accountCode}`);
   }
 
   async deleteWhMapping(id: number): Promise<ApiResponse> {
@@ -1286,6 +1308,16 @@ class ApiClient {
     password: string
   }): Promise<ApiResponse> {
     return this.makeRequest('/stores/test-shipway', {
+      method: 'POST',
+      body: JSON.stringify(credentials)
+    })
+  }
+
+  async testStoreShiprocketConnection(credentials: {
+    username: string
+    password: string
+  }): Promise<ApiResponse> {
+    return this.makeRequest('/stores/test-shiprocket', {
       method: 'POST',
       body: JSON.stringify(credentials)
     })
@@ -1821,6 +1853,41 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data)
     })
+  }
+
+  /**
+   * Health check - verify backend server is running and reachable
+   */
+  async checkBackendHealth(): Promise<{ success: boolean; message: string; database?: string }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/public/health`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(5000), // 5 second timeout for health check
+      });
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message: `Backend server responded with status ${response.status}`,
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: data.success === true,
+        message: data.message || 'Backend is running',
+        database: data.database,
+      };
+    } catch (error: any) {
+      console.error('❌ Backend health check failed:', error.message);
+      return {
+        success: false,
+        message: `Cannot connect to backend server at ${API_BASE_URL}. Please ensure the backend is running on port 5000.`,
+      };
+    }
   }
 }
 

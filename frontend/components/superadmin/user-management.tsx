@@ -167,8 +167,9 @@ export function UserManagement() {
   const [shippingPartners, setShippingPartners] = useState<string[]>([])
   const [showPassword, setShowPassword] = useState(false)
   const [showShopifyToken, setShowShopifyToken] = useState(false)
-  const [testingConnection, setTestingConnection] = useState<{ type: 'shipway' | 'shopify' | null, loading: boolean }>({ type: null, loading: false })
+  const [testingConnection, setTestingConnection] = useState<{ type: 'shipway' | 'shiprocket' | 'shopify' | null, loading: boolean }>({ type: null, loading: false })
   const [shipwayTestResult, setShipwayTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [shiprocketTestResult, setShiprocketTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [shopifyTestResult, setShopifyTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [isAddingStore, setIsAddingStore] = useState(false)
 
@@ -184,11 +185,14 @@ export function UserManagement() {
     claimio_wh_id: "",
     account_code: "",
     vendor_wh_id: "",
+    pickup_location: "",
     return_warehouse_id: ""
   })
   const [selectedVendor, setSelectedVendor] = useState<any>(null)
   const [selectedStore, setSelectedStore] = useState<any>(null)
   const [validatingWarehouse, setValidatingWarehouse] = useState(false)
+  const [shiprocketPickupLocations, setShiprocketPickupLocations] = useState<any[]>([])
+  const [loadingPickupLocations, setLoadingPickupLocations] = useState(false)
 
   const [formData, setFormData] = useState<CreateUserForm>({
     name: "",
@@ -787,6 +791,40 @@ export function UserManagement() {
     }
   }
 
+  const handleTestShiprocket = async (username: string, password: string) => {
+    if (!username || !password) {
+      setShiprocketTestResult({ success: false, message: "Please enter Shiprocket username (email) and password" })
+      setError("Please enter Shiprocket username (email) and password")
+      return
+    }
+
+    setTestingConnection({ type: 'shiprocket', loading: true })
+    setShiprocketTestResult(null) // Clear previous result
+    setShipwayTestResult(null) // Also clear Shipway result to prevent confusion
+    try {
+      const response = await apiClient.testStoreShiprocketConnection({ username: username, password: password })
+
+      // Handle response - check for success property
+      const isSuccess = response?.success === true || (response?.success as any) === 'true' || (response?.success as any) === 1
+
+      if (isSuccess) {
+        const successMessage = response.message || "Shiprocket connection successful! Credentials are valid."
+        setShiprocketTestResult({ success: true, message: successMessage })
+        setSuccess("Shiprocket credentials are valid")
+      } else {
+        const errorMessage = response?.message || "Invalid credentials"
+        setShiprocketTestResult({ success: false, message: errorMessage })
+        setError(errorMessage)
+      }
+    } catch (error: any) {
+      const errorMessage = error?.message || "Failed to test Shiprocket connection"
+      setShiprocketTestResult({ success: false, message: errorMessage })
+      setError(errorMessage)
+    } finally {
+      setTestingConnection({ type: null, loading: false })
+    }
+  }
+
   const handleTestShopify = async (url: string, token: string) => {
     if (!url || !token) {
       setShopifyTestResult({ success: false, message: "Please enter Shopify store URL and token" })
@@ -858,6 +896,25 @@ export function UserManagement() {
     }
   }
 
+  const fetchShiprocketPickupLocations = async (accountCode: string) => {
+    setLoadingPickupLocations(true)
+    setShiprocketPickupLocations([])
+    try {
+      const response = await apiClient.getShiprocketPickupLocations(accountCode)
+      if (response.success) {
+        setShiprocketPickupLocations(response.data || [])
+      } else {
+        setError(response.message || "Failed to fetch Shiprocket pickup locations")
+      }
+    } catch (error: any) {
+      setError(error?.message || "Failed to fetch Shiprocket pickup locations")
+    } finally {
+      setLoadingPickupLocations(false)
+    }
+  }
+
+  const isShiprocketStore = selectedStore?.shipping_partner?.toLowerCase() === 'shiprocket'
+
   const handleValidateWarehouse = async () => {
     if (!newMapping.vendor_wh_id || !newMapping.account_code) {
       setError("Please enter Vendor WH ID and select Account Code first")
@@ -893,7 +950,7 @@ export function UserManagement() {
       return
     }
 
-    if (!warehouseVerified) {
+    if (!isShiprocketStore && !warehouseVerified) {
       setError("Please verify the warehouse ID before saving")
       return
     }
@@ -903,16 +960,18 @@ export function UserManagement() {
         claimio_wh_id: newMapping.claimio_wh_id,
         vendor_wh_id: newMapping.vendor_wh_id,
         account_code: newMapping.account_code,
-        return_warehouse_id: newMapping.return_warehouse_id
+        return_warehouse_id: newMapping.return_warehouse_id || undefined,
+        pickup_location: newMapping.pickup_location || undefined
       })
       if (response.success) {
         setSuccess("Warehouse mapping created successfully")
         setIsAddMappingOpen(false)
-        setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", return_warehouse_id: "" })
+        setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", pickup_location: "", return_warehouse_id: "" })
         setSelectedVendor(null)
         setSelectedStore(null)
         setWarehouseInfo(null)
         setWarehouseVerified(false)
+        setShiprocketPickupLocations([])
         fetchWhMappings()
       } else {
         setError(response.message || "Failed to create warehouse mapping")
@@ -1338,13 +1397,14 @@ export function UserManagement() {
 
                       <div>
                         <Label htmlFor="shipping-partner">Shipping Partner *</Label>
-                        <Select
-                          value={newStore.shipping_partner}
-                          onValueChange={(value) => {
-                            setNewStore({ ...newStore, shipping_partner: value, username: "", password: "" })
-                            setShipwayTestResult(null)
-                            setShopifyTestResult(null)
-                          }}
+                          <Select
+                            value={newStore.shipping_partner}
+                            onValueChange={(value) => {
+                              setNewStore({ ...newStore, shipping_partner: value, username: "", password: "" })
+                              setShipwayTestResult(null)
+                              setShiprocketTestResult(null)
+                              setShopifyTestResult(null)
+                            }}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Select shipping partner" />
@@ -1398,10 +1458,21 @@ export function UserManagement() {
                             variant="outline"
                             size="sm"
                             className="w-full"
-                            onClick={() => handleTestShipway(newStore.username, newStore.password)}
-                            disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                            onClick={() => {
+                              const isShiprocket = newStore.shipping_partner?.toLowerCase() === 'shiprocket'
+                              if (isShiprocket) {
+                                handleTestShiprocket(newStore.username, newStore.password)
+                              } else {
+                                handleTestShipway(newStore.username, newStore.password)
+                              }
+                            }}
+                            disabled={
+                              (testingConnection.loading && testingConnection.type === 'shipway') ||
+                              (testingConnection.loading && testingConnection.type === 'shiprocket')
+                            }
                           >
-                            {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                            {(testingConnection.loading && testingConnection.type === 'shipway') ||
+                            (testingConnection.loading && testingConnection.type === 'shiprocket') ? (
                               <>
                                 <Loader2 className="w-3 h-3 mr-2 animate-spin" />
                                 Testing...
@@ -1413,7 +1484,20 @@ export function UserManagement() {
                               </>
                             )}
                           </Button>
-                          {shipwayTestResult && (
+                          {newStore.shipping_partner?.toLowerCase() === 'shiprocket' && shiprocketTestResult && (
+                            <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shiprocketTestResult.success
+                              ? 'bg-green-50 text-green-800 border border-green-200'
+                              : 'bg-red-50 text-red-800 border border-red-200'
+                              }`}>
+                              {shiprocketTestResult.success ? (
+                                <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                              ) : (
+                                <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                              )}
+                              <span className="flex-1">{shiprocketTestResult.message}</span>
+                            </div>
+                          )}
+                          {newStore.shipping_partner?.toLowerCase() === 'shipway' && shipwayTestResult && (
                             <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shipwayTestResult.success
                               ? 'bg-green-50 text-green-800 border border-green-200'
                               : 'bg-red-50 text-red-800 border border-red-200'
@@ -1688,11 +1772,12 @@ export function UserManagement() {
                 <Dialog open={isAddMappingOpen} onOpenChange={(open) => {
                   setIsAddMappingOpen(open)
                   if (!open) {
-                    setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", return_warehouse_id: "" })
+                    setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", pickup_location: "", return_warehouse_id: "" })
                     setSelectedVendor(null)
                     setSelectedStore(null)
                     setWarehouseInfo(null)
                     setWarehouseVerified(false)
+                    setShiprocketPickupLocations([])
                   }
                 }}>
                   <DialogTrigger asChild>
@@ -1740,11 +1825,16 @@ export function UserManagement() {
                         <Select
                           value={newMapping.account_code}
                           onValueChange={(value) => {
-                            setNewMapping({ ...newMapping, account_code: value })
+                            setNewMapping({ ...newMapping, account_code: value, vendor_wh_id: "", pickup_location: "", return_warehouse_id: "" })
                             const store = storesForMapping.find(s => s.account_code === value)
                             setSelectedStore(store || null)
                             setWarehouseVerified(false)
                             setWarehouseInfo(null)
+                            setShiprocketPickupLocations([])
+                            // Auto-fetch Shiprocket pickup locations if it's a Shiprocket store
+                            if (store && store.shipping_partner?.toLowerCase() === 'shiprocket') {
+                              fetchShiprocketPickupLocations(value)
+                            }
                           }}
                         >
                           <SelectTrigger>
@@ -1759,10 +1849,74 @@ export function UserManagement() {
                           </SelectContent>
                         </Select>
                         {selectedStore && (
-                          <p className="text-sm text-gray-600 mt-1">Store: {selectedStore.store_name}</p>
+                          <div className="text-sm text-gray-600 mt-1">
+                            Store: {selectedStore.store_name}
+                            <Badge className="ml-2 text-xs" variant={isShiprocketStore ? "default" : "secondary"}>
+                              {selectedStore.shipping_partner || 'Shipway'}
+                            </Badge>
+                          </div>
                         )}
                       </div>
 
+                      {/* Only show warehouse fields after account code is selected */}
+                      {selectedStore && (
+                        <>
+                          {/* Shiprocket: Pickup Location dropdown */}
+                          {isShiprocketStore ? (
+                            <>
+                              <div>
+                                <Label htmlFor="pickup-location">Pickup Location *</Label>
+                                {loadingPickupLocations ? (
+                                  <p className="text-sm text-gray-500 mt-1">Loading pickup locations...</p>
+                                ) : (
+                                  <Select
+                                    value={newMapping.pickup_location}
+                                    onValueChange={(value) => {
+                                      const pickup = shiprocketPickupLocations.find(p => p.pickup_location === value)
+                                      if (pickup) {
+                                        setNewMapping({
+                                          ...newMapping,
+                                          pickup_location: pickup.pickup_location,
+                                          vendor_wh_id: String(pickup.id),
+                                          return_warehouse_id: String(pickup.rto_address_id || pickup.id)
+                                        })
+                                        setWarehouseInfo({
+                                          address: [pickup.address, pickup.address_2].filter(Boolean).join(', '),
+                                          city: pickup.city,
+                                          pincode: pickup.pin_code,
+                                          state: pickup.state,
+                                          country: pickup.country
+                                        })
+                                        setWarehouseVerified(true)
+                                      }
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select pickup location" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {shiprocketPickupLocations.map((loc) => (
+                                        <SelectItem key={loc.id} value={loc.pickup_location}>
+                                          {loc.pickup_location} — {loc.city}, {loc.pin_code}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                                {warehouseInfo && newMapping.pickup_location && (
+                                  <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-md">
+                                    <p className="text-sm font-medium text-green-800 mb-1">Pickup Location Selected</p>
+                                    <p className="text-xs text-green-700">Address: {warehouseInfo.address}</p>
+                                    <p className="text-xs text-green-700">City: {warehouseInfo.city}, Pincode: {warehouseInfo.pincode}</p>
+                                    <p className="text-xs text-green-700 mt-1">Vendor WH ID (auto): {newMapping.vendor_wh_id}</p>
+                                    <p className="text-xs text-green-700">Return WH ID (auto): {newMapping.return_warehouse_id}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            /* Shipway: Manual Vendor WH ID + Verify */
+                            <>
                       <div>
                         <Label htmlFor="vendor-wh-id">Vendor WH ID *</Label>
                         <div className="flex gap-2">
@@ -1810,6 +1964,10 @@ export function UserManagement() {
                           Optional: The return warehouse ID configured in Shipway for this store. If not provided, the pickup warehouse ID (Vendor WH ID) will be used for returns.
                         </p>
                       </div>
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setIsAddMappingOpen(false)}>
@@ -1817,7 +1975,7 @@ export function UserManagement() {
                       </Button>
                       <Button
                         onClick={handleCreateMapping}
-                        disabled={!warehouseVerified}
+                        disabled={!selectedStore || (isShiprocketStore ? !newMapping.pickup_location || !newMapping.claimio_wh_id : !warehouseVerified)}
                         className="bg-blue-600 hover:bg-blue-700"
                       >
                         Save Mapping
@@ -1928,6 +2086,7 @@ export function UserManagement() {
                             <p className="text-xs text-gray-600 mt-1">Vendor: {mapping.vendor_name || 'N/A'}</p>
                             <p className="text-xs text-gray-600">Store: {mapping.store_name || mapping.account_code}</p>
                             <p className="text-xs text-gray-600">Vendor WH: {mapping.vendor_wh_id}</p>
+                            {mapping.pickup_location && <p className="text-xs text-gray-600">Pickup: {mapping.pickup_location}</p>}
                             <p className="text-xs text-gray-600">Return WH: {mapping.return_warehouse_id || 'N/A'}</p>
                           </div>
                           <div className="flex flex-col items-end gap-2">
@@ -2237,60 +2396,99 @@ export function UserManagement() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold">Shipway Credentials</Label>
-                  <div>
-                    <Label htmlFor="edit-shipway-username-mobile">Shipway Username *</Label>
-                    <Input
-                      id="edit-shipway-username-mobile"
-                      value={editingStore.username || ''}
-                      onChange={(e) => setEditingStore({ ...editingStore, username: e.target.value })}
-                      placeholder="Enter Shipway username"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="edit-shipway-password-mobile">Shipway Password (leave blank to keep current)</Label>
-                    <div className="relative">
+                {editingStore.shipping_partner && (
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">{editingStore.shipping_partner} Credentials</Label>
+                    <div>
+                      <Label htmlFor="edit-shipping-username-mobile">Username *</Label>
                       <Input
-                        id="edit-shipway-password-mobile"
-                        type={showPassword ? "text" : "password"}
-                        value={editingStore.password || ''}
-                        onChange={(e) => setEditingStore({ ...editingStore, password: e.target.value })}
-                        placeholder="Enter new password or leave blank"
-                        className="pr-10"
+                        id="edit-shipping-username-mobile"
+                        value={editingStore.username || ''}
+                        onChange={(e) => setEditingStore({ ...editingStore, username: e.target.value })}
+                        placeholder={`Enter ${editingStore.shipping_partner} username`}
                       />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                        onClick={() => setShowPassword(!showPassword)}
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </Button>
                     </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => handleTestShipway(editingStore.username, editingStore.password || '')}
-                    disabled={testingConnection.loading && testingConnection.type === 'shipway'}
-                  >
-                    {testingConnection.loading && testingConnection.type === 'shipway' ? (
-                      <>
-                        <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                        Testing...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="w-3 h-3 mr-2" />
-                        Test Shipway Connection
-                      </>
+                    <div>
+                      <Label htmlFor="edit-shipping-password-mobile">{editingStore.shipping_partner} Password (leave blank to keep current)</Label>
+                      <div className="relative">
+                        <Input
+                          id="edit-shipping-password-mobile"
+                          type={showPassword ? "text" : "password"}
+                          value={editingStore.password || ''}
+                          onChange={(e) => setEditingStore({ ...editingStore, password: e.target.value })}
+                          placeholder={`Enter new ${editingStore.shipping_partner.toLowerCase()} password or leave blank`}
+                          className="pr-10"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => {
+                        const isShiprocket = editingStore.shipping_partner?.toLowerCase() === 'shiprocket'
+                        if (isShiprocket) {
+                          handleTestShiprocket(editingStore.username || '', editingStore.password || '')
+                        } else {
+                          handleTestShipway(editingStore.username || '', editingStore.password || '')
+                        }
+                      }}
+                      disabled={
+                        (testingConnection.loading && testingConnection.type === 'shipway') ||
+                        (testingConnection.loading && testingConnection.type === 'shiprocket')
+                      }
+                    >
+                      {(testingConnection.loading && testingConnection.type === 'shipway') ||
+                      (testingConnection.loading && testingConnection.type === 'shiprocket') ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                          Testing...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-3 h-3 mr-2" />
+                          Test {editingStore.shipping_partner} Connection
+                        </>
+                      )}
+                    </Button>
+                    {editingStore.shipping_partner?.toLowerCase() === 'shiprocket' && shiprocketTestResult && (
+                      <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shiprocketTestResult.success
+                        ? 'bg-green-50 text-green-800 border border-green-200'
+                        : 'bg-red-50 text-red-800 border border-red-200'
+                        }`}>
+                        {shiprocketTestResult.success ? (
+                          <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                        ) : (
+                          <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                        )}
+                        <span className="flex-1">{shiprocketTestResult.message}</span>
+                      </div>
                     )}
-                  </Button>
-                </div>
+                    {editingStore.shipping_partner?.toLowerCase() === 'shipway' && shipwayTestResult && (
+                      <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shipwayTestResult.success
+                        ? 'bg-green-50 text-green-800 border border-green-200'
+                        : 'bg-red-50 text-red-800 border border-red-200'
+                        }`}>
+                        {shipwayTestResult.success ? (
+                          <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                        ) : (
+                          <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                        )}
+                        <span className="flex-1">{shipwayTestResult.message}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <Label className="text-sm font-semibold">Shopify Credentials</Label>
@@ -3131,10 +3329,21 @@ export function UserManagement() {
                                 variant="outline"
                                 size="sm"
                                 className="w-full"
-                                onClick={() => handleTestShipway(newStore.username, newStore.password)}
-                                disabled={testingConnection.loading && testingConnection.type === 'shipway'}
+                                onClick={() => {
+                                  const isShiprocket = newStore.shipping_partner?.toLowerCase() === 'shiprocket'
+                                  if (isShiprocket) {
+                                    handleTestShiprocket(newStore.username, newStore.password)
+                                  } else {
+                                    handleTestShipway(newStore.username, newStore.password)
+                                  }
+                                }}
+                                disabled={
+                                  (testingConnection.loading && testingConnection.type === 'shipway') ||
+                                  (testingConnection.loading && testingConnection.type === 'shiprocket')
+                                }
                               >
-                                {testingConnection.loading && testingConnection.type === 'shipway' ? (
+                                {(testingConnection.loading && testingConnection.type === 'shipway') ||
+                                (testingConnection.loading && testingConnection.type === 'shiprocket') ? (
                                   <>
                                     <Loader2 className="w-3 h-3 mr-2 animate-spin" />
                                     Testing...
@@ -3146,7 +3355,20 @@ export function UserManagement() {
                                   </>
                                 )}
                               </Button>
-                              {shipwayTestResult && (
+                              {newStore.shipping_partner?.toLowerCase() === 'shiprocket' && shiprocketTestResult && (
+                                <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shiprocketTestResult.success
+                                  ? 'bg-green-50 text-green-800 border border-green-200'
+                                  : 'bg-red-50 text-red-800 border border-red-200'
+                                  }`}>
+                                  {shiprocketTestResult.success ? (
+                                    <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                                  ) : (
+                                    <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                                  )}
+                                  <span className="flex-1">{shiprocketTestResult.message}</span>
+                                </div>
+                              )}
+                              {newStore.shipping_partner?.toLowerCase() === 'shipway' && shipwayTestResult && (
                                 <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shipwayTestResult.success
                                   ? 'bg-green-50 text-green-800 border border-green-200'
                                   : 'bg-red-50 text-red-800 border border-red-200'
@@ -3378,11 +3600,12 @@ export function UserManagement() {
                     <Dialog open={isAddMappingOpen} onOpenChange={(open) => {
                       setIsAddMappingOpen(open)
                       if (!open) {
-                        setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", return_warehouse_id: "" })
+                        setNewMapping({ claimio_wh_id: "", account_code: "", vendor_wh_id: "", pickup_location: "", return_warehouse_id: "" })
                         setSelectedVendor(null)
                         setSelectedStore(null)
                         setWarehouseInfo(null)
                         setWarehouseVerified(false)
+                        setShiprocketPickupLocations([])
                       }
                     }}>
                       <DialogTrigger asChild>
@@ -3430,11 +3653,16 @@ export function UserManagement() {
                             <Select
                               value={newMapping.account_code}
                               onValueChange={(value) => {
-                                setNewMapping({ ...newMapping, account_code: value })
+                                setNewMapping({ ...newMapping, account_code: value, vendor_wh_id: "", pickup_location: "", return_warehouse_id: "" })
                                 const store = storesForMapping.find(s => s.account_code === value)
                                 setSelectedStore(store || null)
                                 setWarehouseVerified(false)
                                 setWarehouseInfo(null)
+                                setShiprocketPickupLocations([])
+                                // Auto-fetch Shiprocket pickup locations if it's a Shiprocket store
+                                if (store && store.shipping_partner?.toLowerCase() === 'shiprocket') {
+                                  fetchShiprocketPickupLocations(value)
+                                }
                               }}
                             >
                               <SelectTrigger>
@@ -3449,10 +3677,74 @@ export function UserManagement() {
                               </SelectContent>
                             </Select>
                             {selectedStore && (
-                              <p className="text-sm text-gray-600 mt-1">Store: {selectedStore.store_name}</p>
+                              <div className="text-sm text-gray-600 mt-1">
+                                Store: {selectedStore.store_name}
+                                <Badge className="ml-2 text-xs" variant={isShiprocketStore ? "default" : "secondary"}>
+                                  {selectedStore.shipping_partner || 'Shipway'}
+                                </Badge>
+                              </div>
                             )}
                           </div>
 
+                          {/* Only show warehouse fields after account code is selected */}
+                          {selectedStore && (
+                            <>
+                              {/* Shiprocket: Pickup Location dropdown */}
+                              {isShiprocketStore ? (
+                                <>
+                                  <div>
+                                    <Label htmlFor="pickup-location">Pickup Location *</Label>
+                                    {loadingPickupLocations ? (
+                                      <p className="text-sm text-gray-500 mt-1">Loading pickup locations...</p>
+                                    ) : (
+                                      <Select
+                                        value={newMapping.pickup_location}
+                                        onValueChange={(value) => {
+                                          const pickup = shiprocketPickupLocations.find(p => p.pickup_location === value)
+                                          if (pickup) {
+                                            setNewMapping({
+                                              ...newMapping,
+                                              pickup_location: pickup.pickup_location,
+                                              vendor_wh_id: String(pickup.id),
+                                              return_warehouse_id: String(pickup.rto_address_id || pickup.id)
+                                            })
+                                            setWarehouseInfo({
+                                              address: [pickup.address, pickup.address_2].filter(Boolean).join(', '),
+                                              city: pickup.city,
+                                              pincode: pickup.pin_code,
+                                              state: pickup.state,
+                                              country: pickup.country
+                                            })
+                                            setWarehouseVerified(true)
+                                          }
+                                        }}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select pickup location" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {shiprocketPickupLocations.map((loc) => (
+                                            <SelectItem key={loc.id} value={loc.pickup_location}>
+                                              {loc.pickup_location} — {loc.city}, {loc.pin_code}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    )}
+                                    {warehouseInfo && newMapping.pickup_location && (
+                                      <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-md">
+                                        <p className="text-sm font-medium text-green-800 mb-1">Pickup Location Selected</p>
+                                        <p className="text-xs text-green-700">Address: {warehouseInfo.address}</p>
+                                        <p className="text-xs text-green-700">City: {warehouseInfo.city}, Pincode: {warehouseInfo.pincode}</p>
+                                        <p className="text-xs text-green-700 mt-1">Vendor WH ID (auto): {newMapping.vendor_wh_id}</p>
+                                        <p className="text-xs text-green-700">Return WH ID (auto): {newMapping.return_warehouse_id}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              ) : (
+                                /* Shipway: Manual Vendor WH ID + Verify */
+                                <>
                           <div>
                             <Label htmlFor="vendor-wh-id">Vendor WH ID *</Label>
                             <div className="flex gap-2">
@@ -3500,6 +3792,10 @@ export function UserManagement() {
                               Optional: The return warehouse ID configured in Shipway for this store. If not provided, the pickup warehouse ID (Vendor WH ID) will be used for returns.
                             </p>
                           </div>
+                                </>
+                              )}
+                            </>
+                          )}
                         </div>
                         <DialogFooter>
                           <Button variant="outline" onClick={() => setIsAddMappingOpen(false)}>
@@ -3507,7 +3803,7 @@ export function UserManagement() {
                           </Button>
                           <Button
                             onClick={handleCreateMapping}
-                            disabled={!warehouseVerified}
+                            disabled={!selectedStore || (isShiprocketStore ? !newMapping.pickup_location || !newMapping.claimio_wh_id : !warehouseVerified)}
                             className="bg-blue-600 hover:bg-blue-700"
                           >
                             Save Mapping
@@ -3532,6 +3828,7 @@ export function UserManagement() {
                               <TableHead>Account Code</TableHead>
                               <TableHead>Store Name</TableHead>
                               <TableHead>Vendor WH ID</TableHead>
+                              <TableHead>Pickup Location</TableHead>
                               <TableHead>Return WH ID</TableHead>
                               <TableHead>Status</TableHead>
                               <TableHead>Actions</TableHead>
@@ -3545,6 +3842,7 @@ export function UserManagement() {
                                 <TableCell>{mapping.account_code}</TableCell>
                                 <TableCell>{mapping.store_name || 'N/A'}</TableCell>
                                 <TableCell>{mapping.vendor_wh_id}</TableCell>
+                                <TableCell>{mapping.pickup_location || '—'}</TableCell>
                                 <TableCell>{mapping.return_warehouse_id || 'N/A'}</TableCell>
                                 <TableCell>
                                   {mapping.is_active ? (
@@ -3940,60 +4238,99 @@ export function UserManagement() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">Shipway Credentials</Label>
-                <div>
-                  <Label htmlFor="edit-shipway-username">Shipway Username *</Label>
-                  <Input
-                    id="edit-shipway-username"
-                    value={editingStore.username || ''}
-                    onChange={(e) => setEditingStore({ ...editingStore, username: e.target.value })}
-                    placeholder="Enter Shipway username"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="edit-shipway-password">Shipway Password (leave blank to keep current)</Label>
-                  <div className="relative">
+              {editingStore.shipping_partner && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">{editingStore.shipping_partner} Credentials</Label>
+                  <div>
+                    <Label htmlFor="edit-shipping-username">Username *</Label>
                     <Input
-                      id="edit-shipway-password"
-                      type={showPassword ? "text" : "password"}
-                      value={editingStore.password || ''}
-                      onChange={(e) => setEditingStore({ ...editingStore, password: e.target.value })}
-                      placeholder="Enter new password or leave blank"
-                      className="pr-10"
+                      id="edit-shipping-username"
+                      value={editingStore.username || ''}
+                      onChange={(e) => setEditingStore({ ...editingStore, username: e.target.value })}
+                      placeholder={`Enter ${editingStore.shipping_partner} username`}
                     />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
                   </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => handleTestShipway(editingStore.username, editingStore.password || '')}
-                  disabled={testingConnection.loading && testingConnection.type === 'shipway'}
-                >
-                  {testingConnection.loading && testingConnection.type === 'shipway' ? (
-                    <>
-                      <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                      Testing...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-3 h-3 mr-2" />
-                      Test Shipway Connection
-                    </>
+                  <div>
+                    <Label htmlFor="edit-shipping-password">{editingStore.shipping_partner} Password (leave blank to keep current)</Label>
+                    <div className="relative">
+                      <Input
+                        id="edit-shipping-password"
+                        type={showPassword ? "text" : "password"}
+                        value={editingStore.password || ''}
+                        onChange={(e) => setEditingStore({ ...editingStore, password: e.target.value })}
+                        placeholder={`Enter new ${editingStore.shipping_partner.toLowerCase()} password or leave blank`}
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => {
+                      const isShiprocket = editingStore.shipping_partner?.toLowerCase() === 'shiprocket'
+                      if (isShiprocket) {
+                        handleTestShiprocket(editingStore.username || '', editingStore.password || '')
+                      } else {
+                        handleTestShipway(editingStore.username || '', editingStore.password || '')
+                      }
+                    }}
+                    disabled={
+                      (testingConnection.loading && testingConnection.type === 'shipway') ||
+                      (testingConnection.loading && testingConnection.type === 'shiprocket')
+                    }
+                  >
+                    {(testingConnection.loading && testingConnection.type === 'shipway') ||
+                    (testingConnection.loading && testingConnection.type === 'shiprocket') ? (
+                      <>
+                        <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                        Testing...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-3 h-3 mr-2" />
+                        Test {editingStore.shipping_partner} Connection
+                      </>
+                    )}
+                  </Button>
+                  {editingStore.shipping_partner?.toLowerCase() === 'shiprocket' && shiprocketTestResult && (
+                    <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shiprocketTestResult.success
+                      ? 'bg-green-50 text-green-800 border border-green-200'
+                      : 'bg-red-50 text-red-800 border border-red-200'
+                      }`}>
+                      {shiprocketTestResult.success ? (
+                        <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                      ) : (
+                        <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                      )}
+                      <span className="flex-1">{shiprocketTestResult.message}</span>
+                    </div>
                   )}
-                </Button>
-              </div>
+                  {editingStore.shipping_partner?.toLowerCase() === 'shipway' && shipwayTestResult && (
+                    <div className={`text-sm mt-2 p-2 rounded-md flex items-start gap-2 ${shipwayTestResult.success
+                      ? 'bg-green-50 text-green-800 border border-green-200'
+                      : 'bg-red-50 text-red-800 border border-red-200'
+                      }`}>
+                      {shipwayTestResult.success ? (
+                        <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                      ) : (
+                        <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                      )}
+                      <span className="flex-1">{shipwayTestResult.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label className="text-sm font-semibold">Shopify Credentials</Label>

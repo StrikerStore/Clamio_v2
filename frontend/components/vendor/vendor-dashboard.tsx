@@ -267,7 +267,13 @@ export function VendorDashboard() {
   const [labelDownloadLoading, setLabelDownloadLoading] = useState<{ [key: string]: boolean }>({})
   const [bulkDownloadLoading, setBulkDownloadLoading] = useState(false)
 
-  // Merge confirmation dialog state
+  // Unified label download dialog state (format-first, works for both Shipway + Shiprocket)
+  const [showFormatDialog, setShowFormatDialog] = useState(false)
+  const [pendingDownloadOrderIds, setPendingDownloadOrderIds] = useState<string[]>([])
+  const [selectedDownloadFormat, setSelectedDownloadFormat] = useState<string>("thermal")
+  const [downloadProcessing, setDownloadProcessing] = useState(false)
+
+  // Merge confirmation dialog state (kept for backward compat - used after generation)
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [mergeDialogData, setMergeDialogData] = useState<{
     successful: string[]
@@ -282,6 +288,9 @@ export function VendorDashboard() {
   const [showManifestDialog, setShowManifestDialog] = useState(false)
   const [manifestDialogData, setManifestDialogData] = useState<string[] | null>(null)
   const [selectedManifestFormat, setSelectedManifestFormat] = useState<string>("a4")
+  const [isShiprocketManifest, setIsShiprocketManifest] = useState(false)
+  const [shiprocketOrderIds, setShiprocketOrderIds] = useState<string[]>([])
+  const [shiprocketManifestLoading, setShiprocketManifestLoading] = useState(false)
 
   // Loading states for reverse operations
   const [reverseLoading, setReverseLoading] = useState<{ [key: string]: boolean }>({})
@@ -1744,6 +1753,104 @@ export function VendorDashboard() {
     }
   };
 
+  const handleShiprocketManifestGeneration = async (orderIds: string[], format: string = 'a4', shipwayManifestIds: string[] | null = null) => {
+    try {
+      setShiprocketManifestLoading(true);
+
+      const vendorToken = localStorage.getItem('vendorToken');
+      if (!vendorToken) {
+        toast({
+          title: "Authentication Error",
+          description: "Vendor token not found. Please login again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      console.log(`🚀 Calling Shiprocket Generate Manifest API for ${orderIds.length} orders with format: ${format}`);
+
+      const response = await fetch(`${API_BASE_URL}/orders/shiprocket/generate-manifest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': vendorToken,
+        },
+        body: JSON.stringify({ order_ids: orderIds, format: format }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: "Manifest Generated",
+          description: `Successfully generated manifest for ${data.data.successful_orders?.length || 0} order(s)`,
+        });
+
+        // Show details if some orders failed
+        if (data.data.failed_orders && data.data.failed_orders.length > 0) {
+          toast({
+            title: "Some Orders Failed",
+            description: `${data.data.failed_orders.length} orders could not be manifested. Check console for details.`,
+            variant: "destructive",
+          });
+          console.log('Failed orders:', data.data.failed_orders);
+        }
+
+        // Download manifest PDF if manifest IDs were generated
+        // If we have Shipway manifest IDs stored, combine them with Shiprocket manifest IDs
+        if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
+          const shiprocketManifestIds = data.data.manifest_ids;
+          const shipwayIds = shipwayManifestIds && Array.isArray(shipwayManifestIds) ? shipwayManifestIds : [];
+          
+          // Combine all manifest IDs (Shipway + Shiprocket) for single PDF download
+          const allManifestIds = [...shipwayIds, ...shiprocketManifestIds];
+          
+          if (allManifestIds.length > 0) {
+            console.log('📥 Downloading combined manifest summary:');
+            console.log('  - Shipway manifest IDs:', shipwayIds.length);
+            console.log('  - Shiprocket manifest IDs:', shiprocketManifestIds.length);
+            console.log('  - Total manifest IDs:', allManifestIds.length);
+            await downloadManifestSummary(allManifestIds, format);
+          }
+        }
+
+        // Clear selection and refresh orders
+        setSelectedMyOrders([]);
+
+        // Highlight Handover tab to show the change
+        highlightTab("handover");
+
+        fetchGroupedOrders();
+        fetchHandoverOrders();
+
+        // Refresh dashboard stats
+        console.log('🔄 FRONTEND: Refreshing dashboard stats after Shiprocket manifest generation...');
+        try {
+          await fetchDashboardStats();
+          console.log('✅ FRONTEND: Dashboard stats refreshed successfully');
+        } catch (statsError) {
+          console.log('⚠️ FRONTEND: Failed to refresh dashboard stats, but manifest generation was successful');
+        }
+      } else {
+        toast({
+          title: "Manifest Generation Failed",
+          description: data.message || "Failed to generate manifest for orders",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error generating Shiprocket manifest:', error);
+      toast({
+        title: "Error",
+        description: "Network error occurred while generating manifest",
+        variant: "destructive",
+      });
+    } finally {
+      setShiprocketManifestLoading(false);
+    }
+  };
+
   const handleBulkManifestDownload = async () => {
     if (selectedHandoverOrders.length === 0) {
       toast({
@@ -1758,34 +1865,68 @@ export function VendorDashboard() {
       // Get filtered orders for handover tab
       const handoverOrders = getFilteredHandoverOrders();
 
-      // Extract unique manifest_ids from selected orders
-      const uniqueManifestIds = new Set<string>();
+      // Separate orders by shipping partner
+      const shipwayOrders: string[] = [];
+      const shiprocketOrders: string[] = [];
+      const shipwayManifestIds = new Set<string>();
 
       selectedHandoverOrders.forEach(orderId => {
         const order = handoverOrders.find((o: any) => o.order_id === orderId);
-        if (order && order.manifest_id) {
-          uniqueManifestIds.add(order.manifest_id);
+        if (!order) return;
+
+        const shippingPartner = (order.shipping_partner || 'shipway').toLowerCase();
+        
+        if (shippingPartner === 'shiprocket') {
+          shiprocketOrders.push(orderId);
+        } else {
+          // Shipway or other providers
+          shipwayOrders.push(orderId);
+          if (order.manifest_id) {
+            shipwayManifestIds.add(order.manifest_id);
+          }
         }
       });
 
-      const manifestIdsArray = Array.from(uniqueManifestIds);
+      console.log('📥 Bulk manifest download analysis:');
+      console.log('  - Shipway orders:', shipwayOrders.length, 'with', shipwayManifestIds.size, 'manifest IDs');
+      console.log('  - Shiprocket orders:', shiprocketOrders.length);
 
-      if (manifestIdsArray.length === 0) {
+      // If we have both types, we need to handle them separately
+      if (shiprocketOrders.length > 0 && shipwayManifestIds.size > 0) {
+        // We have both Shiprocket and Shipway orders
+        // First, generate manifests for Shiprocket orders, then download all together
+        console.log('📥 Mixed providers detected - will generate Shiprocket manifests first');
+        
+        // Set up for Shiprocket manifest generation
+        setShiprocketOrderIds(shiprocketOrders);
+        setIsShiprocketManifest(true);
+        // Store Shipway manifest IDs to download after Shiprocket generation
+        setManifestDialogData(Array.from(shipwayManifestIds));
+        setShowManifestDialog(true);
+      } else if (shiprocketOrders.length > 0) {
+        // Only Shiprocket orders - need to generate manifests
+        console.log('📥 Only Shiprocket orders - opening generation dialog');
+        setShiprocketOrderIds(shiprocketOrders);
+        setIsShiprocketManifest(true);
+        setManifestDialogData(null);
+        setShowManifestDialog(true);
+      } else if (shipwayManifestIds.size > 0) {
+        // Only Shipway orders - can download directly
+        console.log('📥 Only Shipway orders - opening download dialog');
+        const manifestIdsArray = Array.from(shipwayManifestIds);
+        setManifestDialogData(manifestIdsArray);
+        setIsShiprocketManifest(false);
+        setShowManifestDialog(true);
+      } else {
         toast({
           title: "No Manifest IDs Found",
-          description: "Selected orders do not have manifest IDs",
+          description: "Selected orders do not have manifest IDs. Please ensure orders are manifested first.",
           variant: "destructive",
         });
         return;
       }
 
-      console.log('📥 Opening manifest format dialog:', manifestIdsArray);
-
-      // Open dialog instead of direct download
-      setManifestDialogData(manifestIdsArray);
-      setShowManifestDialog(true);
-
-      // Clear selection after successful download
+      // Clear selection after opening dialog
       setSelectedHandoverOrders([]);
 
     } catch (error) {
@@ -1832,6 +1973,45 @@ export function VendorDashboard() {
 
       const data = await response.json();
 
+      // Check if orders require format selection (for manifest generation)
+      if (data.requires_format && data.order_ids_requiring_format && data.order_ids_requiring_format.length > 0) {
+        console.log('🔵 Orders requiring format selection detected, showing format dialog...');
+        setShiprocketOrderIds(data.order_ids_requiring_format);
+        setIsShiprocketManifest(true);
+        setShowManifestDialog(true);
+        setSelectedManifestFormat("a4"); // Reset to default
+        
+        // Store Shipway manifest IDs if they were created (so they can be combined with Shiprocket manifests)
+        if (data.data?.manifest_ids && data.data.manifest_ids.length > 0) {
+          console.log('📦 Storing Shipway manifest IDs for later combination:', data.data.manifest_ids);
+          setManifestDialogData(data.data.manifest_ids);
+        }
+        
+        // If Shipway orders were already processed, refresh orders and show success
+        if (data.data?.shipway_processed && data.data.successful_orders?.length > 0) {
+          // Refresh orders to show updated status
+          fetchGroupedOrders();
+          fetchHandoverOrders();
+          fetchDashboardStats();
+          
+          toast({
+            title: "Orders Processed",
+            description: `${data.data.successful_orders.length} order(s) already processed successfully`,
+          });
+        }
+        
+        // Show info toast for format selection
+        const formatCount = data.order_ids_requiring_format.length;
+        toast({
+          title: "Select Manifest Format",
+          description: `Please select a format for ${formatCount} order(s)`,
+        });
+        
+        // Don't clear selection yet - wait for format confirmation
+        setBulkMarkReadyLoading(false);
+        return;
+      }
+
       if (data.success) {
         toast({
           title: "Orders Marked Ready",
@@ -1848,10 +2028,11 @@ export function VendorDashboard() {
           console.log('Failed orders:', data.data.failed_orders);
         }
 
-        // Auto-download manifest summary PDF
+        // Auto-download manifest summary PDF (for Shipway orders)
         if (data.data.manifest_ids && data.data.manifest_ids.length > 0) {
           console.log('📥 Opening manifest format dialog after bulk mark ready...');
           setManifestDialogData(data.data.manifest_ids);
+          setIsShiprocketManifest(false);
           setShowManifestDialog(true);
         }
 
@@ -2222,6 +2403,8 @@ export function VendorDashboard() {
               is_handover: order.is_handover,
               is_manifest: order.is_manifest,
               manifest_id: order.manifest_id,
+              account_code: order.account_code, // Add account_code
+              shipping_partner: order.shipping_partner || 'shipway', // Add shipping_partner
               total_quantity: 0,
               products: []
             };
@@ -3042,52 +3225,113 @@ export function VendorDashboard() {
       return
     }
 
-    // Set bulk download loading state
-    setBulkDownloadLoading(true);
+    // Show format selection dialog first (unified for all shipping partners)
+    setPendingDownloadOrderIds(selectedOrders);
+    setSelectedDownloadFormat("thermal");
+    setShowFormatDialog(true);
+  }
+
+  /**
+   * Unified label download flow (handles both Shipway + Shiprocket transparently):
+   * 1. User selects format → clicks "Generate & Download"
+   * 2. Backend processes all orders (Shipway labels + Shiprocket clone/AWB/labels)
+   * 3. Backend returns successful order_ids with labels stored in DB
+   * 4. Frontend calls merge endpoint to combine all PDFs
+   * 5. Download merged PDF
+   */
+  const handleGenerateAndDownload = async () => {
+    if (pendingDownloadOrderIds.length === 0) return;
+
+    setDownloadProcessing(true);
 
     try {
       toast({
         title: "Generating Labels",
-        description: `Generating labels for ${selectedOrders.length} orders...`,
-      })
+        description: `Processing ${pendingDownloadOrderIds.length} orders...`,
+      });
 
-      console.log('🔵 FRONTEND: Starting bulk label generation process');
-      console.log('  - selected orders:', selectedOrders);
-      console.log('  - tab:', tab);
+      console.log('🔵 FRONTEND: Unified label generation - format:', selectedDownloadFormat);
+      console.log('  - Orders:', pendingDownloadOrderIds);
 
-      // Step 1: Generate labels only (without merging)
-      const generateResponse = await apiClient.bulkDownloadLabels(selectedOrders, labelFormat, true);
+      // Step 1: Generate labels for all orders (backend handles Shipway + Shiprocket internally)
+      const generateResponse = await apiClient.bulkDownloadLabels(
+        pendingDownloadOrderIds,
+        selectedDownloadFormat,
+        true
+      );
 
-      console.log('📥 FRONTEND: Label generation response received');
-      console.log('  - response:', generateResponse);
+      console.log('📥 FRONTEND: Generation response:', generateResponse);
 
-      // Check if response is ApiResponse (from generate_only call)
-      if (generateResponse && 'success' in generateResponse && generateResponse.success) {
-        const data = generateResponse.data;
-
-        // Show merge confirmation dialog
-        setMergeDialogData({
-          successful: data.successful || [],
-          failed: data.failed || [],
-          totalSuccessful: data.total_successful || 0,
-          totalFailed: data.total_failed || 0
-        });
-        setSelectedMergeFormat(labelFormat); // Default to current label format
-        setShowMergeDialog(true);
-      } else {
+      if (!generateResponse || !('success' in generateResponse)) {
         throw new Error('Invalid response from label generation');
       }
 
-    } catch (error) {
-      console.error('❌ FRONTEND: Bulk label generation error:', error);
+      if (!generateResponse.success) {
+        throw new Error(generateResponse.message || 'Label generation failed');
+      }
+
+      const { successful, failed, total_successful, total_failed } = generateResponse.data;
+
+      if (!successful || successful.length === 0) {
+        toast({
+          title: 'Label Generation Failed',
+          description: `All ${total_failed || pendingDownloadOrderIds.length} orders failed. Please contact admin.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Step 2: Merge all generated labels into a single PDF
       toast({
-        title: 'Label Generation Failed',
+        title: "Merging Labels",
+        description: `Merging ${successful.length} labels into PDF (${selectedDownloadFormat} format)...`,
+      });
+
+      console.log('🔄 FRONTEND: Merging labels for', successful.length, 'orders');
+
+      const blob = await apiClient.bulkDownloadLabelsMerge(successful, selectedDownloadFormat);
+
+      // Step 3: Download the merged PDF
+      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const vendorId = user?.warehouseId || 'unknown';
+      const vendorCity = vendorAddress?.city || 'unknown';
+      const filename = `${vendorId}_${vendorCity}_${currentDate}_${selectedDownloadFormat}.pdf`;
+
+      const url = window.URL.createObjectURL(blob);
+      await downloadFile(url, filename);
+
+      console.log('✅ FRONTEND: Labels downloaded successfully');
+
+      // Close dialog
+      setShowFormatDialog(false);
+      setPendingDownloadOrderIds([]);
+
+      // Show result toast
+      if (total_failed > 0) {
+        toast({
+          title: "⚠️ Download Completed with Warnings",
+          description: `${total_successful} labels downloaded, ${total_failed} order(s) failed. Please contact admin.`,
+          className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
+        });
+      } else {
+        toast({
+          title: "Labels Downloaded",
+          description: `Successfully downloaded labels for ${total_successful} orders`,
+        });
+      }
+
+      // Refresh orders to update UI
+      await refreshOrders();
+
+    } catch (error) {
+      console.error('❌ FRONTEND: Label download error:', error);
+      toast({
+        title: 'Label Download Failed',
         description: error instanceof Error ? error.message : 'An error occurred while generating labels',
         variant: 'destructive',
-      })
+      });
     } finally {
-      // Clear bulk download loading state
-      setBulkDownloadLoading(false);
+      setDownloadProcessing(false);
     }
   }
 
@@ -4278,10 +4522,10 @@ export function VendorDashboard() {
                       </div>
                       <Button
                         onClick={() => handleBulkDownloadLabels("my-orders")}
-                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
+                        disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading || downloadProcessing}
                         className="h-10 text-sm whitespace-nowrap px-4 min-w-fit bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg text-white"
                       >
-                        {bulkDownloadLoading ? (
+                        {bulkDownloadLoading || downloadProcessing ? (
                           <>
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                             Generating...
@@ -5279,10 +5523,10 @@ export function VendorDashboard() {
                         {/* Download Label Button */}
                         <Button
                           onClick={() => handleBulkDownloadLabels("my-orders")}
-                          disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading}
+                          disabled={getVisibleSelectedOrdersCount() === 0 || bulkDownloadLoading || downloadProcessing}
                           className="flex-1 h-10 sm:h-12 text-xs sm:text-sm md:text-base font-medium bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 border-0 shadow-lg min-w-0 px-2 sm:px-3"
                         >
-                          {bulkDownloadLoading ? (
+                          {bulkDownloadLoading || downloadProcessing ? (
                             <>
                               <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
                               <span className="whitespace-nowrap">{isMobile ? 'Loading' : 'Generating...'}</span>
@@ -6159,17 +6403,137 @@ export function VendorDashboard() {
         </DialogContent>
       </Dialog>
 
+      {/* Unified Label Format Selection Dialog (shown before processing) */}
+      <Dialog open={showFormatDialog} onOpenChange={(open) => {
+        if (!downloadProcessing) {
+          setShowFormatDialog(open);
+        }
+      }}>
+        <DialogContent
+          className={`${isMobile ? 'max-w-[95vw] p-4' : 'max-w-md'}`}
+          onInteractOutside={(e) => { if (downloadProcessing) e.preventDefault(); }}
+          onEscapeKeyDown={(e) => { if (downloadProcessing) e.preventDefault(); }}
+        >
+          <DialogHeader>
+            <DialogTitle className={isMobile ? 'text-lg' : 'text-xl'}>
+              Download Labels
+            </DialogTitle>
+            <DialogDescription className={isMobile ? 'text-sm' : ''}>
+              Select format and download labels for {pendingDownloadOrderIds.length} selected order(s)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-base font-semibold mb-3 block">
+                Label Format:
+              </Label>
+              <div className="space-y-2">
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="downloadFormat"
+                    value="thermal"
+                    checked={selectedDownloadFormat === "thermal"}
+                    onChange={(e) => setSelectedDownloadFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                    disabled={downloadProcessing}
+                  />
+                  <div>
+                    <span className="font-medium">Thermal (Default)</span>
+                    <p className="text-sm text-gray-500">4x6 labels in sequence</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="downloadFormat"
+                    value="a4"
+                    checked={selectedDownloadFormat === "a4"}
+                    onChange={(e) => setSelectedDownloadFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                    disabled={downloadProcessing}
+                  />
+                  <div>
+                    <span className="font-medium">A4</span>
+                    <p className="text-sm text-gray-500">One label per A4 page</p>
+                  </div>
+                </label>
+
+                <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    name="downloadFormat"
+                    value="four-in-one"
+                    checked={selectedDownloadFormat === "four-in-one"}
+                    onChange={(e) => setSelectedDownloadFormat(e.target.value)}
+                    className="w-4 h-4 text-blue-600"
+                    disabled={downloadProcessing}
+                  />
+                  <div>
+                    <span className="font-medium">Four-in-One</span>
+                    <p className="text-sm text-gray-500">4 labels per A4 page</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className={isMobile ? 'flex-col gap-2' : ''}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowFormatDialog(false);
+                setPendingDownloadOrderIds([]);
+              }}
+              disabled={downloadProcessing}
+              className={isMobile ? 'w-full' : ''}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleGenerateAndDownload}
+              disabled={downloadProcessing}
+              className={isMobile ? 'w-full' : ''}
+            >
+              {downloadProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 mr-2" />
+                  Generate & Download
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Manifest Format Selection Dialog */}
-      <Dialog open={showManifestDialog} onOpenChange={setShowManifestDialog}>
+      <Dialog open={showManifestDialog} onOpenChange={(open) => {
+        setShowManifestDialog(open);
+        if (!open) {
+          // Reset state when dialog closes
+          setManifestDialogData(null);
+          setIsShiprocketManifest(false);
+          setShiprocketOrderIds([]);
+        }
+      }}>
         <DialogContent
           className={`${isMobile ? 'max-w-[95vw] p-4' : 'max-w-md'}`}
         >
           <DialogHeader>
             <DialogTitle className={isMobile ? 'text-lg' : 'text-xl'}>
-              Download Manifest
+              {isShiprocketManifest ? 'Generate Manifest' : 'Download Manifest'}
             </DialogTitle>
             <DialogDescription className={isMobile ? 'text-sm' : ''}>
-              Select a format for your manifest summary
+              {isShiprocketManifest 
+                ? `Select a format for ${shiprocketOrderIds.length} order(s). Processing will begin after format selection.`
+                : 'Select a format for your manifest summary'}
             </DialogDescription>
           </DialogHeader>
 
@@ -6187,6 +6551,7 @@ export function VendorDashboard() {
                     checked={selectedManifestFormat === "a4"}
                     onChange={(e) => setSelectedManifestFormat(e.target.value)}
                     className="w-4 h-4 text-blue-600"
+                    disabled={shiprocketManifestLoading}
                   />
                   <div className="flex-1">
                     <span className="font-semibold block">A4 Format</span>
@@ -6202,6 +6567,7 @@ export function VendorDashboard() {
                     checked={selectedManifestFormat === "thermal"}
                     onChange={(e) => setSelectedManifestFormat(e.target.value)}
                     className="w-4 h-4 text-blue-600"
+                    disabled={shiprocketManifestLoading}
                   />
                   <div className="flex-1">
                     <span className="font-semibold block">Thermal Format (4x6)</span>
@@ -6218,23 +6584,46 @@ export function VendorDashboard() {
               onClick={() => {
                 setShowManifestDialog(false);
                 setManifestDialogData(null);
+                setIsShiprocketManifest(false);
+                setShiprocketOrderIds([]);
               }}
               className={isMobile ? 'w-full' : ''}
+              disabled={shiprocketManifestLoading}
             >
               Cancel
             </Button>
             <Button
               onClick={async () => {
-                if (manifestDialogData) {
+                if (isShiprocketManifest && shiprocketOrderIds.length > 0) {
+                  // Handle Shiprocket manifest generation
+                  // manifestDialogData may contain Shipway manifest IDs to combine
+                  const shipwayIds = manifestDialogData && Array.isArray(manifestDialogData) ? manifestDialogData : null;
+                  await handleShiprocketManifestGeneration(shiprocketOrderIds, selectedManifestFormat, shipwayIds);
+                  setShowManifestDialog(false);
+                  setManifestDialogData(null);
+                  setIsShiprocketManifest(false);
+                  setShiprocketOrderIds([]);
+                } else if (manifestDialogData) {
+                  // Handle Shipway manifest download (only Shipway orders)
                   await downloadManifestSummary(manifestDialogData, selectedManifestFormat);
                   setShowManifestDialog(false);
                   setManifestDialogData(null);
                 }
               }}
               className={`${isMobile ? 'w-full' : ''} bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700`}
+              disabled={shiprocketManifestLoading || (!isShiprocketManifest && !manifestDialogData)}
             >
-              <Download className="w-4 h-4 mr-2" />
-              Download
+              {shiprocketManifestLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 mr-2" />
+                  {isShiprocketManifest ? 'Generate & Download' : 'Download'}
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

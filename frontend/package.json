@@ -7,10 +7,10 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
-    "build": "next build --webpack",
-    "dev": "next dev -p 3000",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build --webpack",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev -p 3000 --webpack",
     "lint": "next lint",
-    "start": "next start -p ${PORT:-3000} --webpack",
+    "start": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next start -p ${PORT:-3000} --webpack",
     "generate-icons": "node generate-icons.js"
   },
   "dependencies": {
@@ -65,12 +65,14 @@
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "latest",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "postcss": "^8.5",
     "sharp": "^0.33.5",
     "tailwindcss": "^3.4.17",

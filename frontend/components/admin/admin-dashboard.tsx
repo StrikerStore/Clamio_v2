@@ -247,6 +247,7 @@ export function AdminDashboard() {
   // Orders state
   const [orders, setOrders] = useState<any[]>([])
   const [ordersLoading, setOrdersLoading] = useState(false)
+  const [ordersRefreshing, setOrdersRefreshing] = useState(false)
   const [ordersStats, setOrdersStats] = useState({
     totalOrders: 0,
     claimedOrders: 0,
@@ -1357,6 +1358,38 @@ export function AdminDashboard() {
 
     // No cache or infinite scroll - fetch from API
     await fetchOrdersFromAPI(resetPagination, syncFromShipway, filters, false);
+  };
+
+  // Handle refresh button click - refresh in background without showing loading state
+  const handleRefreshOrders = async () => {
+    setOrdersRefreshing(true);
+    try {
+      // Get current filters
+      const currentFilters: any = {
+        search: searchTerm || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        vendor: selectedVendorFilters.length > 0 ? selectedVendorFilters.join(',') : undefined,
+        store: selectedStoreFilters.length > 0 ? selectedStoreFilters.join(',') : undefined,
+        showInactiveStores: showInactiveStoreOrders
+      };
+
+      // Refresh in background silently (with Shipway sync)
+      await fetchOrdersFromAPI(true, true, currentFilters, true);
+      
+      // Also refresh dashboard stats
+      await fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders });
+    } catch (error) {
+      console.error('Error refreshing orders:', error);
+      toast({
+        title: "Refresh Failed",
+        description: error instanceof Error ? error.message : "An error occurred while refreshing orders.",
+        variant: "destructive",
+      });
+    } finally {
+      setOrdersRefreshing(false);
+    }
   };
 
   // Internal function to fetch orders from API
@@ -2700,13 +2733,13 @@ export function AdminDashboard() {
                 {!isMobile && <CardDescription className="text-sm sm:text-base truncate">Manage orders, vendors, and carriers</CardDescription>}
               </div>
               <Button
-                onClick={() => fetchOrders(true, true)}
-                disabled={ordersLoading}
+                onClick={handleRefreshOrders}
+                disabled={ordersRefreshing}
                 variant="outline"
                 className={`${isMobile ? 'h-8 sm:h-10 text-sm sm:text-base px-2 sm:px-4' : 'h-10'} bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:from-blue-600 hover:to-blue-700 flex-shrink-0`}
                 size="default"
               >
-                {ordersLoading ? (
+                {ordersRefreshing ? (
                   <>
                     <div className={`animate-spin rounded-full border-b-2 border-white ${isMobile ? 'h-3 w-3 mr-1 sm:h-4 sm:w-4 sm:mr-2' : 'h-4 w-4 mr-2'}`}></div>
                     {isMobile ? 'Loading' : 'Refreshing...'}
@@ -4029,7 +4062,25 @@ export function AdminDashboard() {
                                     <span className="text-[10px] text-gray-500">{order.account_code || ''}</span>
                                   </div>
                                 </TableCell>
-                                <TableCell className="text-xs">{order.product_name}</TableCell>
+                                <TableCell className="text-xs">
+                                  <div className="flex justify-between items-center gap-2">
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="break-words">
+                                        {order.product_name}
+                                      </span>
+                                      {order.product_code && (
+                                        <span className="text-[10px] text-gray-500 mt-0.5 opacity-60">
+                                          {order.product_code}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {order.quantity && (
+                                      <span className="font-bold text-green-600 text-sm flex-shrink-0">
+                                        {order.quantity}
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
                                 <TableCell className="text-xs whitespace-nowrap">₹{order.value}</TableCell>
                                 <TableCell className="text-xs">{getStatusBadge(order.status)}</TableCell>
                                 <TableCell className="text-xs font-mono text-purple-600">{order.awb || order.airway_bill || order.airwaybill || 'N/A'}</TableCell>
@@ -4206,12 +4257,21 @@ export function AdminDashboard() {
                                         </Badge>
                                       )}
                                     </div>
-                                    <p className="text-xs sm:text-sm text-gray-600 break-words leading-relaxed">
-                                      {order.product_name}
-                                    </p>
-                                    <p className="text-xs sm:text-sm text-gray-500 break-words leading-relaxed">
-                                      Code: {order.product_code || 'N/A'}
-                                    </p>
+                                    <div className="flex justify-between items-center gap-2">
+                                      <p className="text-xs sm:text-sm text-gray-600 break-words leading-relaxed flex-1">
+                                        {order.product_name}
+                                      </p>
+                                      {order.quantity && (
+                                        <p className="font-bold text-green-600 text-sm sm:text-base flex-shrink-0">
+                                          {order.quantity}
+                                        </p>
+                                      )}
+                                    </div>
+                                    {order.product_code && (
+                                      <p className="text-xs sm:text-sm text-gray-500 break-words leading-relaxed opacity-60">
+                                        {order.product_code}
+                                      </p>
+                                    )}
                                   </div>
                                 </div>
 

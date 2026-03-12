@@ -489,6 +489,37 @@ router.post('/claim', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Order row is not unclaimed' });
     }
 
+    // For Shiprocket orders: Change pickup address to vendor's pickup_location before claiming
+    const store = await database.getStoreByAccountCode(order.account_code);
+    if (store && store.shipping_partner?.toLowerCase() === 'shiprocket') {
+      console.log('📍 Shiprocket order detected — changing pickup address before claim...');
+
+      if (!order.partner_order_id) {
+        console.log('❌ Cannot change pickup address: partner_order_id is missing for order', order.order_id);
+        return res.status(400).json({ success: false, message: 'partner_order_id is missing for this Shiprocket order. Cannot change pickup address.' });
+      }
+
+      // Get vendor's pickup_location from wh_mapping
+      const whMapping = await database.getWhMappingByClaimioWhIdAndAccountCode(warehouseId, order.account_code);
+      if (!whMapping || !whMapping.pickup_location) {
+        console.log('❌ Warehouse mapping or pickup_location not found for vendor', warehouseId, 'and store', order.account_code);
+        return res.status(400).json({ success: false, message: `Pickup location not configured for your warehouse (${warehouseId}) and store (${order.account_code}). Please contact admin.` });
+      }
+
+      console.log(`  - Partner Order ID (order.id): ${order.partner_order_id}`);
+      console.log(`  - Pickup Location: ${whMapping.pickup_location}`);
+
+      try {
+        const ShiprocketService = require('../services/shiprocketService');
+        const shiprocketService = new ShiprocketService(order.account_code);
+        await shiprocketService.changePickupAddress([parseInt(order.partner_order_id)], whMapping.pickup_location);
+        console.log('✅ Pickup address changed successfully');
+      } catch (pickupError) {
+        console.error('❌ Failed to change pickup address:', pickupError.message);
+        return res.status(500).json({ success: false, message: `Failed to change pickup address on Shiprocket: ${pickupError.message}` });
+      }
+    }
+
     // Update order
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     console.log('🔄 UPDATING ORDER');
@@ -507,10 +538,11 @@ router.post('/claim', async (req, res) => {
     };
 
     // Assign top 3 priority carriers during claim
+    // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
     console.log('🚚 ASSIGNING TOP 3 PRIORITY CARRIERS...');
     let priorityCarrier = '';
     try {
-      priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(order);
+      priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(updatedOrder);
       console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
       updatedOrder.priority_carrier = priorityCarrier;
     } catch (carrierError) {
@@ -637,6 +669,33 @@ router.post('/bulk-claim', async (req, res) => {
           return { success: false, unique_id, reason: 'Order is not unclaimed' };
         }
 
+        // For Shiprocket orders: Change pickup address to vendor's pickup_location before claiming
+        const store = await database.getStoreByAccountCode(order.account_code);
+        if (store && store.shipping_partner?.toLowerCase() === 'shiprocket') {
+          console.log(`📍 Shiprocket order ${order.order_id} — changing pickup address before claim...`);
+
+          if (!order.partner_order_id) {
+            console.log(`❌ Cannot change pickup address: partner_order_id is missing for order ${order.order_id}`);
+            return { success: false, unique_id, reason: 'partner_order_id is missing for this Shiprocket order' };
+          }
+
+          const whMapping = await database.getWhMappingByClaimioWhIdAndAccountCode(warehouseId, order.account_code);
+          if (!whMapping || !whMapping.pickup_location) {
+            console.log(`❌ Pickup location not configured for vendor ${warehouseId} and store ${order.account_code}`);
+            return { success: false, unique_id, reason: `Pickup location not configured for warehouse ${warehouseId}` };
+          }
+
+          try {
+            const ShiprocketService = require('../services/shiprocketService');
+            const shiprocketService = new ShiprocketService(order.account_code);
+            await shiprocketService.changePickupAddress([parseInt(order.partner_order_id)], whMapping.pickup_location);
+            console.log(`✅ Pickup address changed for order ${order.order_id}`);
+          } catch (pickupError) {
+            console.error(`❌ Failed to change pickup address for order ${order.order_id}:`, pickupError.message);
+            return { success: false, unique_id, reason: `Failed to change pickup address: ${pickupError.message}` };
+          }
+        }
+
         // Update order
         console.log('🔄 CLAIMING ORDER:', unique_id);
 
@@ -651,10 +710,11 @@ router.post('/bulk-claim', async (req, res) => {
         };
 
         // Assign top 3 priority carriers during claim
+        // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
         console.log(`🚚 ASSIGNING TOP 3 PRIORITY CARRIERS for ${order.order_id}...`);
         let priorityCarrier = '';
         try {
-          priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(order);
+          priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(updatedOrder);
           console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
           updatedOrder.priority_carrier = priorityCarrier;
         } catch (carrierError) {
@@ -806,6 +866,7 @@ router.get('/my-orders', async (req, res) => {
         unique_id: order.unique_id,
         product_name: order.product_name,
         product_code: order.product_code,
+        size: order.size || null,
         product_price: order.product_price,
         quantity: order.quantity,
         product_image: order.product_image,
@@ -930,6 +991,20 @@ router.get('/handover', async (req, res) => {
 
     console.log('📦 Handover Orders loaded:', handoverOrders.length);
 
+    // Get shipping partners for all unique account codes
+    const uniqueAccountCodes = [...new Set(handoverOrders.map(o => o.account_code).filter(Boolean))];
+    let shippingPartnerMap = {};
+    if (uniqueAccountCodes.length > 0) {
+      try {
+        const stores = await database.getStoresByAccountCodes(uniqueAccountCodes);
+        stores.forEach(s => { 
+          shippingPartnerMap[s.account_code] = s.shipping_partner || 'shipway'; 
+        });
+      } catch (err) {
+        console.warn('⚠️ Could not fetch store shipping partners:', err.message);
+      }
+    }
+
     // Group orders by order_id (exact same logic as original Excel flow)
     const groupedOrders = {};
 
@@ -950,6 +1025,8 @@ router.get('/handover', async (req, res) => {
           is_handover: order.is_handover, // Add is_handover field
           manifest_id: order.manifest_id, // Add manifest_id field
           current_shipment_status: order.current_shipment_status, // Add current_shipment_status field
+          account_code: order.account_code, // Add account_code
+          shipping_partner: shippingPartnerMap[order.account_code] || 'shipway', // Add shipping_partner
           products: []
         };
       }
@@ -961,6 +1038,7 @@ router.get('/handover', async (req, res) => {
         unique_id: order.unique_id,
         product_name: order.product_name,
         product_code: order.product_code,
+        size: order.size || null,
         product_price: order.product_price,
         quantity: order.quantity,
         product_image: order.product_image,
@@ -1263,6 +1341,8 @@ router.get('/dashboard-stats', async (req, res) => {
 
     // 2. My Orders - Total Count and Total Quantity
     // Orders claimed by this vendor, status claimed or ready_for_handover, not manifested
+    // For Shiprocket orders: must have is_in_new_order = 1
+    // For Shipway orders: is_in_new_order = 1 OR label_downloaded = 1 (existing logic)
     const myOrdersQuery = database.query(`
       SELECT 
         COUNT(DISTINCT o.order_id) as total_count,
@@ -1270,9 +1350,14 @@ router.get('/dashboard-stats', async (req, res) => {
       FROM orders o
       LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
       LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
+      LEFT JOIN store_info s ON o.account_code = s.account_code
       WHERE c.claimed_by = ?
         AND (c.status = 'claimed' OR c.status = 'ready_for_handover')
-        AND (o.is_in_new_order = 1 OR c.label_downloaded = 1)
+        AND (
+          (COALESCE(s.shipping_partner, '') = 'Shiprocket' AND o.is_in_new_order = 1)
+          OR 
+          (COALESCE(s.shipping_partner, '') != 'Shiprocket' AND (o.is_in_new_order = 1 OR c.label_downloaded = 1))
+        )
         AND (l.is_manifest IS NULL OR l.is_manifest = 0)
     `, [warehouseId]);
 
@@ -1409,6 +1494,18 @@ router.get('/grouped', async (req, res) => {
 
     console.log('📦 Vendor orders loaded:', vendorOrders.length);
 
+    // Fetch shipping_partner for all unique account_codes
+    const uniqueAccountCodes = [...new Set(vendorOrders.map(o => o.account_code).filter(Boolean))];
+    let shippingPartnerMap = {};
+    if (uniqueAccountCodes.length > 0) {
+      try {
+        const stores = await database.getStoresByAccountCodes(uniqueAccountCodes);
+        stores.forEach(s => { shippingPartnerMap[s.account_code] = s.shipping_partner || 'shipway'; });
+      } catch (err) {
+        console.warn('⚠️ Could not fetch store shipping partners:', err.message);
+      }
+    }
+
     // Group orders by order_id (exact same logic as original Excel flow)
     const groupedOrders = {};
 
@@ -1425,6 +1522,8 @@ router.get('/grouped', async (req, res) => {
           label_downloaded: order.label_downloaded, // Add label_downloaded field
           is_handover: order.is_handover, // Add is_handover field
           current_shipment_status: order.current_shipment_status, // Add current_shipment_status field
+          account_code: order.account_code, // Add account_code for shipping partner detection
+          shipping_partner: shippingPartnerMap[order.account_code] || 'shipway', // Add shipping_partner
           total_value: 0,
           total_products: 0,
           total_quantity: 0,
@@ -1437,6 +1536,7 @@ router.get('/grouped', async (req, res) => {
         unique_id: order.unique_id,
         product_name: order.product_name || order.product,
         product_code: order.product_code,
+        size: order.size || null,
         value: order.value || order.price || 0,
         image: order.image || order.product_image,
         quantity: order.quantity || 1
@@ -1745,6 +1845,7 @@ router.get('/admin/all', requireAdminOrSuperadmin, async (req, res) => {
       vendor_name: order.vendor_name || (order.claimed_by ? order.claimed_by : 'Unclaimed'),
       product_name: order.product_name || order.product || 'N/A',
       product_code: order.product_code || order.sku || 'N/A',
+      size: order.size || null,
       quantity: order.quantity || '1',
       status: order.status || 'unclaimed',
       value: order.value || order.price || order.selling_price || '0',
@@ -1864,16 +1965,18 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
     };
 
     // Assign top 3 priority carriers during admin assignment (same as vendor claim)
+    // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
     console.log('🚚 ASSIGNING TOP 3 PRIORITY CARRIERS...');
     console.log('  - Order data for carrier assignment:');
-    console.log('    - order_id:', order.order_id);
-    console.log('    - pincode:', order.pincode);
-    console.log('    - payment_type:', order.payment_type);
-    console.log('    - unique_id:', order.unique_id);
+    console.log('    - order_id:', updatedOrder.order_id);
+    console.log('    - pincode:', updatedOrder.pincode);
+    console.log('    - payment_type:', updatedOrder.payment_type);
+    console.log('    - unique_id:', updatedOrder.unique_id);
+    console.log('    - claimed_by:', updatedOrder.claimed_by);
 
     let priorityCarrier = '';
     try {
-      priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(order);
+      priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(updatedOrder);
       console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
       updatedOrder.priority_carrier = priorityCarrier;
     } catch (carrierError) {
@@ -1987,16 +2090,18 @@ router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmi
         };
 
         // Assign top 3 priority carriers during bulk assignment (same as vendor claim)
+        // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
         console.log(`🚚 ASSIGNING TOP 3 PRIORITY CARRIERS for ${order.order_id}...`);
         console.log('  - Order data for carrier assignment:');
-        console.log('    - order_id:', order.order_id);
-        console.log('    - pincode:', order.pincode);
-        console.log('    - payment_type:', order.payment_type);
-        console.log('    - unique_id:', order.unique_id);
+        console.log('    - order_id:', updatedOrder.order_id);
+        console.log('    - pincode:', updatedOrder.pincode);
+        console.log('    - payment_type:', updatedOrder.payment_type);
+        console.log('    - unique_id:', updatedOrder.unique_id);
+        console.log('    - claimed_by:', updatedOrder.claimed_by);
 
         let priorityCarrier = '';
         try {
-          priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(order);
+          priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(updatedOrder);
           console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
           updatedOrder.priority_carrier = priorityCarrier;
         } catch (carrierError) {
@@ -2023,7 +2128,9 @@ router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmi
           priority_carrier: updatedOrder.priority_carrier
         });
 
-        if (result.success) {
+        // database.updateOrder returns the updated order object (or null), not { success: true }
+        // Treat any truthy result as a successful update
+        if (result) {
           updatedCount += 1;
         }
       } catch (error) {
@@ -2283,7 +2390,7 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
     const isLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === true || order.label_downloaded === '1';
 
     if (isLabelDownloaded) {
-      console.log('🔄 CASE 2: Label downloaded - calling Shipway cancel API');
+      console.log('🔄 CASE 2: Label downloaded - cancelling shipment before unclaim');
 
       // Get account_code from order to use correct store credentials
       const accountCode = order.account_code;
@@ -2308,26 +2415,34 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
 
       console.log('✅ AWB FOUND:', label.awb);
 
-      // Call Shipway cancel API with store-specific credentials
-      const ShipwayService = require('../services/shipwayService');
-      const shipwayService = new ShipwayService(accountCode);
-
-      // Initialize the service to load store credentials
-      await shipwayService.initialize();
+      // Determine shipping partner for this store
+      const storeInfo = await database.getStoreByAccountCode(accountCode);
+      const shippingPartner = (storeInfo?.shipping_partner || '').toLowerCase();
 
       try {
-        const cancelResult = await shipwayService.cancelShipment([label.awb]);
-        console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+        if (shippingPartner === 'shiprocket') {
+          console.log('🔄 Using Shiprocket cancel API for order:', order.order_id);
+          const ShiprocketService = require('../services/shiprocketService');
+          const shiprocketService = new ShiprocketService(accountCode);
+          const cancelResult = await shiprocketService.cancelShipmentsByAwbs([label.awb]);
+          console.log('✅ SHIPROCKET CANCEL SUCCESS:', cancelResult);
+        } else {
+          console.log('🔄 Using Shipway cancel API for order:', order.order_id);
+          const ShipwayService = require('../services/shipwayService');
+          const shipwayService = new ShipwayService(accountCode);
+          await shipwayService.initialize();
+          const cancelResult = await shipwayService.cancelShipment([label.awb]);
+          console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+        }
       } catch (cancelError) {
-        console.error('❌ SHIPWAY CANCEL FAILED:');
+        console.error('❌ SHIPMENT CANCEL FAILED:');
         console.error('  - Error message:', cancelError.message);
-        console.error('  - Error stack:', cancelError.stack);
         console.error('  - Account Code:', accountCode);
         console.error('  - AWB:', label.awb);
         return res.status(500).json({
           success: false,
           message: cancelError.message || 'Failed to cancel shipment. Please try after sometime.',
-          error: 'shipway_cancel_failed',
+          error: 'shipment_cancel_failed',
           details: cancelError.message
         });
       }
@@ -2687,22 +2802,46 @@ router.post('/download-label', async (req, res) => {
     console.log(`  - All products:`, orderProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
     console.log(`  - Claimed products:`, claimedProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
 
+    // Check shipping partner from store
+    const accountCode = claimedProducts[0]?.account_code || orderProducts[0]?.account_code;
+    if (!accountCode) {
+      throw new Error(`account_code not found for order ${order_id}. Cannot determine shipping partner.`);
+    }
+
+    const store = await database.getStoreByAccountCode(accountCode);
+    if (!store) {
+      throw new Error(`Store not found for account_code: ${accountCode}`);
+    }
+
+    const isShiprocket = store.shipping_partner?.toLowerCase() === 'shiprocket';
+    console.log(`📦 Shipping Partner: ${store.shipping_partner} (${isShiprocket ? 'Shiprocket' : 'Shipway'})`);
+
     // Updated logic: Only 2 conditions (removed underscore check)
     if (orderProducts.length === claimedProducts.length) {
       // Condition 1: Direct download - all products claimed by vendor
       console.log('✅ CONDITION 1: Direct download - all products claimed by vendor');
 
+      if (isShiprocket) {
+        // Shiprocket direct download - AWB assign will be implemented later
+        console.log('🚀 Shiprocket direct download - AWB assign API pending implementation');
+        return res.status(200).json({
+          success: false,
+          message: 'Shiprocket direct download (AWB assign) is pending implementation',
+          data: {
+            original_order_id: order_id,
+            shipping_url: null,
+            awb: null,
+            carrier_id: null,
+            carrier_name: null
+          }
+        });
+      } else {
+        // Shipway direct download (existing flow)
       const labelResponse = await generateLabelForOrder(order_id, claimedProducts, vendor, format);
 
       // Store label in cache after successful generation
       if (labelResponse.success && labelResponse.data.shipping_url) {
         try {
-          // Get account_code from the first claimed product
-          const accountCode = claimedProducts[0]?.account_code;
-          if (!accountCode) {
-            throw new Error(`account_code not found for order ${order_id}. Cannot store label without store information.`);
-          }
-
           const labelDataToStore = {
             order_id: order_id,
             account_code: accountCode,
@@ -2733,11 +2872,38 @@ router.post('/download-label', async (req, res) => {
       }
 
       return res.json(labelResponse);
+      }
 
     } else if (claimedProducts.length > 0) {
       // Condition 2: Clone required - some products claimed by vendor
       console.log('🔄 CONDITION 2: Clone required - some products claimed by vendor');
 
+      if (isShiprocket) {
+        // Shiprocket clone flow
+        let cloneResponse;
+        try {
+          cloneResponse = await handleShiprocketOrderCloning(order_id, claimedProducts, orderProducts, vendor);
+        } catch (firstError) {
+          // Check if error is due to clone conflict
+          if (firstError.message && firstError.message.includes('already exists')) {
+            console.log('⚠️ CLONE CONFLICT DETECTED: Clone order already exists');
+            console.log('🔄 RETRYING: Using suffix _99 to avoid conflict...');
+
+            try {
+              cloneResponse = await handleShiprocketOrderCloning(order_id, claimedProducts, orderProducts, vendor, '99');
+              console.log('✅ RETRY SUCCESSFUL: Clone created with _99 suffix');
+            } catch (retryError) {
+              console.error('❌ RETRY FAILED: Could not create clone even with _99 suffix');
+              throw retryError;
+            }
+          } else {
+            throw firstError;
+          }
+        }
+
+        return res.json(cloneResponse);
+      } else {
+        // Shipway clone flow (existing)
       let cloneResponse;
       try {
         // Try normal clone creation first
@@ -2763,6 +2929,7 @@ router.post('/download-label', async (req, res) => {
       }
 
       return res.json(cloneResponse);
+      }
 
     } else {
       // No products claimed by this vendor
@@ -3638,6 +3805,267 @@ async function retryOperation(operation, maxAttempts, stepName, inputData) {
   throw lastError;
 }
 
+/**
+ * Handle Shiprocket order cloning (Condition 2: Clone required)
+ */
+async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix = null) {
+  const MAX_ATTEMPTS = 5;
+  let cloneOrderId;
+
+  console.log('🚀 Starting Shiprocket clone process...');
+  console.log(`📊 Input Analysis:`);
+  console.log(`  - Original Order ID: ${originalOrderId}`);
+  console.log(`  - Total products in order: ${allOrderProducts.length}`);
+  console.log(`  - Products claimed by vendor: ${claimedProducts.length}`);
+  console.log(`  - Vendor warehouse ID: ${vendor.warehouseId}`);
+  if (forceCloneSuffix) {
+    console.log(`  - Forced Clone Suffix: ${forceCloneSuffix} (Retry attempt to avoid conflict)`);
+  }
+
+  try {
+    // ============================================================================
+    // STEP 0: DATA PREPARATION & CONSISTENCY
+    // ============================================================================
+    console.log('\n📋 STEP 0: Capturing and freezing input data...');
+
+    const inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix);
+    cloneOrderId = inputData.cloneOrderId;
+
+    console.log(`✅ Input data captured and frozen:`);
+    console.log(`  - Clone Order ID: ${cloneOrderId}`);
+    console.log(`  - Claimed products: ${inputData.claimedProducts.length}`);
+    console.log(`  - Remaining products: ${inputData.remainingProducts.length}`);
+    console.log(`  - Data timestamp: ${inputData.timestamp}`);
+
+    // Get warehouse mapping for pickup_location
+    const database = require('../config/database');
+    const whMapping = await database.getWhMappingByClaimioWhIdAndAccountCode(vendor.warehouseId, inputData.accountCode);
+    if (!whMapping || !whMapping.pickup_location) {
+      throw new Error(`Warehouse mapping not found or pickup_location missing for claimio_wh_id: ${vendor.warehouseId}, account_code: ${inputData.accountCode}`);
+    }
+    inputData.pickupLocation = whMapping.pickup_location;
+    console.log(`  - Pickup Location: ${whMapping.pickup_location}`);
+
+    // ============================================================================
+    // STEP 1: CREATE CLONE ORDER (NO LABEL)
+    // ============================================================================
+    console.log('\n🔧 STEP 1: Creating clone order (without label)...');
+
+    await retryOperation(
+      (data) => createShiprocketCloneOrderOnly(data),
+      MAX_ATTEMPTS,
+      'Create Shiprocket clone order',
+      inputData
+    );
+
+    console.log('✅ STEP 1 COMPLETED: Clone order created successfully');
+
+    // ============================================================================
+    // STEP 2: VERIFY CLONE CREATION (SKIP FOR NOW - can be added later)
+    // ============================================================================
+    console.log('\n🔍 STEP 2: Skipping clone verification (to be implemented)...');
+
+    // ============================================================================
+    // STEP 3: UPDATE ORIGINAL ORDER
+    // ============================================================================
+    console.log('\n📝 STEP 3: Updating original order (removing claimed products)...');
+
+    await retryOperation(
+      (data) => updateShiprocketOriginalOrder(data),
+      MAX_ATTEMPTS,
+      'Update Shiprocket original order',
+      inputData
+    );
+
+    console.log('✅ STEP 3 COMPLETED: Original order updated');
+
+    // ============================================================================
+    // STEP 4: VERIFY ORIGINAL ORDER UPDATE (SKIP FOR NOW - can be added later)
+    // ============================================================================
+    console.log('\n🔍 STEP 4: Skipping original order update verification (to be implemented)...');
+
+    // ============================================================================
+    // STEP 5: UPDATE LOCAL DATABASE (AFTER CLONE CREATION)
+    // ============================================================================
+    console.log('\n💾 STEP 5: Updating local database after clone creation...');
+
+    await retryOperation(
+      (data) => updateLocalDatabaseAfterClone(data),
+      MAX_ATTEMPTS,
+      'Update local database after clone',
+      inputData
+    );
+
+    console.log('✅ STEP 5 COMPLETED: Local database updated');
+
+    // ============================================================================
+    // STEP 6: GENERATE LABEL FOR CLONE (SKIP FOR NOW - will be implemented later)
+    // ============================================================================
+    console.log('\n🏷️ STEP 6: Skipping label generation (AWB assign API - to be implemented)...');
+
+    // ============================================================================
+    // STEP 7: RETURN SUCCESS (WITHOUT LABEL)
+    // ============================================================================
+    console.log('\n🎉 STEP 7: Shiprocket clone process completed successfully!');
+    console.log(`  - Original Order ID: ${inputData.originalOrderId}`);
+    console.log(`  - Clone Order ID: ${cloneOrderId}`);
+    console.log(`  - Note: Label generation (AWB assign) will be implemented separately`);
+
+    return {
+      success: true,
+      message: `Shiprocket clone order created successfully.`,
+      data: {
+        original_order_id: inputData.originalOrderId,
+        clone_order_id: cloneOrderId,
+        clone_shipment_id: inputData.cloneShipmentIdForShipment || null, // Use actual shipment_id from create response (if not available, will be fetched from DB in fallback)
+        shipping_url: null, // Will be populated after label generation
+        awb: null, // Will be populated after AWB assign
+        carrier_id: null, // Will be populated after AWB assign
+        carrier_name: null // Will be populated after AWB assign
+      }
+    };
+
+  } catch (error) {
+    console.error('❌ SHIPROCKET CLONE ERROR:', error);
+    throw error;
+  }
+}
+
+// Step 1: Create Shiprocket clone order (NO label generation)
+async function createShiprocketCloneOrderOnly(inputData) {
+  const { cloneOrderId, claimedProducts, accountCode, pickupLocation, originalOrder } = inputData;
+
+  console.log(`🔒 Creating Shiprocket clone with consistent data:`);
+  console.log(`  - Clone ID: ${cloneOrderId}`);
+  console.log(`  - Products count: ${claimedProducts.length}`);
+  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
+  console.log(`  - Pickup Location: ${pickupLocation}`);
+  console.log(`  - Timestamp: ${inputData.timestamp}`);
+
+  if (!accountCode) {
+    throw new Error(`account_code not found in inputData for clone order ${cloneOrderId}. Cannot create clone without store information.`);
+  }
+
+  if (!pickupLocation) {
+    throw new Error(`pickup_location not found in inputData for clone order ${cloneOrderId}. Cannot create clone without pickup location.`);
+  }
+
+  // Get customer info from database
+  const database = require('../config/database');
+  const customerInfo = await database.getCustomerInfoByOrderId(inputData.originalOrderId);
+  if (!customerInfo) {
+    throw new Error(`Customer info not found for order ID: ${inputData.originalOrderId}`);
+  }
+
+  // Initialize Shiprocket service
+  const ShiprocketService = require('../services/shiprocketService');
+  const shiprocketService = new ShiprocketService(accountCode);
+  await shiprocketService.initialize();
+
+  // Prepare request body
+  const requestBody = shiprocketService.prepareCreateOrderBody(
+    cloneOrderId,
+    claimedProducts,
+    customerInfo,
+    pickupLocation
+  );
+
+  console.log('📤 Shiprocket Create Adhoc Order Request Body:', JSON.stringify(requestBody, null, 2));
+
+  // Call Shiprocket Create Adhoc Order API
+  const response = await shiprocketService.createOrder(requestBody);
+
+  if (!response.success) {
+    throw new Error(`Failed to create Shiprocket clone order: ${response.message || 'Unknown error'}`);
+  }
+
+  // Extract order_id from response (this is Shiprocket's order ID, which maps to 'id' in get order API)
+  // This should be stored in orders.partner_order_id in our database
+  const shiprocketOrderId = response.data?.order_id;
+  if (shiprocketOrderId) {
+    inputData.cloneShipmentId = String(shiprocketOrderId);
+    console.log(`  - Received Shiprocket order_id: ${shiprocketOrderId} (will be saved to orders.partner_order_id in Step 5)`);
+  } else {
+    console.warn(`⚠️ No order_id returned from Shiprocket for clone order: ${cloneOrderId}`);
+  }
+
+  // Extract shipment_id from response (if available)
+  // Check both direct shipment_id and shipments array (first shipment)
+  let shipmentId = null;
+  if (response.data?.shipment_id) {
+    shipmentId = String(response.data.shipment_id);
+  } else if (response.data?.shipments && Array.isArray(response.data.shipments) && response.data.shipments.length > 0) {
+    shipmentId = response.data.shipments[0].id ? String(response.data.shipments[0].id) : null;
+  }
+  
+  if (shipmentId) {
+    inputData.cloneShipmentIdForShipment = shipmentId;
+    console.log(`  - Received Shiprocket shipment_id: ${shipmentId} (will be saved to orders.shipment_id in Step 5)`);
+  } else {
+    console.log(`  - No shipment_id returned from Shiprocket for clone order: ${cloneOrderId} (will be populated on next sync)`);
+  }
+
+  console.log('✅ Shiprocket clone order created successfully');
+  return response;
+}
+
+// Step 3: Update Shiprocket original order
+async function updateShiprocketOriginalOrder(inputData) {
+  const { originalOrderId, remainingProducts, accountCode, pickupLocation } = inputData;
+
+  console.log(`🔒 Updating Shiprocket original with consistent data:`);
+  console.log(`  - Original ID: ${originalOrderId}`);
+  console.log(`  - Remaining products: ${remainingProducts.length}`);
+  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
+  console.log(`  - Pickup Location: ${pickupLocation}`);
+  console.log(`  - Timestamp: ${inputData.timestamp}`);
+
+  if (remainingProducts.length > 0) {
+    if (!accountCode) {
+      throw new Error(`account_code not found in inputData for original order ${originalOrderId}. Cannot update order without store information.`);
+    }
+
+    if (!pickupLocation) {
+      throw new Error(`pickup_location not found in inputData for original order ${originalOrderId}. Cannot update order without pickup location.`);
+    }
+
+    // Get customer info
+    const database = require('../config/database');
+    const customerInfo = await database.getCustomerInfoByOrderId(originalOrderId);
+    if (!customerInfo) {
+      throw new Error(`Customer info not found for order ID: ${originalOrderId}`);
+    }
+
+    // Initialize Shiprocket service
+    const ShiprocketService = require('../services/shiprocketService');
+    const shiprocketService = new ShiprocketService(accountCode);
+    await shiprocketService.initialize();
+
+    // Prepare request body
+    const requestBody = shiprocketService.prepareUpdateOrderBody(
+      originalOrderId,
+      remainingProducts,
+      customerInfo,
+      pickupLocation
+    );
+
+    console.log('📤 Shiprocket Update Order Request Body:', JSON.stringify(requestBody, null, 2));
+
+    // Call Shiprocket Update Order API
+    const response = await shiprocketService.updateOrder(requestBody);
+
+    if (!response.success) {
+      throw new Error(`Failed to update Shiprocket original order: ${response.message || 'Unknown error'}`);
+    }
+
+    console.log('✅ Shiprocket original order updated successfully');
+    return response;
+  } else {
+    console.log('ℹ️ No remaining products - original order will be empty');
+    return { success: true, message: 'No remaining products to update' };
+  }
+}
+
 // Step 0: Prepare and freeze input data
 async function prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix = null) {
   console.log('📋 Capturing input data for clone process...');
@@ -3949,14 +4377,40 @@ async function updateLocalDatabaseAfterClone(inputData) {
     throw error;
   }
 
+  // Build update data — include Shiprocket order_id and shipment_id if available (from create/adhoc response)
+  // Note: order_id in create response = Shiprocket's order ID (maps to 'id' in get order API)
+  // This should be stored in orders.partner_order_id in our database
+  // shipment_id from create response should be stored in orders.shipment_id
+  const cloneShipmentId = inputData.cloneShipmentId || null;
+  const cloneShipmentIdForShipment = inputData.cloneShipmentIdForShipment || null;
+  if (cloneShipmentId) {
+    console.log(`  - Shiprocket Order ID: ${cloneShipmentId} (from create response, will be stored in orders.partner_order_id)`);
+  }
+  if (cloneShipmentIdForShipment) {
+    console.log(`  - Shiprocket Shipment ID: ${cloneShipmentIdForShipment} (from create response, will be stored in orders.shipment_id)`);
+  } else {
+    console.log(`  - Note: shipment_id not in create response, will be populated on next sync when order is fetched from API`);
+  }
+
   for (const product of claimedProducts) {
-    // Update both orders and claims tables in a single call
-    await database.updateOrder(product.unique_id, {
+    const updateData = {
       order_id: cloneOrderId,           // ✅ Update orders & claims tables with clone ID
       clone_status: 'cloned',           // ✅ Mark as cloned
       cloned_order_id: originalOrderId, // ✅ Store original order ID (not clone ID)
       label_downloaded: 0               // ✅ Initially 0 (not downloaded)
-    });
+    };
+
+    // Add Shiprocket order_id to orders.partner_order_id (order_id from create response = Shiprocket's order ID)
+    // Add Shiprocket shipment_id to orders.shipment_id if available from create response
+    if (cloneShipmentId) {
+      updateData.partner_order_id = cloneShipmentId;
+    }
+    if (cloneShipmentIdForShipment) {
+      updateData.shipment_id = cloneShipmentIdForShipment;
+    }
+
+    // Update both orders and claims tables in a single call
+    await database.updateOrder(product.unique_id, updateData);
 
     console.log(`  ✅ Updated product ${product.unique_id} after clone creation:`);
     console.log(`     - orders.order_id: ${cloneOrderId}`);
@@ -3964,6 +4418,14 @@ async function updateLocalDatabaseAfterClone(inputData) {
     console.log(`     - clone_status: cloned`);
     console.log(`     - cloned_order_id: ${originalOrderId}`);
     console.log(`     - label_downloaded: 0`);
+    if (cloneShipmentId) {
+      console.log(`     - partner_order_id: ${cloneShipmentId}`);
+    }
+    if (cloneShipmentIdForShipment) {
+      console.log(`     - shipment_id: ${cloneShipmentIdForShipment}`);
+    } else {
+      console.log(`     - shipment_id: NULL (will be populated on next sync)`);
+    }
   }
 
   console.log('✅ Local database updated after clone creation');
@@ -4570,7 +5032,7 @@ router.post('/bulk-download-labels', async (req, res) => {
       whMappingsMap
     };
 
-    const results = [];
+    let results = [];
     const errors = [];
 
     // ⚡ PARALLEL PROCESSING OPTIMIZATION
@@ -4580,7 +5042,9 @@ router.post('/bulk-download-labels', async (req, res) => {
 
     console.log(`⚡ [${batchId}] Processing ${order_ids.length} orders with concurrency limit of ${CONCURRENCY_LIMIT}`);
 
-    // Helper function to process a single order (same logic as before)
+    // Helper function to process a single order
+    // For Shipway: generates label fully (returns shipping_url)
+    // For Shiprocket: does clone + AWB assign (label generated in bulk later)
     const processSingleOrder = async (orderId) => {
       try {
         console.log(`🔄 [${batchId}] Processing order: ${orderId}`);
@@ -4600,12 +5064,15 @@ router.post('/bulk-download-labels', async (req, res) => {
           };
         }
 
+        const accountCode = claimedProducts[0]?.account_code;
+        const store = storesMap.get(accountCode);
+        const isShiprocket = store?.shipping_partner?.toLowerCase() === 'shiprocket';
+
         // ✅ OPTIMIZATION: Check if label already downloaded
         const firstClaimedProduct = claimedProducts[0];
         if (firstClaimedProduct.label_downloaded === 1) {
           console.log(`⚡ BULK: Label already downloaded for ${orderId}, fetching from cache...`);
 
-          // Get existing label from pre-fetched map (O(1) lookup, no database query)
           const existingLabel = labelsMap.get(orderId);
           if (existingLabel && existingLabel.label_url) {
             console.log(`✅ BULK: Found cached label for ${orderId}`);
@@ -4613,13 +5080,120 @@ router.post('/bulk-download-labels', async (req, res) => {
               success: true,
               order_id: orderId,
               shipping_url: existingLabel.label_url,
-              awb: existingLabel.awb || 'N/A'
+              awb: existingLabel.awb || 'N/A',
+              shipping_partner: isShiprocket ? 'shiprocket' : 'shipway',
+              already_cached: true
             };
           } else {
             console.log(`⚠️ BULK: label_downloaded=1 but no cached label found for ${orderId}, generating new one...`);
           }
         }
 
+        // ============================================================
+        // SHIPROCKET FLOW: Clone + AWB Assign (label gen happens later in bulk)
+        // ============================================================
+        if (isShiprocket) {
+          console.log(`🚀 [${batchId}] Shiprocket order detected: ${orderId}`);
+
+          let shipmentId = firstClaimedProduct.shipment_id;
+          let actualOrderId = orderId;
+
+          // Check if clone is needed
+          if (orderProducts.length !== claimedProducts.length && claimedProducts.length > 0) {
+            console.log(`🔄 [${batchId}] Clone required for Shiprocket order ${orderId}`);
+
+            let cloneResponse;
+            try {
+              cloneResponse = await handleShiprocketOrderCloning(orderId, claimedProducts, orderProducts, vendor);
+            } catch (firstError) {
+              if (firstError.message && firstError.message.includes('already exists')) {
+                console.log(`⚠️ [${batchId}] Clone conflict, retrying with _99 suffix...`);
+                try {
+                  cloneResponse = await handleShiprocketOrderCloning(orderId, claimedProducts, orderProducts, vendor, '99');
+                } catch (retryError) {
+                  throw retryError;
+                }
+              } else {
+                throw firstError;
+              }
+            }
+
+            // Get shipment_id from clone response or database
+            shipmentId = cloneResponse.data?.clone_shipment_id || null;
+            console.log(`  - [${batchId}] Clone response shipment_id: ${shipmentId || 'null'}`);
+            
+            if (!shipmentId) {
+              const cloneOid = cloneResponse.data?.clone_order_id;
+              console.log(`  - [${batchId}] shipment_id not in response, fetching from DB for clone order: ${cloneOid}`);
+              if (cloneOid) {
+                const cloneProds = await database.getOrdersByOrderId(cloneOid);
+                if (cloneProds.length > 0 && cloneProds[0].shipment_id) {
+                  shipmentId = cloneProds[0].shipment_id;
+                  console.log(`  - [${batchId}] Found shipment_id in DB: ${shipmentId}`);
+                } else {
+                  console.log(`  - [${batchId}] ⚠️ shipment_id not found in DB for clone order: ${cloneOid}`);
+                }
+              }
+            }
+            actualOrderId = cloneResponse.data?.clone_order_id || orderId;
+          }
+
+          if (!shipmentId) {
+            throw new Error(`shipment_id missing for Shiprocket order ${orderId}`);
+          }
+
+          // AWB Assign with carrier fallback
+          const priorityCarrierStr = firstClaimedProduct?.priority_carrier || '';
+          let carrierIds = [];
+          try {
+            carrierIds = JSON.parse(priorityCarrierStr);
+            if (!Array.isArray(carrierIds)) carrierIds = [carrierIds];
+          } catch (e) {
+            if (priorityCarrierStr) carrierIds = [priorityCarrierStr];
+          }
+
+          if (carrierIds.length === 0) {
+            throw new Error(`No priority carriers assigned for order ${orderId}`);
+          }
+
+          const ShiprocketService = require('../services/shiprocketService');
+          const shiprocketService = new ShiprocketService(accountCode);
+
+          let awbResult = null;
+          for (let i = 0; i < carrierIds.length; i++) {
+            console.log(`  - [${batchId}] Trying carrier ${i + 1}/${carrierIds.length}: ${carrierIds[i]}`);
+            const result = await shiprocketService.assignAWB(shipmentId, carrierIds[i]);
+            if (result.success) {
+              awbResult = result;
+              console.log(`  ✅ [${batchId}] AWB assigned: ${result.awb_code} (carrier: ${result.courier_name})`);
+              break;
+            } else {
+              console.log(`  ❌ [${batchId}] Carrier ${carrierIds[i]} failed: ${result.message}`);
+            }
+          }
+
+          if (!awbResult) {
+            throw new Error(`AWB assignment failed with all ${carrierIds.length} carriers for order ${orderId}`);
+          }
+
+          // Return Shiprocket result (label will be generated in bulk later)
+          return {
+            success: true,
+            order_id: actualOrderId,
+            shipment_id: String(shipmentId),
+            awb: awbResult.awb_code,
+            courier_company_id: awbResult.courier_company_id,
+            courier_name: awbResult.courier_name,
+            account_code: accountCode,
+            unique_ids: claimedProducts.map(p => p.unique_id),
+            shipping_partner: 'shiprocket',
+            needs_label_generation: true
+          };
+        }
+
+        // ============================================================
+        // SHIPWAY FLOW: Existing logic (unchanged)
+        // ============================================================
         let labelResponse;
         if (orderProducts.length === claimedProducts.length) {
           // Direct download - all products claimed by vendor
@@ -4627,8 +5201,6 @@ router.post('/bulk-download-labels', async (req, res) => {
 
           // Store label and carrier info for direct download
           if (labelResponse.success && labelResponse.data.shipping_url) {
-            // Get account_code from the first claimed product
-            const accountCode = claimedProducts[0]?.account_code;
             if (!accountCode) {
               throw new Error(`account_code not found for order ${orderId}. Cannot store label without store information.`);
             }
@@ -4645,35 +5217,29 @@ router.post('/bulk-download-labels', async (req, res) => {
             // ✅ Mark label as downloaded in claims table for all claimed products
             for (const product of claimedProducts) {
               await database.updateOrder(product.unique_id, {
-                label_downloaded: 1  // Mark as downloaded after successful label generation
+                label_downloaded: 1
               });
             }
           }
         } else if (claimedProducts.length > 0) {
           // Clone required - some products claimed by vendor
           try {
-            // Try normal clone creation first (uses _1, _2, _3, etc. logic)
             labelResponse = await handleOrderCloning(orderId, claimedProducts, orderProducts, vendor);
           } catch (cloneError) {
-            // Check if error is due to clone conflict with external orders
-            // Only retry with _99 if the error specifically mentions "not found in Shipway" after creation
             if (cloneError.message && cloneError.message.includes('not found in Shipway')) {
-              console.log(`⚠️ [${batchId}] CLONE CONFLICT DETECTED for ${orderId}: Clone order already exists in Shipway (created externally)`);
-              console.log(`🔄 [${batchId}] RETRYING: Using suffix _99 to avoid conflict with external clones...`);
-
+              console.log(`⚠️ [${batchId}] CLONE CONFLICT DETECTED for ${orderId}`);
+              console.log(`🔄 [${batchId}] RETRYING: Using suffix _99...`);
               try {
-                // Retry with _99 suffix to avoid conflicts with external clones
                 labelResponse = await handleOrderCloning(orderId, claimedProducts, orderProducts, vendor, '99');
-                console.log(`✅ [${batchId}] RETRY SUCCESSFUL: Clone created with _99 suffix for ${orderId}`);
+                console.log(`✅ [${batchId}] RETRY SUCCESSFUL with _99 suffix`);
               } catch (retryError) {
-                console.error(`❌ [${batchId}] RETRY FAILED: Could not create clone even with _99 suffix for ${orderId}`);
-                throw retryError; // Re-throw to be caught by outer catch
+                console.error(`❌ [${batchId}] RETRY FAILED for ${orderId}`);
+                throw retryError;
               }
             } else {
-              throw cloneError; // Re-throw if not a clone conflict
+              throw cloneError;
             }
           }
-          // Note: handleOrderCloning already stores labels via markLabelAsDownloaded
         } else {
           return {
             success: false,
@@ -4683,18 +5249,15 @@ router.post('/bulk-download-labels', async (req, res) => {
         }
 
         if (labelResponse.success) {
-          // CRITICAL: For clone orders, use clone_order_id instead of original orderId
-          // The label is stored in database with clone_order_id, so we must return that
           const actualOrderId = labelResponse.data.clone_order_id || orderId;
-
           return {
             success: true,
-            order_id: actualOrderId, // Use clone_order_id if available, otherwise original orderId
+            order_id: actualOrderId,
             shipping_url: labelResponse.data.shipping_url,
             awb: labelResponse.data.awb,
-            // Include both IDs for reference
             original_order_id: orderId !== actualOrderId ? orderId : undefined,
-            clone_order_id: labelResponse.data.clone_order_id
+            clone_order_id: labelResponse.data.clone_order_id,
+            shipping_partner: 'shipway'
           };
         } else {
           return {
@@ -4707,14 +5270,12 @@ router.post('/bulk-download-labels', async (req, res) => {
       } catch (error) {
         console.error(`❌ Error processing order ${orderId}:`, error);
 
-        // Create notification for this failed order
         try {
           await createLabelGenerationNotification(error.message, orderId, vendor);
         } catch (notificationError) {
           console.error(`⚠️ Failed to create notification for ${orderId}:`, notificationError.message);
         }
 
-        // Return error result
         return {
           success: false,
           order_id: orderId,
@@ -4725,25 +5286,41 @@ router.post('/bulk-download-labels', async (req, res) => {
     };
 
     // Process orders in controlled parallel batches
+    // NOTE: Shiprocket orders are processed sequentially (AWB assign needs carrier fallback)
+    // while Shipway orders can be parallelized
+    const shiprocketPending = []; // Shiprocket orders needing bulk label generation
+    const processedOrderIds = new Set(); // Track processed order_ids to prevent duplicates
+
     for (let i = 0; i < order_ids.length; i += CONCURRENCY_LIMIT) {
       const batch = order_ids.slice(i, i + CONCURRENCY_LIMIT);
       console.log(`⚡ Processing batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1}: ${batch.length} orders (${i + 1}-${i + batch.length} of ${order_ids.length})`);
 
-      // Process batch in parallel using Promise.allSettled
       const batchResults = await Promise.allSettled(
         batch.map(orderId => processSingleOrder(orderId))
       );
 
-      // Collect results and errors from batch
       batchResults.forEach((result, index) => {
         if (result.status === 'fulfilled') {
           const orderResult = result.value;
           if (orderResult.success) {
+            // Skip if this order_id was already processed (prevent duplicates)
+            if (processedOrderIds.has(orderResult.order_id)) {
+              console.log(`⚠️ [${batchId}] Skipping duplicate order_id: ${orderResult.order_id}`);
+              return;
+            }
+            processedOrderIds.add(orderResult.order_id);
+            
+            if (orderResult.needs_label_generation) {
+              // Shiprocket: AWB assigned, needs bulk label generation
+              shiprocketPending.push(orderResult);
+            } else {
+              // Shipway or cached: already has label URL
             results.push({
               order_id: orderResult.order_id,
               shipping_url: orderResult.shipping_url,
               awb: orderResult.awb
             });
+            }
           } else {
             errors.push({
               order_id: orderResult.order_id,
@@ -4752,7 +5329,6 @@ router.post('/bulk-download-labels', async (req, res) => {
             });
           }
         } else {
-          // Promise rejected (shouldn't happen with proper error handling, but just in case)
           const orderId = batch[index];
           errors.push({
             order_id: orderId,
@@ -4762,7 +5338,118 @@ router.post('/bulk-download-labels', async (req, res) => {
         }
       });
 
-      console.log(`✅ Batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} complete: ${results.length} successful, ${errors.length} failed so far`);
+      console.log(`✅ Batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} complete: ${results.length} shipway done, ${shiprocketPending.length} shiprocket pending, ${errors.length} failed`);
+    }
+
+    // ============================================================
+    // SHIPROCKET POST-PROCESSING: Bulk label generation
+    // ============================================================
+    if (shiprocketPending.length > 0) {
+      console.log(`\n🏷️ [${batchId}] SHIPROCKET BULK LABEL GENERATION: ${shiprocketPending.length} orders`);
+
+      // Group by account_code (different stores may need separate API calls)
+      const groupedByAccount = {};
+      shiprocketPending.forEach(item => {
+        if (!groupedByAccount[item.account_code]) {
+          groupedByAccount[item.account_code] = [];
+        }
+        groupedByAccount[item.account_code].push(item);
+      });
+
+      for (const [accountCode, shipments] of Object.entries(groupedByAccount)) {
+        try {
+          const ShiprocketService = require('../services/shiprocketService');
+          const shiprocketService = new ShiprocketService(accountCode);
+
+          // Deduplicate shipments by order_id to prevent duplicate labels
+          const uniqueShipmentsMap = new Map();
+          shipments.forEach(shipment => {
+            if (!uniqueShipmentsMap.has(shipment.order_id)) {
+              uniqueShipmentsMap.set(shipment.order_id, shipment);
+            }
+          });
+          const uniqueShipments = Array.from(uniqueShipmentsMap.values());
+          
+          console.log(`  - Account ${accountCode}: ${shipments.length} shipments, ${uniqueShipments.length} unique orders`);
+
+          const shipmentIds = uniqueShipments.map(s => s.shipment_id);
+          console.log(`  - Account ${accountCode}: generating labels for ${shipmentIds.length} shipments`);
+
+          const labelResponse = await shiprocketService.generateLabel(shipmentIds, format);
+
+          if (labelResponse.success) {
+            const labelUrl = labelResponse.label_url;
+            const notCreated = labelResponse.not_created || [];
+
+            // Update DB and collect results for successful shipments (using unique shipments only)
+            for (const shipment of uniqueShipments) {
+              const shipmentIdInt = parseInt(shipment.shipment_id);
+              if (notCreated.includes(shipmentIdInt)) {
+                errors.push({
+                  order_id: shipment.order_id,
+                  error: 'Shiprocket label generation failed for this shipment',
+                  userMessage: `Order ${shipment.order_id} label not created, please contact admin`
+                });
+                continue;
+              }
+
+              try {
+                // Store label in labels table
+                await database.upsertLabel({
+                  order_id: shipment.order_id,
+                  account_code: shipment.account_code,
+                  label_url: labelUrl,
+                  awb: shipment.awb,
+                  carrier_id: shipment.courier_company_id,
+                  carrier_name: shipment.courier_name
+                });
+
+                // Mark label_downloaded = 1
+                if (shipment.unique_ids && Array.isArray(shipment.unique_ids)) {
+                  for (const uniqueId of shipment.unique_ids) {
+                    await database.updateOrder(uniqueId, { label_downloaded: 1 });
+                  }
+                }
+
+                results.push({
+                  order_id: shipment.order_id,
+                  shipping_url: labelUrl,
+                  awb: shipment.awb
+                });
+
+                console.log(`  ✅ Label stored for ${shipment.order_id}`);
+              } catch (dbError) {
+                console.error(`  ⚠️ DB update failed for ${shipment.order_id}:`, dbError.message);
+                errors.push({
+                  order_id: shipment.order_id,
+                  error: `DB update failed: ${dbError.message}`,
+                  userMessage: `Order ${shipment.order_id} not assigned, please contact admin`
+                });
+              }
+            }
+          } else {
+            // All shipments in this account failed label generation
+            for (const shipment of shipments) {
+              errors.push({
+                order_id: shipment.order_id,
+                error: `Shiprocket label generation failed: ${labelResponse.message}`,
+                userMessage: `Order ${shipment.order_id} not assigned, please contact admin`
+              });
+            }
+          }
+        } catch (labelError) {
+          console.error(`❌ Shiprocket label generation failed for account ${accountCode}:`, labelError.message);
+          for (const shipment of shipments) {
+            errors.push({
+              order_id: shipment.order_id,
+              error: `Shiprocket label generation failed: ${labelError.message}`,
+              userMessage: `Order ${shipment.order_id} not assigned, please contact admin`
+            });
+          }
+        }
+      }
+
+      console.log(`✅ [${batchId}] Shiprocket post-processing complete: ${results.length} total successful, ${errors.length} total failed`);
     }
 
     const requestEndTime = Date.now();
@@ -4808,16 +5495,17 @@ router.post('/bulk-download-labels', async (req, res) => {
     // Return JSON response with order_ids (labels already stored in DB)
     // Verify that all successful labels are actually saved in the database
     // This ensures the merge endpoint will find them (handles potential database commit delays)
-    const successfulOrderIds = results.map(r => r.order_id);
-    if (successfulOrderIds.length > 0) {
+    // Deduplicate order_ids first to avoid processing duplicates
+    let uniqueSuccessfulOrderIds = [...new Set(results.map(r => r.order_id))];
+    if (uniqueSuccessfulOrderIds.length > 0) {
       let verifiedLabels = [];
       const verificationRetries = 3;
       const verificationDelay = 300; // 300ms delay
 
       for (let attempt = 1; attempt <= verificationRetries; attempt++) {
-        verifiedLabels = await database.getLabelsByOrderIds(successfulOrderIds);
+        verifiedLabels = await database.getLabelsByOrderIds(uniqueSuccessfulOrderIds);
 
-        if (verifiedLabels.length === successfulOrderIds.length) {
+        if (verifiedLabels.length === uniqueSuccessfulOrderIds.length) {
           break;
         }
 
@@ -4826,22 +5514,52 @@ router.post('/bulk-download-labels', async (req, res) => {
         }
       }
 
-      if (verifiedLabels.length < successfulOrderIds.length) {
-        const missingOrderIds = successfulOrderIds.filter(id => !verifiedLabels.some(label => label.order_id === id));
-        console.warn(`⚠️ [${batchId}] Only ${verifiedLabels.length}/${successfulOrderIds.length} labels verified. Missing:`, missingOrderIds);
+      if (verifiedLabels.length < uniqueSuccessfulOrderIds.length) {
+        const missingOrderIds = uniqueSuccessfulOrderIds.filter(id => !verifiedLabels.some(label => label.order_id === id));
+        console.warn(`⚠️ [${batchId}] Only ${verifiedLabels.length}/${uniqueSuccessfulOrderIds.length} labels verified. Missing:`, missingOrderIds);
         // Filter out unverified order_ids from successful list
         const verifiedOrderIds = verifiedLabels.map(label => label.order_id);
-        results = results.filter(r => verifiedOrderIds.includes(r.order_id));
+        // Deduplicate results and filter by verified order_ids
+        const resultsMap = new Map();
+        results.forEach(r => {
+          if (!resultsMap.has(r.order_id) && verifiedOrderIds.includes(r.order_id)) {
+            resultsMap.set(r.order_id, r);
+          }
+        });
+        results = Array.from(resultsMap.values());
+      } else {
+        // Deduplicate results even if all are verified
+        const resultsMap = new Map();
+        results.forEach(r => {
+          if (!resultsMap.has(r.order_id)) {
+            resultsMap.set(r.order_id, r);
+          }
+        });
+        results = Array.from(resultsMap.values());
       }
+    } else {
+      // Deduplicate results even if no verification needed
+      const resultsMap = new Map();
+      results.forEach(r => {
+        if (!resultsMap.has(r.order_id)) {
+          resultsMap.set(r.order_id, r);
+        }
+      });
+      results = Array.from(resultsMap.values());
+      // Recalculate unique order_ids after deduplicating results
+      uniqueSuccessfulOrderIds = [...new Set(results.map(r => r.order_id))];
     }
+    // Deduplicate failed order_ids
+    const uniqueFailedOrderIds = [...new Set(errors.map(e => e.order_id))];
+    
     return res.json({
       success: true,
       message: 'Labels generated successfully. Ready for merge.',
       data: {
-        successful: results.map(r => r.order_id),
-        failed: errors.map(e => e.order_id),
-        total_successful: results.length,
-        total_failed: errors.length,
+        successful: uniqueSuccessfulOrderIds,
+        failed: uniqueFailedOrderIds,
+        total_successful: uniqueSuccessfulOrderIds.length,
+        total_failed: uniqueFailedOrderIds.length,
         errors: errors.length > 0 ? errors : undefined
       }
     });
@@ -4899,44 +5617,63 @@ router.post('/bulk-download-labels-merge', async (req, res) => {
     console.log('  - Email:', vendor.email);
     console.log('  - Warehouse ID:', vendor.warehouseId);
 
-    // Fetch label URLs from database using order_ids
+    // Deduplicate order_ids before querying database (prevent duplicate labels)
+    const uniqueOrderIds = [...new Set(order_ids)];
+    if (uniqueOrderIds.length !== order_ids.length) {
+      console.log(`⚠️ Deduplicated order_ids: ${order_ids.length} → ${uniqueOrderIds.length} unique`);
+    }
+
+    // Fetch label URLs from database using unique order_ids
     // Add retry mechanism to handle potential database commit delays
     let labels = [];
     const maxRetries = 3;
     const retryDelay = 500; // 500ms delay between retries
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      labels = await database.getLabelsByOrderIds(order_ids);
+      labels = await database.getLabelsByOrderIds(uniqueOrderIds);
 
       // If we got all the labels we need, break out of retry loop
-      if (labels.length === order_ids.length) {
+      if (labels.length === uniqueOrderIds.length) {
         break;
       }
 
       // If this is not the last attempt, wait before retrying
-      if (attempt < maxRetries && labels.length < order_ids.length) {
+      if (attempt < maxRetries && labels.length < uniqueOrderIds.length) {
         await new Promise(resolve => setTimeout(resolve, retryDelay));
       }
     }
 
-    console.log(`📦 Fetched ${labels.length}/${order_ids.length} labels from database`);
+    console.log(`📦 Fetched ${labels.length}/${uniqueOrderIds.length} labels from database`);
 
     if (labels.length === 0) {
-      console.error(`❌ No labels found after ${maxRetries} attempts for order_ids:`, order_ids);
+      console.error(`❌ No labels found after ${maxRetries} attempts for order_ids:`, uniqueOrderIds);
       return res.status(400).json({
         success: false,
         message: 'No labels found for the specified order_ids. Please generate labels first and wait a moment before merging.'
       });
     }
 
-    if (labels.length < order_ids.length) {
-      const missingOrderIds = order_ids.filter(id => !labels.some(label => label.order_id === id));
-      console.warn(`⚠️ Only found ${labels.length}/${order_ids.length} labels. Missing order_ids:`, missingOrderIds);
+    // Deduplicate labels by order_id (in case database returns duplicates)
+    const uniqueLabelsMap = new Map();
+    labels.forEach(label => {
+      if (!uniqueLabelsMap.has(label.order_id)) {
+        uniqueLabelsMap.set(label.order_id, label);
+      }
+    });
+    const uniqueLabels = Array.from(uniqueLabelsMap.values());
+    
+    if (uniqueLabels.length !== labels.length) {
+      console.log(`⚠️ Deduplicated labels: ${labels.length} → ${uniqueLabels.length} unique`);
+    }
+
+    if (uniqueLabels.length < uniqueOrderIds.length) {
+      const missingOrderIds = uniqueOrderIds.filter(id => !uniqueLabels.some(label => label.order_id === id));
+      console.warn(`⚠️ Only found ${uniqueLabels.length}/${uniqueOrderIds.length} labels. Missing order_ids:`, missingOrderIds);
       // Continue with available labels, but log the missing ones
     }
 
-    // Convert to format expected by generateCombinedLabelsPDF
-    const labelData = labels.map(label => ({
+    // Convert to format expected by generateCombinedLabelsPDF (using deduplicated labels)
+    const labelData = uniqueLabels.map(label => ({
       order_id: label.order_id,
       shipping_url: label.label_url,
       awb: label.awb || 'N/A'
@@ -5084,6 +5821,22 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
   try {
     console.log(`🔄 Generating combined PDF for ${labels.length} labels in ${format} format`);
 
+    // Group labels by shipping_url to avoid downloading the same PDF multiple times
+    // This is important for Shiprocket bulk labels where multiple orders share the same URL
+    const labelsByUrl = new Map();
+    labels.forEach(label => {
+      if (!labelsByUrl.has(label.shipping_url)) {
+        labelsByUrl.set(label.shipping_url, []);
+      }
+      labelsByUrl.get(label.shipping_url).push(label);
+    });
+
+    const uniqueUrls = Array.from(labelsByUrl.keys());
+    console.log(`📦 Grouped ${labels.length} labels into ${uniqueUrls.length} unique URLs`);
+    labelsByUrl.forEach((labelGroup, url) => {
+      console.log(`  - URL: ${url.substring(0, 80)}... (${labelGroup.length} order(s))`);
+    });
+
     // Import PDF-lib for PDF manipulation
     const { PDFDocument } = require('pdf-lib');
 
@@ -5091,54 +5844,58 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
     const mergedPdf = await PDFDocument.create();
 
     if (format === 'thermal') {
-      // ⚡ PARALLEL OPTIMIZATION: Download all PDFs concurrently
-      console.log(`⚡ Downloading ${labels.length} PDFs in parallel...`);
+      // ⚡ PARALLEL OPTIMIZATION: Download each unique URL only once
+      console.log(`⚡ Downloading ${uniqueUrls.length} unique PDFs in parallel...`);
 
-      // Download all PDFs in parallel
-      const downloadPromises = labels.map(async (label) => {
+      // Download each unique URL only once
+      const downloadPromises = uniqueUrls.map(async (url) => {
         try {
-          console.log(`  - Downloading label for order ${label.order_id}`);
+          const orderIds = labelsByUrl.get(url).map(l => l.order_id).join(', ');
+          console.log(`  - Downloading PDF for orders: ${orderIds}`);
 
-          const response = await fetch(label.shipping_url);
+          const response = await fetch(url);
           if (!response.ok) {
-            console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
-            return { label, pdfBuffer: null, error: `HTTP ${response.status}` };
+            console.log(`    ⚠️ Failed to fetch PDF:`, response.status);
+            return { url, pdfBuffer: null, error: `HTTP ${response.status}`, orderIds };
           }
 
           const pdfBuffer = await response.arrayBuffer();
-          console.log(`    ✅ Downloaded label for order ${label.order_id} (${pdfBuffer.byteLength} bytes)`);
+          console.log(`    ✅ Downloaded PDF (${pdfBuffer.byteLength} bytes) for orders: ${orderIds}`);
 
-          return { label, pdfBuffer, error: null };
+          return { url, pdfBuffer, error: null, orderIds };
         } catch (error) {
-          console.log(`    ❌ Error downloading label for order ${label.order_id}:`, error.message);
-          return { label, pdfBuffer: null, error: error.message };
+          const orderIds = labelsByUrl.get(url).map(l => l.order_id).join(', ');
+          console.log(`    ❌ Error downloading PDF for orders ${orderIds}:`, error.message);
+          return { url, pdfBuffer: null, error: error.message, orderIds };
         }
       });
 
       // Wait for all downloads to complete
       const downloadResults = await Promise.allSettled(downloadPromises);
-      console.log(`✅ All PDFs downloaded, now merging...`);
+      console.log(`✅ All unique PDFs downloaded, now merging...`);
 
-      // Merge PDFs in order (sequentially to maintain order)
+      // Merge each unique PDF only once
       for (const result of downloadResults) {
         if (result.status === 'fulfilled' && result.value.pdfBuffer) {
           try {
-            const { label, pdfBuffer } = result.value;
-            console.log(`  - Merging label for order ${label.order_id}`);
+            const { url, pdfBuffer, orderIds } = result.value;
+            console.log(`  - Merging PDF for orders: ${orderIds}`);
 
             // Load the PDF
             const pdf = await PDFDocument.load(pdfBuffer);
 
-            // Copy all pages from this PDF to the merged PDF
+            // Copy all pages from this PDF to the merged PDF (only once)
             const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
             pages.forEach(page => mergedPdf.addPage(page));
 
-            console.log(`    ✅ Added label for order ${label.order_id}`);
+            console.log(`    ✅ Added PDF (${pages.length} page(s)) for orders: ${orderIds}`);
           } catch (labelError) {
-            console.log(`    ❌ Error processing label for order ${result.value.label.order_id}:`, labelError.message);
+            const orderIds = result.value?.orderIds || 'unknown';
+            console.log(`    ❌ Error processing PDF for orders ${orderIds}:`, labelError.message);
           }
         } else if (result.status === 'fulfilled') {
-          console.log(`    ⚠️ Skipping label for order ${result.value.label.order_id}: ${result.value.error}`);
+          const orderIds = result.value?.orderIds || 'unknown';
+          console.log(`    ⚠️ Skipping PDF for orders ${orderIds}: ${result.value?.error}`);
         } else {
           console.log(`    ❌ Promise rejected:`, result.reason?.message);
         }
@@ -5147,71 +5904,100 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
       // For A4 and four-in-one formats, process labels in batches
       console.log(`📄 Processing labels in ${format} format batches`);
 
-      // ⚡ PARALLEL OPTIMIZATION: Download all PDFs first
-      console.log(`⚡ Downloading ${labels.length} PDFs in parallel for ${format} format...`);
+      // ⚡ PARALLEL OPTIMIZATION: Download each unique URL only once
+      console.log(`⚡ Downloading ${uniqueUrls.length} unique PDFs in parallel for ${format} format...`);
 
-      const downloadPromises = labels.map(async (label) => {
+      const downloadPromises = uniqueUrls.map(async (url) => {
         try {
-          const response = await fetch(label.shipping_url);
+          const orderIds = labelsByUrl.get(url).map(l => l.order_id).join(', ');
+          console.log(`  - Downloading PDF for orders: ${orderIds}`);
+
+          const response = await fetch(url);
           if (!response.ok) {
-            console.log(`    ⚠️ Failed to fetch label for order ${label.order_id}:`, response.status);
-            return { label, pdfBuffer: null, error: `HTTP ${response.status}` };
+            console.log(`    ⚠️ Failed to fetch PDF:`, response.status);
+            return { url, pdfBuffer: null, error: `HTTP ${response.status}`, orderIds };
           }
 
           const pdfBuffer = await response.arrayBuffer();
-          console.log(`    ✅ Downloaded label for order ${label.order_id} (${pdfBuffer.byteLength} bytes)`);
+          console.log(`    ✅ Downloaded PDF (${pdfBuffer.byteLength} bytes) for orders: ${orderIds}`);
 
-          return { label, pdfBuffer, error: null };
+          return { url, pdfBuffer, error: null, orderIds, labels: labelsByUrl.get(url) };
         } catch (error) {
-          console.log(`    ❌ Error downloading label for order ${label.order_id}:`, error.message);
-          return { label, pdfBuffer: null, error: error.message };
+          const orderIds = labelsByUrl.get(url).map(l => l.order_id).join(', ');
+          console.log(`    ❌ Error downloading PDF for orders ${orderIds}:`, error.message);
+          return { url, pdfBuffer: null, error: error.message, orderIds, labels: labelsByUrl.get(url) };
         }
       });
 
       const downloadResults = await Promise.allSettled(downloadPromises);
-      console.log(`✅ All PDFs downloaded for ${format} format, now processing...`);
+      console.log(`✅ All unique PDFs downloaded for ${format} format, now processing...`);
 
-      // Extract successful downloads
+      // Extract successful downloads (each contains labels for that URL)
       const successfulDownloads = downloadResults
         .filter(result => result.status === 'fulfilled' && result.value.pdfBuffer)
         .map(result => result.value);
 
       if (format === 'a4') {
         // A4 format: One label per A4 page
-        for (const { label, pdfBuffer } of successfulDownloads) {
+        // Process each unique PDF and add all its pages
+        for (const { url, pdfBuffer, labels: labelGroup, orderIds } of successfulDownloads) {
           try {
-            console.log(`  - Processing A4 label for order ${label.order_id}`);
-
-            const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
+            console.log(`  - Processing A4 PDF for orders: ${orderIds}`);
 
             const originalPdf = await PDFDocument.load(pdfBuffer);
-            const [originalPage] = await mergedPdf.embedPages([originalPdf.getPage(0)]);
+            const pageCount = originalPdf.getPageCount();
+            
+            // Add each page from the PDF (Shiprocket bulk PDFs may have multiple pages)
+            for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+              const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
+              const [originalPage] = await mergedPdf.embedPages([originalPdf.getPage(pageIndex)]);
 
-            // Center the label on the A4 page
-            const labelWidth = 288; // 4x6 label width in points
-            const labelHeight = 432; // 4x6 label height in points
-            const x = (595 - labelWidth) / 2; // Center horizontally
-            const y = (842 - labelHeight) / 2; // Center vertically
+              // Center the label on the A4 page
+              const labelWidth = 288; // 4x6 label width in points
+              const labelHeight = 432; // 4x6 label height in points
+              const x = (595 - labelWidth) / 2; // Center horizontally
+              const y = (842 - labelHeight) / 2; // Center vertically
 
-            a4Page.drawPage(originalPage, {
-              x: x,
-              y: y,
-              width: labelWidth,
-              height: labelHeight
-            });
+              a4Page.drawPage(originalPage, {
+                x: x,
+                y: y,
+                width: labelWidth,
+                height: labelHeight
+              });
+            }
 
-            console.log(`    ✅ Added A4 label for order ${label.order_id}`);
+            console.log(`    ✅ Added A4 PDF (${pageCount} page(s)) for orders: ${orderIds}`);
 
           } catch (labelError) {
-            console.log(`    ❌ Error processing A4 label for order ${label.order_id}:`, labelError.message);
+            console.log(`    ❌ Error processing A4 PDF for orders ${orderIds}:`, labelError.message);
           }
         }
       } else if (format === 'four-in-one') {
         // Four-in-one format: 4 labels per A4 page
+        // Extract all pages from all unique PDFs first
+        const allPages = [];
+        for (const { url, pdfBuffer, labels: labelGroup, orderIds } of successfulDownloads) {
+          try {
+            const originalPdf = await PDFDocument.load(pdfBuffer);
+            const pageCount = originalPdf.getPageCount();
+            
+            // Extract all pages from this PDF
+            for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+              const [originalPage] = await mergedPdf.embedPages([originalPdf.getPage(pageIndex)]);
+              allPages.push(originalPage);
+            }
+            
+            console.log(`  - Extracted ${pageCount} page(s) from PDF for orders: ${orderIds}`);
+          } catch (error) {
+            console.log(`    ❌ Error extracting pages from PDF for orders ${orderIds}:`, error.message);
+          }
+        }
+
+        // Now arrange pages in four-in-one layout
         const batchSize = 4;
-        for (let i = 0; i < successfulDownloads.length; i += batchSize) {
-          const batch = successfulDownloads.slice(i, i + batchSize);
-          console.log(`  - Processing four-in-one batch ${Math.floor(i / batchSize) + 1} (${batch.length} labels)`);
+        for (let i = 0; i < allPages.length; i += batchSize) {
+          const batch = allPages.slice(i, i + batchSize);
+          console.log(`  - Processing four-in-one batch ${Math.floor(i / batchSize) + 1} (${batch.length} pages)`);
 
           const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
 
@@ -5241,15 +6027,12 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
             [595 - scaledLabelWidth - horizontalMargin, bottomRowY] // bottom-right
           ];
 
-          // Process each label in the batch
+          // Process each page in the batch
           for (let j = 0; j < batch.length; j++) {
-            const { label, pdfBuffer } = batch[j];
+            const originalPage = batch[j];
             const [x, y] = positions[j];
 
             try {
-              const originalPdf = await PDFDocument.load(pdfBuffer);
-              const [originalPage] = await mergedPdf.embedPages([originalPdf.getPage(0)]);
-
               a4Page.drawPage(originalPage, {
                 x: x,
                 y: y,
@@ -5257,10 +6040,10 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
                 height: scaledLabelHeight
               });
 
-              console.log(`    ✅ Added label for order ${label.order_id} at position ${j + 1}`);
+              console.log(`    ✅ Added page at position ${j + 1}`);
 
             } catch (labelError) {
-              console.log(`    ❌ Error processing label for order ${label.order_id}:`, labelError.message);
+              console.log(`    ❌ Error processing page at position ${j + 1}:`, labelError.message);
             }
           }
         }
@@ -5474,8 +6257,11 @@ router.post('/bulk-mark-ready', async (req, res) => {
     console.log('  - Email:', vendor.email);
     console.log('  - Warehouse ID:', vendor.warehouseId);
 
-    // Get orders from MySQL to verify all orders belong to this vendor
-    const orders = await database.getAllOrders();
+    // OPTIMIZATION: Fetch only selected orders instead of all orders
+    // This reduces query time from 5-10 seconds to 0.1-0.5 seconds
+    console.log(`📦 Fetching only selected orders (${order_ids.length} orders)...`);
+    const orders = await database.getOrdersByOrderIds(order_ids);
+    console.log(`✅ Fetched ${orders.length} products from ${order_ids.length} orders`);
     const successfulOrders = [];
     const failedOrders = [];
     const validOrderIds = [];
@@ -5567,8 +6353,33 @@ router.post('/bulk-mark-ready', async (req, res) => {
         console.log(`  - ${groupKey}: ${group.orderIds.length} orders (${group.orderIds.join(', ')})`);
       }
 
-      // Step 2: Process each group separately (each group has same payment_type and account_code)
+      // Step 2: Check shipping partner and route accordingly
+      // Separate Shiprocket and Shipway orders
+      // OPTIMIZATION: Fetch all stores in parallel instead of sequentially
+      const uniqueAccountCodes = [...new Set(Object.values(orderGroups).map(g => g.accountCode))];
+      console.log(`📦 Fetching store info for ${uniqueAccountCodes.length} unique account code(s) in parallel...`);
+      const storePromises = uniqueAccountCodes.map(accountCode => 
+        database.getStoreByAccountCode(accountCode).then(store => ({ accountCode, store }))
+      );
+      const storeResults = await Promise.all(storePromises);
+      const storeMap = new Map(storeResults.map(({ accountCode, store }) => [accountCode, store]));
+      console.log(`✅ Fetched store info for ${storeMap.size} stores`);
+
+      const shiprocketGroups = [];
+      const shipwayGroups = [];
+
       for (const [groupKey, group] of Object.entries(orderGroups)) {
+        const store = storeMap.get(group.accountCode);
+        if (store && store.shipping_partner?.toLowerCase() === 'shiprocket') {
+          shiprocketGroups.push(group);
+        } else {
+          shipwayGroups.push(group);
+        }
+      }
+
+      // Step 3: Process Shipway groups first (they don't need format selection)
+      // This allows mixed orders to be handled - Shipway orders are processed immediately
+      for (const group of shipwayGroups) {
         const { paymentType, accountCode, orderIds } = group;
         const paymentTypeName = paymentType === 'C' ? 'COD' : 'Prepaid';
 
@@ -5635,6 +6446,36 @@ router.post('/bulk-mark-ready', async (req, res) => {
           }
         }
       }
+
+      // Step 4: If Shiprocket orders found, return format requirement
+      // Shipway orders are already processed above, so we only need format for Shiprocket
+      if (shiprocketGroups.length > 0) {
+        const shiprocketOrderIds = shiprocketGroups.flatMap(g => g.orderIds);
+        console.log(`🔵 Orders requiring format selection detected: ${shiprocketOrderIds.join(', ')}`);
+        console.log(`   → Shipway orders already processed. Returning response to trigger format popup.`);
+        
+        // Return response indicating format is needed
+        // Include Shipway results if any were processed
+        return res.status(200).json({
+          success: shipwayGroups.length > 0, // true if Shipway orders were processed
+          requires_format: true,
+          message: shipwayGroups.length > 0 
+            ? `Shipway orders processed. Please select manifest format for remaining orders.`
+            : 'Please select manifest format for manifest generation',
+          order_ids_requiring_format: shiprocketOrderIds,
+          data: {
+            // Include Shipway results if processed
+            shipway_processed: shipwayGroups.length > 0,
+            successful_orders: successfulOrders,
+            failed_orders: failedOrders,
+            total_requested: order_ids.length,
+            total_successful: successfulOrders.length,
+            total_failed: failedOrders.length,
+            manifest_ids: manifestIds,
+            order_ids_requiring_format: shiprocketOrderIds
+          }
+        });
+      }
     }
 
     console.log('🟢 BULK MARK READY COMPLETE');
@@ -5675,6 +6516,698 @@ router.post('/bulk-mark-ready', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to mark orders as ready',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/shiprocket/start-pickup
+ * @desc    Start pickup API calls for Shiprocket orders (async, non-blocking)
+ * @access  Vendor (token required)
+ */
+router.post('/shiprocket/start-pickup', async (req, res) => {
+  const { order_ids } = req.body;
+  const token = req.headers['authorization'];
+
+  console.log('🔵 SHIPROCKET START PICKUP REQUEST');
+  console.log('  - order_ids:', order_ids);
+  console.log('  - token received:', token ? 'YES' : 'NO');
+
+  if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
+    return res.status(400).json({
+      success: false,
+      message: 'order_ids array and Authorization token required'
+    });
+  }
+
+  try {
+    const database = require('../config/database');
+    await database.waitForMySQLInitialization();
+
+    if (!database.isMySQLAvailable()) {
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+
+    const vendor = req.user || await database.getUserByToken(token);
+    if (!vendor || vendor.active_session !== 'TRUE') {
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+
+    // Get orders and validate
+    const orders = await database.getAllOrders();
+    const orderDetails = [];
+    const processedShipmentIds = new Set();
+
+    for (const order_id of order_ids) {
+      const orderProducts = orders.filter(order => order.order_id === order_id);
+      const claimedProducts = orderProducts.filter(order =>
+        order.claimed_by === vendor.warehouseId && order.claims_status === 'claimed'
+      );
+
+      if (claimedProducts.length === 0) continue;
+
+      const productsWithoutLabel = claimedProducts.filter(product => product.label_downloaded !== 1);
+      if (productsWithoutLabel.length > 0) continue;
+
+      const accountCode = claimedProducts[0]?.account_code;
+      const store = await database.getStoreByAccountCode(accountCode);
+      if (!store || store.shipping_partner?.toLowerCase() !== 'shiprocket') continue;
+
+      const shipmentIds = claimedProducts
+        .map(p => p.shipment_id)
+        .filter(id => id && id !== '' && id !== null);
+
+      if (shipmentIds.length === 0) continue;
+
+      for (const shipmentId of shipmentIds) {
+        if (!processedShipmentIds.has(shipmentId)) {
+          processedShipmentIds.add(shipmentId);
+          orderDetails.push({
+            shipmentId,
+            accountCode
+          });
+        }
+      }
+    }
+
+    if (orderDetails.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid Shiprocket orders found'
+      });
+    }
+
+    // Start pickup calls in background (fire and forget)
+    const ShiprocketService = require('../services/shiprocketService');
+    const pickupPromises = [];
+
+    for (const orderDetail of orderDetails) {
+      const shiprocketService = new ShiprocketService(orderDetail.accountCode);
+      
+      const pickupPromise = (async () => {
+        let attempt = 1;
+        while (attempt <= 3) {
+          try {
+            const result = await shiprocketService.generatePickup(orderDetail.shipmentId);
+            if (result.success) {
+              console.log(`✅ Pickup requested for shipment ${orderDetail.shipmentId} (attempt ${attempt})`);
+              return { success: true, shipmentId: orderDetail.shipmentId };
+            } else {
+              console.log(`⚠️ Pickup failed for shipment ${orderDetail.shipmentId} (attempt ${attempt}): ${result.message}`);
+              shiprocketService.logApiActivity({
+                type: 'shiprocket-pickup-failure',
+                shipmentId: orderDetail.shipmentId,
+                attempt,
+                error: result.message
+              });
+              if (attempt < 3) {
+                const delay = attempt === 1 ? 1000 : 2000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+              attempt++;
+            }
+          } catch (error) {
+            console.error(`❌ Pickup error for shipment ${orderDetail.shipmentId} (attempt ${attempt}):`, error.message);
+            shiprocketService.logApiActivity({
+              type: 'shiprocket-pickup-error',
+              shipmentId: orderDetail.shipmentId,
+              attempt,
+              error: error.message
+            });
+            if (attempt < 3) {
+              const delay = attempt === 1 ? 1000 : 2000;
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            attempt++;
+          }
+        }
+        console.log(`❌ Pickup failed after 3 attempts for shipment ${orderDetail.shipmentId}`);
+        return { success: false, shipmentId: orderDetail.shipmentId };
+      })();
+      
+      pickupPromises.push(pickupPromise);
+    }
+
+    // Return immediately, continue pickup in background
+    res.json({
+      success: true,
+      message: 'Pickup requests started',
+      pickup_in_progress: true,
+      shipment_count: orderDetails.length
+    });
+
+    // Continue pickup calls in background
+    Promise.allSettled(pickupPromises).then(results => {
+      const successCount = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+      const failCount = results.length - successCount;
+      console.log(`📊 Pickup API calls completed: ${successCount} success, ${failCount} failed`);
+    });
+
+  } catch (error) {
+    console.error('❌ SHIPROCKET START PICKUP ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to start pickup requests',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/orders/shiprocket/generate-manifest
+ * @desc    Generate manifest for Shiprocket orders (calls pickup first, then manifest)
+ * @access  Vendor (token required)
+ * 
+ * Flow:
+ * 1. Call pickup API for all shipments (with retries: 3 attempts, incremental delays)
+ * 2. Wait for all pickup calls to complete
+ * 3. Call generate manifest API (bulk)
+ * 4. Generate custom manifest IDs (one for Prepaid, one for COD)
+ * 5. Update database with manifest_id and is_manifest
+ * 6. Return manifest_ids
+ */
+router.post('/shiprocket/generate-manifest', async (req, res) => {
+  const { order_ids, format } = req.body;
+  const token = req.headers['authorization'];
+
+  console.log('🔵 SHIPROCKET MANIFEST REQUEST START');
+  console.log('  - order_ids:', order_ids);
+  console.log('  - format:', format);
+  console.log('  - token received:', token ? 'YES' : 'NO');
+
+  if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token || !format) {
+    console.log('❌ SHIPROCKET MANIFEST FAILED: Missing required fields');
+    return res.status(400).json({
+      success: false,
+      message: 'order_ids array, format, and Authorization token required'
+    });
+  }
+
+  try {
+    const database = require('../config/database');
+    await database.waitForMySQLInitialization();
+
+    if (!database.isMySQLAvailable()) {
+      console.log('❌ MySQL connection not available');
+      return res.status(500).json({ success: false, message: 'Database connection not available' });
+    }
+
+    const vendor = req.user || await database.getUserByToken(token);
+    if (!vendor || vendor.active_session !== 'TRUE') {
+      console.log('❌ VENDOR NOT FOUND OR INACTIVE');
+      return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
+    }
+
+    console.log('✅ VENDOR FOUND:');
+    console.log('  - Email:', vendor.email);
+    console.log('  - Warehouse ID:', vendor.warehouseId);
+
+    // OPTIMIZATION: Fetch only selected orders instead of all orders
+    // This reduces query time from 5-10 seconds to 0.1-0.5 seconds
+    console.log(`📦 Fetching only selected orders (${order_ids.length} orders)...`);
+    const orders = await database.getOrdersByOrderIds(order_ids);
+    console.log(`✅ Fetched ${orders.length} products from ${order_ids.length} orders`);
+
+    // Get orders and validate
+    const validOrderIds = [];
+    const orderDetails = [];
+
+    for (const order_id of order_ids) {
+      const orderProducts = orders.filter(order => order.order_id === order_id);
+      const claimedProducts = orderProducts.filter(order =>
+        order.claimed_by === vendor.warehouseId && order.claims_status === 'claimed'
+      );
+
+      if (claimedProducts.length === 0) {
+        console.log(`❌ No products claimed by this vendor for order: ${order_id}`);
+        continue;
+      }
+
+      const productsWithoutLabel = claimedProducts.filter(product => product.label_downloaded !== 1);
+      if (productsWithoutLabel.length > 0) {
+        console.log(`❌ Label not downloaded for order: ${order_id}`);
+        continue;
+      }
+
+      // Get shipment_id for each order
+      const shipmentIds = claimedProducts
+        .map(p => p.shipment_id)
+        .filter(id => id && id !== '' && id !== null);
+
+      if (shipmentIds.length === 0) {
+        console.log(`❌ No shipment_id found for order: ${order_id}`);
+        continue;
+      }
+
+      // Get account_code for later store validation
+      const accountCode = claimedProducts[0]?.account_code;
+
+      validOrderIds.push(order_id);
+      orderDetails.push({
+        order_id: order_id,
+        account_code: accountCode,
+        shipment_ids: shipmentIds,
+        payment_type: claimedProducts[0]?.payment_type,
+        claimed_products: claimedProducts
+      });
+    }
+
+    if (validOrderIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid Shiprocket orders found for manifest generation'
+      });
+    }
+
+    // OPTIMIZATION: Fetch all stores in parallel to check shipping partner
+    const uniqueAccountCodes = [...new Set(orderDetails.map(od => od.account_code))];
+    console.log(`📦 Fetching store info for ${uniqueAccountCodes.length} unique account code(s) in parallel...`);
+    const storePromises = uniqueAccountCodes.map(accountCode => 
+      database.getStoreByAccountCode(accountCode).then(store => ({ accountCode, store }))
+    );
+    const storeResults = await Promise.all(storePromises);
+    const storeMap = new Map(storeResults.map(({ accountCode, store }) => [accountCode, store]));
+    console.log(`✅ Fetched store info for ${storeMap.size} stores`);
+
+    // Filter out non-Shiprocket orders
+    const shiprocketOrderDetails = orderDetails.filter(orderDetail => {
+      const store = storeMap.get(orderDetail.account_code);
+      if (!store || store.shipping_partner?.toLowerCase() !== 'shiprocket') {
+        console.log(`❌ Order ${orderDetail.order_id} is not a Shiprocket order (${orderDetail.account_code})`);
+        return false;
+      }
+      return true;
+    });
+
+    if (shiprocketOrderDetails.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid Shiprocket orders found for manifest generation'
+      });
+    }
+
+    // Step 1: Call pickup API for all shipments (with retries)
+    console.log('📋 Step 1: Calling pickup API for all shipments...');
+
+    // Collect all shipment_ids
+    const allShipmentIds = [];
+    const shipmentIdToOrderMap = new Map(); // Map shipment_id to order details
+
+    for (const orderDetail of shiprocketOrderDetails) {
+      for (const shipmentId of orderDetail.shipment_ids) {
+        if (!allShipmentIds.includes(shipmentId)) {
+          allShipmentIds.push(shipmentId);
+        }
+        if (!shipmentIdToOrderMap.has(shipmentId)) {
+          shipmentIdToOrderMap.set(shipmentId, []);
+        }
+        shipmentIdToOrderMap.get(shipmentId).push(orderDetail);
+      }
+    }
+
+    // Call pickup API for all shipments in parallel (with retries)
+    console.log(`🔄 Calling pickup API for ${allShipmentIds.length} shipments (parallel processing)...`);
+    const ShiprocketService = require('../services/shiprocketService');
+    const processedShipmentIds = new Set();
+    const pickupPromises = [];
+
+    // Create pickup promise for each unique shipment_id
+    for (const shipmentId of allShipmentIds) {
+      if (processedShipmentIds.has(shipmentId)) {
+        continue; // Skip if already processed
+      }
+      processedShipmentIds.add(shipmentId);
+
+      // Get account_code from first order that uses this shipment_id
+      const orderDetail = shipmentIdToOrderMap.get(shipmentId)[0];
+      const shiprocketService = new ShiprocketService(orderDetail.account_code);
+
+      // Create pickup promise with retry logic
+      const pickupPromise = (async () => {
+        let attempt = 1;
+        while (attempt <= 3) {
+          try {
+            const result = await shiprocketService.generatePickup(shipmentId);
+            if (result.success) {
+              console.log(`✅ Pickup requested for shipment ${shipmentId} (attempt ${attempt})`);
+              return { success: true, shipmentId, attempt };
+            } else {
+              console.log(`⚠️ Pickup failed for shipment ${shipmentId} (attempt ${attempt}): ${result.message}`);
+              shiprocketService.logApiActivity({
+                type: 'shiprocket-pickup-failure',
+                shipmentId,
+                attempt,
+                error: result.message
+              });
+              if (attempt < 3) {
+                const delay = attempt === 1 ? 1000 : 2000; // 1s then 2s
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+              attempt++;
+            }
+          } catch (error) {
+            console.error(`❌ Pickup error for shipment ${shipmentId} (attempt ${attempt}):`, error.message);
+            shiprocketService.logApiActivity({
+              type: 'shiprocket-pickup-error',
+              shipmentId,
+              attempt,
+              error: error.message
+            });
+            if (attempt < 3) {
+              const delay = attempt === 1 ? 1000 : 2000;
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            attempt++;
+          }
+        }
+        console.log(`❌ Pickup failed after 3 attempts for shipment ${shipmentId}, continuing anyway`);
+        return { success: false, shipmentId, attempt: 3 };
+      })();
+
+      pickupPromises.push(pickupPromise);
+    }
+
+    // Wait for all pickup calls to complete (parallel processing)
+    const pickupResults = await Promise.allSettled(pickupPromises);
+    const successfulPickups = pickupResults.filter(r => r.status === 'fulfilled' && r.value.success).length;
+    const failedPickups = pickupResults.length - successfulPickups;
+    console.log(`📊 Pickup API calls completed: ${successfulPickups} success, ${failedPickups} failed`);
+
+    // Group orders by payment_type and account_code
+    const orderGroups = {};
+    for (const orderDetail of shiprocketOrderDetails) {
+      const groupKey = `${orderDetail.payment_type}-${orderDetail.account_code}`;
+      if (!orderGroups[groupKey]) {
+        orderGroups[groupKey] = {
+          paymentType: orderDetail.payment_type,
+          accountCode: orderDetail.account_code,
+          orders: []
+        };
+      }
+      orderGroups[groupKey].orders.push(orderDetail);
+    }
+
+    // OPTIMIZATION #1: Pre-generate all manifest IDs upfront (in parallel)
+    const groupKeys = Object.keys(orderGroups);
+    console.log(`📋 Pre-generating ${groupKeys.length} manifest ID(s) in parallel...`);
+    const manifestIdPromises = groupKeys.map(() => database.getNextShiprocketManifestId());
+    const preGeneratedManifestIds = await Promise.all(manifestIdPromises);
+    console.log(`✅ Pre-generated manifest IDs: ${preGeneratedManifestIds.join(', ')}`);
+
+    // OPTIMIZATION #2: Process all groups in parallel
+    console.log(`🚀 Processing ${groupKeys.length} manifest group(s) in parallel...`);
+    const groupPromises = groupKeys.map(async (groupKey, index) => {
+      const group = orderGroups[groupKey];
+      const { paymentType, accountCode, orders } = group;
+      const paymentTypeName = paymentType === 'C' ? 'COD' : 'Prepaid';
+      const manifestId = preGeneratedManifestIds[index];
+
+      // Collect all shipment_ids for this group
+      const groupShipmentIds = [];
+      const orderIdToShipmentIds = new Map();
+
+      for (const orderDetail of orders) {
+        orderIdToShipmentIds.set(orderDetail.order_id, orderDetail.shipment_ids);
+        groupShipmentIds.push(...orderDetail.shipment_ids);
+      }
+
+      // Remove duplicates
+      const uniqueShipmentIds = [...new Set(groupShipmentIds)];
+
+      console.log(`🔄 [${groupKey}] Generating manifest for ${paymentTypeName} orders (${accountCode})...`);
+      console.log(`  - Shipment IDs: ${uniqueShipmentIds.length}`);
+      console.log(`  - Pre-assigned Manifest ID: ${manifestId}`);
+
+      try {
+        const shiprocketService = new ShiprocketService(accountCode);
+        const manifestResponse = await shiprocketService.generateManifest(uniqueShipmentIds);
+
+        if (!manifestResponse.success) {
+          // Check if manifest was already generated (Shiprocket returns this error)
+          const isAlreadyManifested = manifestResponse.message?.toLowerCase().includes('already') || 
+                                      manifestResponse.data?.message?.toLowerCase().includes('already');
+          
+          if (isAlreadyManifested) {
+            // Shiprocket has already manifested these orders on their side
+            // We need to mark them as manifested in our database using our pre-generated manifest_id
+            console.log(`✅ [${groupKey}] Manifest already generated by Shiprocket. Marking orders as manifested in our database...`);
+            console.log(`  - Using pre-generated manifest_id: ${manifestId}`);
+            
+            // Prepare batch updates with the pre-generated manifest_id
+            const labelUpdates = [];
+            const orderUpdates = [];
+            
+            for (const orderDetail of orders) {
+              labelUpdates.push({
+                order_id: orderDetail.order_id,
+                account_code: accountCode,
+                is_manifest: 1,
+                manifest_id: manifestId
+              });
+              
+              for (const product of orderDetail.claimed_products) {
+                orderUpdates.push({
+                  unique_id: product.unique_id,
+                  updateData: { status: 'ready_for_handover' }
+                });
+              }
+            }
+            
+            return {
+              success: true,
+              manifestId: manifestId,
+              failedOrders: [],
+              labelUpdates: labelUpdates,
+              orderUpdates: orderUpdates,
+              successfulOrders: orders.map(orderDetail => ({
+                order_id: orderDetail.order_id,
+                status: 'ready_for_handover',
+                manifest_created: true,
+                is_manifest: 1,
+                manifest_id: manifestId,
+                payment_type: paymentTypeName,
+                account_code: accountCode
+              }))
+            };
+          } else {
+            // Real failure - not "already manifested"
+            console.log(`❌ [${groupKey}] ${paymentTypeName} manifest generation failed: ${manifestResponse.message}`);
+            return {
+              success: false,
+              manifestId: null,
+              failedOrders: orders.map(orderDetail => ({
+                order_id: orderDetail.order_id,
+                reason: `Failed to generate ${paymentTypeName} manifest: ${manifestResponse.message}`
+              })),
+              labelUpdates: [],
+              orderUpdates: []
+            };
+          }
+        }
+
+        console.log(`✅ [${groupKey}] ${paymentTypeName} Manifest generated successfully`);
+        console.log(`  - Custom Manifest ID: ${manifestId}`);
+
+        // OPTIMIZATION #3: Prepare batch updates
+        const labelUpdates = [];
+        const orderUpdates = [];
+
+        for (const orderDetail of orders) {
+          labelUpdates.push({
+            order_id: orderDetail.order_id,
+            account_code: accountCode,
+            is_manifest: 1,
+            manifest_id: manifestId
+          });
+
+          // Collect all unique_ids for order status updates
+          for (const product of orderDetail.claimed_products) {
+            orderUpdates.push({
+              unique_id: product.unique_id,
+              updateData: { status: 'ready_for_handover' }
+            });
+          }
+        }
+
+        return {
+          success: true,
+          manifestId: manifestId,
+          failedOrders: [],
+          labelUpdates: labelUpdates,
+          orderUpdates: orderUpdates,
+          successfulOrders: orders.map(orderDetail => ({
+            order_id: orderDetail.order_id,
+            status: 'ready_for_handover',
+            manifest_created: true,
+            is_manifest: 1,
+            manifest_id: manifestId,
+            payment_type: paymentTypeName,
+            account_code: accountCode
+          }))
+        };
+      } catch (error) {
+        // Check if error is about manifest already generated
+        const isAlreadyManifested = error.message?.toLowerCase().includes('already');
+        
+        if (isAlreadyManifested) {
+          // Shiprocket has already manifested these orders on their side
+          // We need to mark them as manifested in our database using our pre-generated manifest_id
+          console.log(`✅ [${groupKey}] Manifest already generated by Shiprocket (caught in error). Marking orders as manifested in our database...`);
+          console.log(`  - Using pre-generated manifest_id: ${manifestId}`);
+          
+          // Prepare batch updates with the pre-generated manifest_id
+          const labelUpdates = [];
+          const orderUpdates = [];
+          
+          for (const orderDetail of orders) {
+            labelUpdates.push({
+              order_id: orderDetail.order_id,
+              account_code: accountCode,
+              is_manifest: 1,
+              manifest_id: manifestId
+            });
+            
+            for (const product of orderDetail.claimed_products) {
+              orderUpdates.push({
+                unique_id: product.unique_id,
+                updateData: { status: 'ready_for_handover' }
+              });
+            }
+          }
+          
+          return {
+            success: true,
+            manifestId: manifestId,
+            failedOrders: [],
+            labelUpdates: labelUpdates,
+            orderUpdates: orderUpdates,
+            successfulOrders: orders.map(orderDetail => ({
+              order_id: orderDetail.order_id,
+              status: 'ready_for_handover',
+              manifest_created: true,
+              is_manifest: 1,
+              manifest_id: manifestId,
+              payment_type: paymentTypeName,
+              account_code: accountCode
+            }))
+          };
+        } else {
+          // Real error - not "already manifested"
+          console.error(`❌ [${groupKey}] Error generating ${paymentTypeName} manifest:`, error);
+          return {
+            success: false,
+            manifestId: null,
+            failedOrders: orders.map(orderDetail => ({
+              order_id: orderDetail.order_id,
+              reason: error.message
+            })),
+            labelUpdates: [],
+            orderUpdates: []
+          };
+        }
+      }
+    });
+
+    // Wait for all groups to complete
+    const groupResults = await Promise.allSettled(groupPromises);
+
+    // Collect results and prepare batch updates
+    const manifestIds = [];
+    const successfulOrders = [];
+    const failedOrders = [];
+    const allLabelUpdates = [];
+    const allOrderUpdates = [];
+
+    for (let i = 0; i < groupResults.length; i++) {
+      const result = groupResults[i];
+      if (result.status === 'fulfilled') {
+        const groupResult = result.value;
+        if (groupResult.success && groupResult.manifestId) {
+          manifestIds.push(groupResult.manifestId);
+          successfulOrders.push(...(groupResult.successfulOrders || []));
+          allLabelUpdates.push(...groupResult.labelUpdates);
+          allOrderUpdates.push(...groupResult.orderUpdates);
+        }
+        failedOrders.push(...groupResult.failedOrders);
+      } else {
+        // Handle rejected promise
+        const groupKey = groupKeys[i];
+        console.error(`❌ [${groupKey}] Promise rejected:`, result.reason);
+        const group = orderGroups[groupKey];
+        group.orders.forEach(orderDetail => {
+          failedOrders.push({
+            order_id: orderDetail.order_id,
+            reason: result.reason?.message || 'Unknown error during parallel processing'
+          });
+        });
+      }
+    }
+
+    // OPTIMIZATION #3: Batch update database (all labels and orders at once)
+    if (allLabelUpdates.length > 0) {
+      console.log(`💾 Batch updating ${allLabelUpdates.length} label(s)...`);
+      try {
+        await database.batchUpsertLabels(allLabelUpdates);
+        console.log(`✅ Batch label updates completed`);
+      } catch (error) {
+        console.error(`❌ Batch label update failed:`, error);
+        // Mark affected orders as failed
+        allLabelUpdates.forEach(labelUpdate => {
+          failedOrders.push({
+            order_id: labelUpdate.order_id,
+            reason: `Database update failed: ${error.message}`
+          });
+        });
+      }
+    }
+
+    if (allOrderUpdates.length > 0) {
+      console.log(`💾 Batch updating ${allOrderUpdates.length} order status(es)...`);
+      try {
+        await database.bulkUpdateOrders(allOrderUpdates);
+        console.log(`✅ Batch order updates completed`);
+      } catch (error) {
+        console.error(`❌ Batch order update failed:`, error);
+        // Note: Order status updates are less critical, so we don't mark as failed
+      }
+    }
+
+    console.log('🟢 SHIPROCKET MANIFEST COMPLETE');
+    console.log(`  - Successful orders: ${successfulOrders.length}`);
+    console.log(`  - Failed orders: ${failedOrders.length}`);
+    console.log(`  - Manifest IDs created: ${manifestIds.join(', ')}`);
+
+    if (successfulOrders.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to generate manifest for any orders',
+        data: {
+          successful_orders: [],
+          failed_orders: failedOrders,
+          manifest_ids: []
+        }
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Successfully generated manifest for ${successfulOrders.length} out of ${order_ids.length} orders`,
+      data: {
+        successful_orders: successfulOrders,
+        failed_orders: failedOrders,
+        total_requested: order_ids.length,
+        total_successful: successfulOrders.length,
+        total_failed: failedOrders.length,
+        manifest_ids: manifestIds
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ SHIPROCKET MANIFEST ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate manifest',
       error: error.message
     });
   }
@@ -5884,7 +7417,7 @@ router.post('/reverse', async (req, res) => {
     const isLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === true || order.label_downloaded === '1';
 
     if (isLabelDownloaded) {
-      console.log('🔄 CASE 2: Label downloaded - calling Shipway cancel API');
+      console.log('🔄 CASE 2: Label downloaded - cancelling shipment before reverse');
 
       // Get account_code from order to use correct store credentials
       const accountCode = order.account_code;
@@ -5907,28 +7440,53 @@ router.post('/reverse', async (req, res) => {
         });
       }
 
-      console.log('✅ AWB FOUND:', label.awb);
+      // Validate AWB is not empty or null
+      const awbValue = String(label.awb || '').trim();
+      if (!awbValue || awbValue === '') {
+        console.log('❌ AWB IS EMPTY OR NULL for order:', order.order_id);
+        return res.status(400).json({
+          success: false,
+          message: 'AWB number is empty or invalid. Cannot cancel shipment.'
+        });
+      }
 
-      // Call Shipway cancel API with store-specific credentials
-      const ShipwayService = require('../services/shipwayService');
-      const shipwayService = new ShipwayService(accountCode);
+      console.log('✅ AWB FOUND:', awbValue);
+      console.log('  - AWB type:', typeof label.awb);
+      console.log('  - AWB length:', awbValue.length);
 
-      // Initialize the service to load store credentials
-      await shipwayService.initialize();
+      // Determine shipping partner for this store
+      const storeInfo = await database.getStoreByAccountCode(accountCode);
+      const shippingPartner = (storeInfo?.shipping_partner || '').toLowerCase();
+      console.log('  - Shipping Partner:', shippingPartner);
+      console.log('  - Store Info:', storeInfo ? 'Found' : 'Not found');
 
       try {
-        const cancelResult = await shipwayService.cancelShipment([label.awb]);
-        console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+        if (shippingPartner === 'shiprocket') {
+          console.log('🔄 Using Shiprocket cancel API for order:', order.order_id);
+          console.log('  - AWB to cancel:', awbValue);
+          const ShiprocketService = require('../services/shiprocketService');
+          const shiprocketService = new ShiprocketService(accountCode);
+          const cancelResult = await shiprocketService.cancelShipmentsByAwbs([awbValue]);
+          console.log('✅ SHIPROCKET CANCEL SUCCESS:', JSON.stringify(cancelResult, null, 2));
+        } else {
+          console.log('🔄 Using Shipway cancel API for order:', order.order_id);
+          const ShipwayService = require('../services/shipwayService');
+          const shipwayService = new ShipwayService(accountCode);
+          await shipwayService.initialize();
+          const cancelResult = await shipwayService.cancelShipment([awbValue]);
+          console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+        }
       } catch (cancelError) {
-        console.error('❌ SHIPWAY CANCEL FAILED:');
+        console.error('❌ SHIPMENT CANCEL FAILED:');
         console.error('  - Error message:', cancelError.message);
         console.error('  - Error stack:', cancelError.stack);
         console.error('  - Account Code:', accountCode);
-        console.error('  - AWB:', label.awb);
+        console.error('  - AWB:', awbValue);
+        console.error('  - Shipping Partner:', shippingPartner);
         return res.status(500).json({
           success: false,
           message: cancelError.message || 'Failed to cancel shipment. Please try after sometime.',
-          error: 'shipway_cancel_failed',
+          error: 'shipment_cancel_failed',
           details: cancelError.message
         });
       }
@@ -6136,7 +7694,7 @@ router.post('/reverse-grouped', async (req, res) => {
     const isLabelDownloaded = firstValidOrder.label_downloaded === 1 || firstValidOrder.label_downloaded === true || firstValidOrder.label_downloaded === '1';
 
     if (isLabelDownloaded) {
-      console.log('🔄 CASE 2: Label downloaded - calling Shipway cancel API');
+      console.log('🔄 CASE 2: Label downloaded - cancelling shipment before reverse (grouped)');
 
       // Get account_code from order to use correct store credentials
       const accountCode = firstValidOrder.account_code;
@@ -6159,28 +7717,49 @@ router.post('/reverse-grouped', async (req, res) => {
         });
       }
 
-      console.log('✅ AWB FOUND:', label.awb);
+      const awbValue = String(label.awb || '').trim();
+      if (!awbValue) {
+        console.log('❌ AWB IS EMPTY OR NULL for order:', order_id);
+        return res.status(400).json({
+          success: false,
+          message: 'AWB number is empty or invalid. Cannot cancel shipment.'
+        });
+      }
 
-      // Call Shipway cancel API with store-specific credentials (only once for the entire order)
-      const ShipwayService = require('../services/shipwayService');
-      const shipwayService = new ShipwayService(accountCode);
+      console.log('✅ AWB FOUND FOR GROUPED REVERSE:', awbValue);
 
-      // Initialize the service to load store credentials
-      await shipwayService.initialize();
+      // Determine shipping partner for this store
+      const storeInfo = await database.getStoreByAccountCode(accountCode);
+      const shippingPartner = (storeInfo?.shipping_partner || '').toLowerCase();
+      console.log('  - Shipping Partner (grouped):', shippingPartner);
+      console.log('  - Store Info:', storeInfo ? 'Found' : 'Not found');
 
       try {
-        const cancelResult = await shipwayService.cancelShipment([label.awb]);
-        console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+        if (shippingPartner === 'shiprocket') {
+          console.log('🔄 Using Shiprocket cancel API for grouped order:', order_id);
+          const ShiprocketService = require('../services/shiprocketService');
+          const shiprocketService = new ShiprocketService(accountCode);
+          const cancelResult = await shiprocketService.cancelShipmentsByAwbs([awbValue]);
+          console.log('✅ SHIPROCKET CANCEL SUCCESS (grouped):', JSON.stringify(cancelResult, null, 2));
+        } else {
+          console.log('🔄 Using Shipway cancel API for grouped order:', order_id);
+          const ShipwayService = require('../services/shipwayService');
+          const shipwayService = new ShipwayService(accountCode);
+          await shipwayService.initialize();
+          const cancelResult = await shipwayService.cancelShipment([awbValue]);
+          console.log('✅ SHIPWAY CANCEL SUCCESS (grouped):', cancelResult);
+        }
       } catch (cancelError) {
-        console.error('❌ SHIPWAY CANCEL FAILED:');
+        console.error('❌ SHIPMENT CANCEL FAILED (grouped):');
         console.error('  - Error message:', cancelError.message);
         console.error('  - Error stack:', cancelError.stack);
         console.error('  - Account Code:', accountCode);
-        console.error('  - AWB:', label.awb);
+        console.error('  - AWB:', awbValue);
+        console.error('  - Shipping Partner:', shippingPartner);
         return res.status(500).json({
           success: false,
           message: cancelError.message || 'Failed to cancel shipment. Please try after sometime.',
-          error: 'shipway_cancel_failed',
+          error: 'shipment_cancel_failed',
           details: cancelError.message
         });
       }
@@ -6190,7 +7769,7 @@ router.post('/reverse-grouped', async (req, res) => {
         'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL, is_manifest = 0, manifest_id = NULL, current_shipment_status = NULL WHERE order_id = ? AND account_code = ?',
         [order_id, accountCode]
       );
-      console.log('✅ LABEL DATA CLEARED (including manifest_id)');
+      console.log('✅ LABEL DATA CLEARED (including manifest_id) for grouped reverse');
     } else {
       console.log('🔄 CASE 1: No label downloaded - simple reverse');
       // Even without label download, reset manifest fields if they exist (for Handover tab orders)
