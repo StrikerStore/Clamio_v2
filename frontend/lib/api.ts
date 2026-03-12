@@ -526,14 +526,15 @@ class ApiClient {
     return this.makeRequest('/orders/last-updated')
   }
 
-  async refreshOrders(): Promise<ApiResponse> {
+  async refreshOrders(runAsync: boolean = false): Promise<ApiResponse> {
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
     return this.makeRequest('/orders/refresh', {
       method: 'POST',
       headers: {
         ...(vendorToken && { 'Authorization': vendorToken }),
-      }
+      },
+      body: JSON.stringify({ async: runAsync })
     });
   }
 
@@ -640,9 +641,10 @@ class ApiClient {
     return this.makeRequest(`/orders/admin/dashboard-stats${queryString ? '?' + queryString : ''}`);
   }
 
-  async refreshAdminOrders(): Promise<ApiResponse> {
+  async refreshAdminOrders(runAsync: boolean = false): Promise<ApiResponse> {
     return this.makeRequest('/orders/admin/refresh', {
       method: 'POST',
+      body: JSON.stringify({ async: runAsync })
     });
   }
 
@@ -1334,7 +1336,7 @@ class ApiClient {
   }
 
   // Download label methods
-  async downloadLabel(orderId: string, format: string = 'thermal'): Promise<ApiResponse> {
+  async downloadLabel(orderId: string, format: string = 'thermal', runAsync: boolean = false): Promise<ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
@@ -1342,6 +1344,7 @@ class ApiClient {
     console.log('  - Order ID being sent:', orderId);
     console.log('  - Order ID type:', typeof orderId);
     console.log('  - Format being sent:', format);
+    console.log('  - runAsync:', runAsync);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
@@ -1350,10 +1353,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_id: orderId, format: format })
+      body: JSON.stringify({ order_id: orderId, format: format, async: runAsync })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_id: orderId, format: format }));
+    console.log('  - Request body:', JSON.stringify({ order_id: orderId, format: format, async: runAsync }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/download-label`, config)
@@ -1375,7 +1378,7 @@ class ApiClient {
     }
   }
 
-  async bulkDownloadLabels(orderIds: string[], format: string = 'thermal', generateOnly: boolean = false): Promise<Blob | ApiResponse> {
+  async bulkDownloadLabels(orderIds: string[], format: string = 'thermal', generateOnly: boolean = false, runAsync: boolean = false): Promise<Blob | ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
@@ -1384,6 +1387,7 @@ class ApiClient {
     console.log('  - Order IDs count:', orderIds.length);
     console.log('  - Format being sent:', format);
     console.log('  - Generate only:', generateOnly);
+    console.log('  - runAsync:', runAsync);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
@@ -1392,10 +1396,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly })
+      body: JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly, async: runAsync })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly }));
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly, async: runAsync }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)
@@ -1408,6 +1412,12 @@ class ApiClient {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+      }
+
+      // runAsync=true always returns JSON {taskId}
+      if (runAsync) {
+        const data = await response.json();
+        return data as ApiResponse;
       }
 
       // If generate_only is true, return JSON response
@@ -1447,7 +1457,7 @@ class ApiClient {
     }
   }
 
-  async bulkDownloadLabelsMerge(orderIds: string[], format: string = 'thermal'): Promise<Blob> {
+  async bulkDownloadLabelsMerge(orderIds: string[], format: string = 'thermal', runAsync: boolean = false): Promise<Blob | ApiResponse> {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
@@ -1455,6 +1465,7 @@ class ApiClient {
     console.log('  - Order IDs being sent:', orderIds);
     console.log('  - Order IDs count:', orderIds.length);
     console.log('  - Format being sent:', format);
+    console.log('  - runAsync:', runAsync);
     console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
@@ -1463,10 +1474,10 @@ class ApiClient {
         'Content-Type': 'application/json',
         ...(vendorToken && { 'Authorization': vendorToken }),
       },
-      body: JSON.stringify({ order_ids: orderIds, format: format })
+      body: JSON.stringify({ order_ids: orderIds, format: format, async: runAsync })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format }));
+    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, async: runAsync }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels-merge`, config)
@@ -1479,6 +1490,12 @@ class ApiClient {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+      }
+
+      // runAsync returns JSON {taskId}
+      if (runAsync) {
+        const data = await response.json();
+        return data as ApiResponse;
       }
 
       // Get the blob from the response

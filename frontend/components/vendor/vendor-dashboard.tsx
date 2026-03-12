@@ -44,6 +44,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { DatePicker } from "@/components/ui/date-picker"
 import { apiClient } from "@/lib/api"
 import { vendorErrorTracker } from "@/lib/vendorErrorTracker"
+import { useAsyncTask } from "@/hooks/useAsyncTask"
 
 // Mock data - Version 4
 // const mockOrders = [
@@ -153,6 +154,35 @@ export function VendorDashboard() {
   const { user, logout } = useAuth()
   const { toast } = useToast()
   const { isMobile, isTablet, isDesktop, deviceType } = useDeviceType()
+  const { registerTask } = useAsyncTask({
+    onComplete: (taskId, result) => {
+      // Global fallback for tasks whose specific callback was not set (e.g. recovered from localStorage on re-open)
+      if (result?.pdfBase64) {
+        try {
+          const binaryString = atob(result.pdfBase64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+          const blob = new Blob([bytes], { type: result.contentType || 'application/pdf' });
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `label_${new Date().toISOString().slice(0, 10)}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          toast({ title: 'Download Ready', description: 'Your background task file has been downloaded.' });
+        } catch {
+          toast({ title: 'Download Failed', description: 'Could not decode the background task file.', variant: 'destructive' });
+        }
+      } else if (result?.success) {
+        toast({ title: 'Operation Complete', description: result.message || 'Your background task completed successfully.' });
+      }
+    },
+    onError: (taskId, error) => {
+      toast({ title: 'Background Task Failed', description: error || 'An error occurred.', variant: 'destructive' });
+    }
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("all-orders")
 
@@ -3055,143 +3085,153 @@ export function VendorDashboard() {
     setLabelDownloadLoading(prev => ({ ...prev, [orderId]: true }));
 
     try {
-      console.log('🔵 FRONTEND: Starting download label process');
+      console.log('🔵 FRONTEND: Starting download label process (async)');
       console.log('  - order_id:', orderId);
-      console.log('  - order_id type:', typeof orderId);
       console.log('  - format:', format);
 
-      // Debug: Check auth header and vendor token
-      const authHeader = localStorage.getItem('authHeader');
-      const vendorToken = localStorage.getItem('vendorToken');
-      console.log('🔍 FRONTEND: Auth header:', authHeader ? authHeader.substring(0, 20) + '...' : 'null');
-      console.log('🔍 FRONTEND: Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+      // Call the download label API with async:true so it returns a taskId immediately
+      const response = await apiClient.downloadLabel(orderId, format, true);
 
-      // Call the download label API with format parameter
-      const response = await apiClient.downloadLabel(orderId, format);
+      console.log('📥 FRONTEND: Download label async response received');
+      console.log('  - taskId:', (response as any).taskId);
 
-      console.log('📥 FRONTEND: Download label response received');
-      console.log('  - success:', response.success);
-      console.log('  - data:', response.data);
+      if ((response as any).taskId) {
+        // Background: poll until done, then deliver via onComplete callback
+        const taskId = (response as any).taskId;
+        registerTask(
+          taskId,
+          // onComplete override for richer UX (knows the orderId + format)
+          async (tId: string, result: any) => {
+            if (result?.pdfBase64) {
+              try {
+                const binaryString = atob(result.pdfBase64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+                const blob = new Blob([bytes], { type: 'application/pdf' });
+                const url = window.URL.createObjectURL(blob);
+                const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const vendorId = user?.warehouseId || 'unknown';
+                const vendorCity = vendorAddress?.city || 'unknown';
+                const filename = `${vendorId}_${vendorCity}_${currentDate}_${format}.pdf`;
+                await downloadFile(url, filename);
+                toast({ title: 'Label Downloaded', description: `Label for order ${orderId} downloaded.` });
+                await refreshOrders();
+              } catch {
+                toast({ title: 'Download Failed', description: 'Could not decode label PDF.', variant: 'destructive' });
+              }
+            } else if (result?.success && result?.data) {
+              // JSON result with shipping_url etc. (non-async fallback case or cached)
+              const { shipping_url, awb, original_order_id, clone_order_id, formatted_pdf, format: responseFormat } = result.data;
+              const orderDisplayId = clone_order_id || original_order_id || orderId;
+              if (formatted_pdf && (responseFormat === 'a4' || responseFormat === 'four-in-one')) {
+                try {
+                  const binaryString = atob(formatted_pdf);
+                  const bytes = new Uint8Array(binaryString.length);
+                  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                  const blob = new Blob([bytes], { type: 'application/pdf' });
+                  const url = window.URL.createObjectURL(blob);
+                  const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                  const vendorId = user?.warehouseId || 'unknown';
+                  const vendorCity = vendorAddress?.city || 'unknown';
+                  const filename = `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`;
+                  await downloadFile(url, filename);
+                  toast({ title: 'Label Downloaded', description: `${responseFormat} label for order ${orderDisplayId} downloaded.` });
+                  await refreshOrders();
+                } catch {
+                  window.open(shipping_url, '_blank');
+                  toast({ title: 'Label Generated', description: 'Opening label in new tab.' });
+                }
+              } else {
+                // Thermal – fetch from url via proxy
+                try {
+                  const blob = await apiClient.downloadLabelFile(shipping_url);
+                  const url = window.URL.createObjectURL(blob);
+                  const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                  const vendorId = user?.warehouseId || 'unknown';
+                  const vendorCity = vendorAddress?.city || 'unknown';
+                  const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
+                  await downloadFile(url, filename);
+                  toast({ title: 'Label Downloaded', description: `${format} label for order ${orderDisplayId} downloaded.` });
+                  await refreshOrders();
+                } catch {
+                  window.open(shipping_url, '_blank');
+                  toast({ title: 'Label Generated', description: 'Opening label in new tab.' });
+                }
+              }
+            } else if (result?.warning) {
+              toast({ title: '⚠️ Label Generation Issue', description: result.userMessage || result.message || 'Could not generate label', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+            }
 
+            // Clear loading regardless
+            setLabelDownloadLoading(prev => ({ ...prev, [orderId]: false }));
+          },
+          // onError override
+          (tId: string, error: string) => {
+            toast({ title: 'Download Label Failed', description: error || 'An error occurred while generating the label.', variant: 'destructive' });
+            setLabelDownloadLoading(prev => ({ ...prev, [orderId]: false }));
+          }
+        );
+
+        toast({
+          title: '📥 Label Generation Started',
+          description: 'Generating label in background — you can minimize the app. We\'ll notify you when done.',
+        });
+
+        // Note: Don't clear loading here — the task callbacks do it
+        return;
+      }
+
+      // Fallback: sync response (async: false response or error)
       if (response.success && response.data) {
         const { shipping_url, awb, original_order_id, clone_order_id, formatted_pdf, format: responseFormat } = response.data;
 
-        console.log('✅ FRONTEND: Label generated successfully');
-        console.log('  - Shipping URL:', shipping_url);
-        console.log('  - AWB:', awb);
-        console.log('  - Format:', responseFormat);
-        console.log('  - Has formatted PDF:', !!formatted_pdf);
+        console.log('✅ FRONTEND: Label generated successfully (sync)');
 
-        // Handle different formats
         if (formatted_pdf && (responseFormat === 'a4' || responseFormat === 'four-in-one')) {
-          // Handle A4 and four-in-one formats with base64 PDF
           try {
-            console.log('🔄 FRONTEND: Processing formatted PDF...');
-
-            // Convert base64 to blob
             const binaryString = atob(formatted_pdf);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
               bytes[i] = binaryString.charCodeAt(i);
             }
             const blob = new Blob([bytes], { type: 'application/pdf' });
-
-            // Create download URL
             const url = window.URL.createObjectURL(blob);
-
-            // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
-            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const vendorId = user?.warehouseId || 'unknown';
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}_${responseFormat}.pdf`;
-
-            // Download using iOS-compatible method
             await downloadFile(url, filename);
-
-            console.log('✅ FRONTEND: Formatted PDF downloaded successfully');
-
-            // Show success message
             const orderDisplayId = clone_order_id || original_order_id || orderId;
-            toast({
-              title: "Label Downloaded",
-              description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully`,
-            });
-
-            // Refresh orders to update the UI (works immediately on iOS with iframe approach)
+            toast({ title: 'Label Downloaded', description: `${responseFormat} label for order ${orderDisplayId} downloaded successfully` });
             await refreshOrders();
-
-          } catch (pdfError) {
-            console.error('❌ FRONTEND: Formatted PDF download failed:', pdfError);
-
-            // Fallback: open original URL in new tab
+          } catch {
             window.open(shipping_url, '_blank');
-
-            toast({
-              title: "Label Generated",
-              description: `Label generated successfully. Opening in new tab.`,
-            });
+            toast({ title: 'Label Generated', description: 'Opening in new tab.' });
           }
         } else {
-          // Handle thermal format (original behavior)
           try {
             const blob = await apiClient.downloadLabelFile(shipping_url);
-
-            // Create download URL
             const url = window.URL.createObjectURL(blob);
-
-            // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}
-            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+            const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const vendorId = user?.warehouseId || 'unknown';
             const vendorCity = vendorAddress?.city || 'unknown';
             const filename = `${vendorId}_${vendorCity}_${currentDate}.pdf`;
-
-            // Download using iOS-compatible method
             await downloadFile(url, filename);
-
-            console.log('✅ FRONTEND: Label file downloaded successfully');
-
-            // Show success message
             const orderDisplayId = clone_order_id || original_order_id || orderId;
-            toast({
-              title: "Label Downloaded",
-              description: `${format} label for order ${orderDisplayId} downloaded successfully`,
-            });
-
-            // Refresh orders to update the UI (works immediately on iOS with iframe approach)
+            toast({ title: 'Label Downloaded', description: `${format} label for order ${orderDisplayId} downloaded successfully` });
             await refreshOrders();
-
-          } catch (downloadError) {
-            console.error('❌ FRONTEND: Label file download failed:', downloadError);
-
-            // Fallback: open in new tab
+          } catch {
             window.open(shipping_url, '_blank');
-
-            toast({
-              title: "Label Generated",
-              description: `Label generated successfully. Opening in new tab.`,
-            });
+            toast({ title: 'Label Generated', description: 'Opening in new tab.' });
           }
         }
-
       } else {
-        console.log('❌ FRONTEND: Download label failed');
-        console.log('  - Error message:', response.message);
-        console.log('  - Warning flag:', response.warning);
-        console.log('  - User message:', response.userMessage);
-
-        // Show warning toast with yellowish color for non-blocking errors
         if (response.warning) {
-          toast({
-            title: '⚠️ Label Generation Issue',
-            description: response.userMessage || response.message || 'Could not generate label',
-            className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
-          });
+          toast({ title: '⚠️ Label Generation Issue', description: response.userMessage || response.message || 'Could not generate label', className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
         } else {
-          toast({
-            title: 'Download Label Failed',
-            description: response.message || 'Could not generate label',
-            variant: 'destructive',
-          });
+          toast({ title: 'Download Label Failed', description: response.message || 'Could not generate label', variant: 'destructive' });
         }
       }
 
@@ -3246,81 +3286,120 @@ export function VendorDashboard() {
 
     try {
       toast({
-        title: "Generating Labels",
-        description: `Processing ${pendingDownloadOrderIds.length} orders...`,
+        title: '📥 Generating Labels in Background',
+        description: `Processing ${pendingDownloadOrderIds.length} orders — you can minimize the app. We\'ll notify you when done.`,
       });
 
-      console.log('🔵 FRONTEND: Unified label generation - format:', selectedDownloadFormat);
+      console.log('🔵 FRONTEND: Unified label generation (async) - format:', selectedDownloadFormat);
       console.log('  - Orders:', pendingDownloadOrderIds);
 
-      // Step 1: Generate labels for all orders (backend handles Shipway + Shiprocket internally)
+      // Step 1: Submit async task for bulk label generation
       const generateResponse = await apiClient.bulkDownloadLabels(
         pendingDownloadOrderIds,
         selectedDownloadFormat,
-        true
-      );
+        true,  // generate_only
+        true   // runAsync
+      ) as any;
 
-      console.log('📥 FRONTEND: Generation response:', generateResponse);
+      console.log('📥 FRONTEND: Async task submitted:', generateResponse);
 
-      if (!generateResponse || !('success' in generateResponse)) {
-        throw new Error('Invalid response from label generation');
-      }
+      if (generateResponse?.taskId) {
+        const capturedOrderIds = [...pendingDownloadOrderIds];
+        const capturedFormat = selectedDownloadFormat;
 
-      if (!generateResponse.success) {
-        throw new Error(generateResponse.message || 'Label generation failed');
-      }
+        registerTask(
+          generateResponse.taskId,
+          async (tId: string, result: any) => {
+            if (!result?.success) {
+              toast({ title: 'Label Generation Failed', description: result?.message || 'All orders failed.', variant: 'destructive' });
+              return;
+            }
 
-      const { successful, failed, total_successful, total_failed } = generateResponse.data;
+            const { successful, failed, total_successful, total_failed } = result.data || {};
 
-      if (!successful || successful.length === 0) {
-        toast({
-          title: 'Label Generation Failed',
-          description: `All ${total_failed || pendingDownloadOrderIds.length} orders failed. Please contact admin.`,
-          variant: 'destructive',
-        });
+            if (!successful || successful.length === 0) {
+              toast({ title: 'Label Generation Failed', description: `All ${total_failed || capturedOrderIds.length} orders failed.`, variant: 'destructive' });
+              return;
+            }
+
+            // Notify and start merge
+            toast({ title: 'Labels Generated!', description: `Merging ${successful.length} labels into PDF...` });
+
+            try {
+              const mergeResponse = await apiClient.bulkDownloadLabelsMerge(successful, capturedFormat, true) as any;
+
+              if (mergeResponse?.taskId) {
+                registerTask(
+                  mergeResponse.taskId,
+                  async (mId: string, mergeResult: any) => {
+                    if (mergeResult?.pdfBase64) {
+                      try {
+                        const binaryString = atob(mergeResult.pdfBase64);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                        const blob = new Blob([bytes], { type: 'application/pdf' });
+                        const url = window.URL.createObjectURL(blob);
+                        const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                        const vendorId = user?.warehouseId || 'unknown';
+                        const vendorCity = vendorAddress?.city || 'unknown';
+                        const filename = `${vendorId}_${vendorCity}_${currentDate}_${capturedFormat}.pdf`;
+                        await downloadFile(url, filename);
+                        if ((total_failed ?? 0) > 0) {
+                          toast({ title: '⚠️ Download Completed with Warnings', description: `${total_successful} labels downloaded, ${total_failed} failed.`, className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+                        } else {
+                          toast({ title: 'Labels Downloaded', description: `Successfully downloaded labels for ${total_successful} orders` });
+                        }
+                        await refreshOrders();
+                      } catch {
+                        toast({ title: 'Download Failed', description: 'Could not decode merged PDF.', variant: 'destructive' });
+                      }
+                    }
+                  },
+                  (mId: string, error: string) => {
+                    toast({ title: 'PDF Merge Failed', description: error || 'Merge task failed.', variant: 'destructive' });
+                  }
+                );
+              }
+            } catch (mergeErr: any) {
+              toast({ title: 'PDF Merge Failed', description: mergeErr?.message || 'Could not start merge.', variant: 'destructive' });
+            }
+          },
+          (tId: string, error: string) => {
+            toast({ title: 'Label Generation Failed', description: error || 'Background task failed.', variant: 'destructive' });
+          }
+        );
+
+        // Close dialog immediately — background will handle the rest
+        setShowFormatDialog(false);
+        setPendingDownloadOrderIds([]);
         return;
       }
 
-      // Step 2: Merge all generated labels into a single PDF
-      toast({
-        title: "Merging Labels",
-        description: `Merging ${successful.length} labels into PDF (${selectedDownloadFormat} format)...`,
-      });
+      // Fallback: sync path (non-async response)
+      if (!generateResponse || !('success' in generateResponse)) throw new Error('Invalid response from label generation');
+      if (!generateResponse.success) throw new Error(generateResponse.message || 'Label generation failed');
 
-      console.log('🔄 FRONTEND: Merging labels for', successful.length, 'orders');
+      const { successful, failed, total_successful, total_failed } = generateResponse.data;
+      if (!successful || successful.length === 0) {
+        toast({ title: 'Label Generation Failed', description: `All ${total_failed || pendingDownloadOrderIds.length} orders failed.`, variant: 'destructive' });
+        return;
+      }
 
-      const blob = await apiClient.bulkDownloadLabelsMerge(successful, selectedDownloadFormat);
-
-      // Step 3: Download the merged PDF
+      toast({ title: 'Merging Labels', description: `Merging ${successful.length} labels into PDF (${selectedDownloadFormat} format)...` });
+      const blob = await apiClient.bulkDownloadLabelsMerge(successful, selectedDownloadFormat) as Blob;
       const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const vendorId = user?.warehouseId || 'unknown';
       const vendorCity = vendorAddress?.city || 'unknown';
       const filename = `${vendorId}_${vendorCity}_${currentDate}_${selectedDownloadFormat}.pdf`;
-
       const url = window.URL.createObjectURL(blob);
       await downloadFile(url, filename);
-
-      console.log('✅ FRONTEND: Labels downloaded successfully');
-
-      // Close dialog
       setShowFormatDialog(false);
       setPendingDownloadOrderIds([]);
-
-      // Show result toast
       if (total_failed > 0) {
-        toast({
-          title: "⚠️ Download Completed with Warnings",
-          description: `${total_successful} labels downloaded, ${total_failed} order(s) failed. Please contact admin.`,
-          className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
-        });
+        toast({ title: '⚠️ Download Completed with Warnings', description: `${total_successful} labels downloaded, ${total_failed} order(s) failed.`, className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
       } else {
-        toast({
-          title: "Labels Downloaded",
-          description: `Successfully downloaded labels for ${total_successful} orders`,
-        });
+        toast({ title: 'Labels Downloaded', description: `Successfully downloaded labels for ${total_successful} orders` });
       }
-
-      // Refresh orders to update UI
       await refreshOrders();
 
     } catch (error) {
@@ -3344,55 +3423,98 @@ export function VendorDashboard() {
 
     try {
       toast({
-        title: "Merging Labels",
-        description: `Merging ${mergeDialogData.successful.length} labels into PDF (${selectedMergeFormat} format)...`,
-      })
+        title: '📥 Merge Started in Background',
+        description: `Merging ${mergeDialogData.successful.length} labels — you can minimize the app. We\'ll notify you when done.`,
+      });
 
-      console.log('🔵 FRONTEND: Starting PDF merge process');
+      console.log('🔵 FRONTEND: Starting PDF merge process (async)');
       console.log('  - order_ids:', mergeDialogData.successful);
       console.log('  - format:', selectedMergeFormat);
 
-      // Step 2: Call merge endpoint with selected format
-      const blob = await apiClient.bulkDownloadLabelsMerge(mergeDialogData.successful, selectedMergeFormat);
+      const capturedSuccessful = [...mergeDialogData.successful];
+      const capturedFormat = selectedMergeFormat;
+      const capturedTotalSuccessful = mergeDialogData.totalSuccessful;
+      const capturedTotalFailed = mergeDialogData.totalFailed;
 
-      console.log('📥 FRONTEND: PDF merge response received');
-      console.log('  - blob size:', blob.size);
-      console.log('  - blob type:', blob.type);
+      // Submit async merge task
+      const mergeResponse = await apiClient.bulkDownloadLabelsMerge(capturedSuccessful, capturedFormat, true) as any;
 
-      // Create download URL for the combined PDF
+      if (mergeResponse?.taskId) {
+        registerTask(
+          mergeResponse.taskId,
+          async (tId: string, result: any) => {
+            if (result?.pdfBase64) {
+              try {
+                const binaryString = atob(result.pdfBase64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+                const blob = new Blob([bytes], { type: 'application/pdf' });
+                const url = window.URL.createObjectURL(blob);
+                const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const vendorId = user?.warehouseId || 'unknown';
+                const vendorCity = vendorAddress?.city || 'unknown';
+                const filename = `${vendorId}_${vendorCity}_${currentDate}_${capturedFormat}.pdf`;
+                await downloadFile(url, filename);
+
+                if (capturedTotalFailed > 0) {
+                  toast({ title: '⚠️ Bulk Download Completed with Warnings', description: `Labels downloaded, but ${capturedTotalFailed} order(s) failed.`, className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
+                } else {
+                  toast({ title: 'Bulk Download Complete', description: `Successfully downloaded labels for ${capturedTotalSuccessful} orders` });
+                }
+
+                // Refresh My Orders tab
+                try {
+                  setGroupedOrdersPage(1);
+                  const groupedResponse = await apiClient.getGroupedOrders(1, 50);
+                  if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+                    setGroupedOrders(groupedResponse.data.groupedOrders);
+                    if (groupedResponse.data.pagination) {
+                      setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
+                      setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
+                    }
+                  }
+                } catch (_) {}
+
+                // Clear selected orders
+                const activeTab = selectedMyOrders.length > 0 ? 'my-orders' : 'all-orders';
+                if (activeTab === 'my-orders') setSelectedMyOrders([]);
+                else setSelectedOrdersForDownload([]);
+              } catch {
+                toast({ title: 'Download Failed', description: 'Could not decode merged PDF.', variant: 'destructive' });
+              }
+            }
+            setMergeLoading(false);
+          },
+          (tId: string, error: string) => {
+            toast({ title: 'PDF Merge Failed', description: error || 'Merge task failed.', variant: 'destructive' });
+            setMergeLoading(false);
+          }
+        );
+
+        // Close dialog — background handles the rest
+        setShowMergeDialog(false);
+        setMergeDialogData(null);
+        // Note: don't clear mergeLoading here — task callbacks do it
+        return;
+      }
+
+      // Fallback: sync blob response
+      const blob = mergeResponse as Blob;
       const url = window.URL.createObjectURL(blob);
-
-      // Generate filename with format: {vendor_id}_{vendor_city}_{current_date}_{format}
-      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // yyyymmdd format
+      const currentDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const vendorId = user?.warehouseId || 'unknown';
       const vendorCity = vendorAddress?.city || 'unknown';
       const filename = `${vendorId}_${vendorCity}_${currentDate}_${selectedMergeFormat}.pdf`;
-
-      // Download using iOS-compatible method
       await downloadFile(url, filename);
 
-      console.log('✅ FRONTEND: Bulk labels PDF merged and downloaded successfully');
-
-      // Show success toast
-      if (mergeDialogData.totalFailed > 0) {
-        toast({
-          title: "⚠️ Bulk Download Completed with Warnings",
-          description: `Downloaded labels successfully, but ${mergeDialogData.totalFailed} order(s) failed. Please contact admin.`,
-          className: 'bg-yellow-50 border-yellow-400 text-yellow-800',
-        });
+      if (capturedTotalFailed > 0) {
+        toast({ title: '⚠️ Bulk Download Completed with Warnings', description: `Labels downloaded, but ${capturedTotalFailed} order(s) failed.`, className: 'bg-yellow-50 border-yellow-400 text-yellow-800' });
       } else {
-        toast({
-          title: "Bulk Download Complete",
-          description: `Successfully downloaded labels for ${mergeDialogData.totalSuccessful} orders`,
-        });
+        toast({ title: 'Bulk Download Complete', description: `Successfully downloaded labels for ${capturedTotalSuccessful} orders` });
       }
-
-      // Close dialog
       setShowMergeDialog(false);
       setMergeDialogData(null);
 
-      // OPTIMIZATION: Only refresh "My Orders" tab with pagination (fast) instead of all orders (slow)
-      console.log('🔄 FRONTEND: Refreshing grouped orders for My Orders tab...');
       try {
         setGroupedOrdersPage(1);
         const groupedResponse = await apiClient.getGroupedOrders(1, 50);
@@ -3402,19 +3524,12 @@ export function VendorDashboard() {
             setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
             setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
           }
-          console.log('✅ FRONTEND: Grouped orders refreshed successfully');
         }
-      } catch (refreshError) {
-        console.log('⚠️ FRONTEND: Failed to refresh grouped orders, but bulk download was successful:', refreshError);
-      }
+      } catch (_) {}
 
-      // Clear selected orders
-      const activeTab = selectedMyOrders.length > 0 ? "my-orders" : "all-orders";
-      if (activeTab === "my-orders") {
-        setSelectedMyOrders([])
-      } else {
-        setSelectedOrdersForDownload([])
-      }
+      const at = selectedMyOrders.length > 0 ? 'my-orders' : 'all-orders';
+      if (at === 'my-orders') setSelectedMyOrders([]);
+      else setSelectedOrdersForDownload([]);
 
     } catch (error) {
       console.error('❌ FRONTEND: PDF merge error:', error);
@@ -3902,72 +4017,96 @@ export function VendorDashboard() {
   const handleRefreshOrders = async () => {
     setOrdersRefreshing(true);
     try {
-      const response = await apiClient.refreshOrders();
-      if (response.success) {
+      // Submit async refresh task so it runs in background even if tab is hidden
+      const response = await apiClient.refreshOrders(true);
+
+      if ((response as any)?.taskId) {
+        registerTask(
+          (response as any).taskId,
+          async (tId: string, result: any) => {
+            toast({
+              title: 'Orders Refreshed',
+              description: result?.message || 'Your orders have been refreshed from Shipway.',
+            });
+            // Re-fetch local data
+            setActiveTab('all-orders');
+            setTabFilters({
+              'all-orders': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+              'my-orders': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+              'handover': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+              'order-tracking': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+            });
+            try {
+              const ordersResponse = await apiClient.getOrders();
+              if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
+                setOrders(ordersResponse.data.orders);
+              }
+              setGroupedOrdersPage(1);
+              const groupedResponse = await apiClient.getGroupedOrders(1, 50);
+              if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
+                setGroupedOrders(groupedResponse.data.groupedOrders);
+                if (groupedResponse.data.pagination) {
+                  setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
+                  setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
+                }
+              }
+              await fetchHandoverOrders();
+              await fetchOrderTrackingOrders();
+            } catch (_) {}
+            setOrdersRefreshing(false);
+          },
+          (tId: string, error: string) => {
+            toast({ title: 'Refresh Failed', description: error || 'Failed to refresh orders.', variant: 'destructive' });
+            setOrdersRefreshing(false);
+          }
+        );
         toast({
-          title: "Orders Refreshed",
-          description: "Your orders have been refreshed from Shipway.",
+          title: '🔄 Refresh Started',
+          description: 'Syncing orders with Shipway in background — this may take a moment.',
         });
+        // Note: don't clear ordersRefreshing here — the task callback does it
+        return;
+      }
 
-        // Clear filters and refresh all orders
-        setActiveTab("all-orders");
+      // Fallback: sync path
+      if (response.success) {
+        toast({ title: 'Orders Refreshed', description: 'Your orders have been refreshed from Shipway.' });
+        setActiveTab('all-orders');
         setTabFilters({
-          "all-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-          "my-orders": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-          "handover": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
-          "order-tracking": { searchTerm: "", dateFrom: undefined, dateTo: undefined },
+          'all-orders': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+          'my-orders': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+          'handover': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
+          'order-tracking': { searchTerm: '', dateFrom: undefined, dateTo: undefined },
         });
-
-        // Re-fetch all orders and grouped orders
         try {
           const ordersResponse = await apiClient.getOrders();
-          if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) {
-            setOrders(ordersResponse.data.orders);
-            console.log('✅ FRONTEND: Orders refreshed successfully');
-          }
-
-          // Reset pagination and fetch first page
+          if (ordersResponse.success && ordersResponse.data && Array.isArray(ordersResponse.data.orders)) setOrders(ordersResponse.data.orders);
           setGroupedOrdersPage(1);
           const groupedResponse = await apiClient.getGroupedOrders(1, 50);
           if (groupedResponse.success && groupedResponse.data && Array.isArray(groupedResponse.data.groupedOrders)) {
             setGroupedOrders(groupedResponse.data.groupedOrders);
-
-            // Update pagination metadata
             if (groupedResponse.data.pagination) {
               setGroupedOrdersHasMore(groupedResponse.data.pagination.hasMore);
               setGroupedOrdersTotalCount(groupedResponse.data.pagination.total);
             }
-
-            console.log('✅ FRONTEND: Grouped orders refreshed successfully');
           }
-
-          // Refresh Handover orders
           await fetchHandoverOrders();
-
-          // Refresh Order Tracking orders
           await fetchOrderTrackingOrders();
-        } catch (refreshError) {
-          console.log('⚠️ FRONTEND: Failed to refresh orders data, but Shipway sync was successful');
-        }
-
-        console.log('✅ FRONTEND: Orders refreshed successfully via API');
+        } catch (_) {}
       } else {
-        toast({
-          title: "Refresh Failed",
-          description: response.message || "Failed to refresh orders.",
-          variant: "destructive",
-        });
+        toast({ title: 'Refresh Failed', description: response.message || 'Failed to refresh orders.', variant: 'destructive' });
       }
     } catch (error) {
       console.error('❌ FRONTEND: Error refreshing orders:', error);
       toast({
-        title: "Refresh Failed",
-        description: error instanceof Error ? error.message : "An error occurred while refreshing orders.",
-        variant: "destructive",
+        title: 'Refresh Failed',
+        description: error instanceof Error ? error.message : 'An error occurred while refreshing orders.',
+        variant: 'destructive',
       });
     } finally {
       setOrdersRefreshing(false);
     }
+
   };
 
   return (

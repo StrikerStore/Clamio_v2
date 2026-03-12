@@ -47,14 +47,19 @@ function loadFromStorage(): Omit<PendingTask, 'onComplete' | 'onError'>[] {
     }
 }
 
-function saveToStorage(tasks: Omit<PendingTask, 'onComplete' | 'onError'>[]) {
+function saveToStorage(tasks: PendingTask[]) {
     if (typeof window === 'undefined') return;
     if (tasks.length === 0) {
         localStorage.removeItem(STORAGE_KEY);
     } else {
         // Strip callbacks before saving (functions can't be JSON-serialised)
         localStorage.setItem(STORAGE_KEY, JSON.stringify(
-            tasks.map(({ onComplete: _a, onError: _b, ...rest }) => rest)
+            tasks.map(t => ({
+                taskId: t.taskId,
+                type: t.type,
+                meta: t.meta,
+                startedAt: t.startedAt
+            }))
         ));
     }
 }
@@ -64,12 +69,17 @@ function getAuthHeader(): string {
     return localStorage.getItem('authHeader') || localStorage.getItem('vendorToken') || '';
 }
 
-export function useAsyncTask() {
+interface UseAsyncTaskOptions {
+    onComplete?: (taskId: string, result: any) => void;
+    onError?: (taskId: string, error: string) => void;
+}
+
+export function useAsyncTask(options?: UseAsyncTaskOptions) {
     // activeTasks drives UI indicators (spinner, disabling buttons, etc.)
     const [activeTasks, setActiveTasks] = useState<PendingTask[]>([]);
 
     // Keeps per-task callbacks in memory so they survive re-renders
-    const callbacksRef = useRef<Map<string, { onComplete?: (r: any) => void; onError?: (e: string) => void }>>(new Map());
+    const callbacksRef = useRef<Map<string, { onComplete?: (taskId: string, r: any) => void; onError?: (taskId: string, e: string) => void }>>(new Map());
 
     // visibilitychange listener dedup refs  
     const visibilityHandlers = useRef<Map<string, () => void>>(new Map());
@@ -86,7 +96,12 @@ export function useAsyncTask() {
             if (res.status === 404) {
                 // Task expired on backend (>1 hour old)
                 const cbs = callbacksRef.current.get(taskId);
-                cbs?.onError?.('Task expired. Please retry the operation.');
+                const expiredMsg = 'Task expired. Please retry the operation.';
+                if (cbs?.onError) {
+                    cbs.onError(taskId, expiredMsg);
+                } else {
+                    options?.onError?.(taskId, expiredMsg);
+                }
                 removeTask(taskId);
                 return;
             }
@@ -96,7 +111,12 @@ export function useAsyncTask() {
 
             if (task.status === 'completed') {
                 const cbs = callbacksRef.current.get(taskId);
-                cbs?.onComplete?.(task.result);
+                const result = task.result;
+                if (cbs?.onComplete) {
+                    cbs.onComplete(taskId, result);
+                } else {
+                    options?.onComplete?.(taskId, result);
+                }
                 removeTask(taskId);
                 // Tell backend to clean up
                 fetch(`${API_BASE_URL}/tasks/${taskId}`, {
@@ -105,7 +125,12 @@ export function useAsyncTask() {
                 }).catch(() => {/* non-critical */ });
             } else if (task.status === 'failed') {
                 const cbs = callbacksRef.current.get(taskId);
-                cbs?.onError?.(task.error || 'Operation failed. Please retry.');
+                const errMsg = task.error || 'Operation failed. Please retry.';
+                if (cbs?.onError) {
+                    cbs.onError(taskId, errMsg);
+                } else {
+                    options?.onError?.(taskId, errMsg);
+                }
                 removeTask(taskId);
             } else {
                 // Still processing — schedule next poll
@@ -147,8 +172,8 @@ export function useAsyncTask() {
     const addTask = useCallback((task: PendingTask) => {
         // Save callbacks (not serialisable, keep in memory only)
         callbacksRef.current.set(task.taskId, {
-            onComplete: task.onComplete,
-            onError: task.onError
+            onComplete: task.onComplete as any,
+            onError: task.onError as any
         });
 
         setActiveTasks(prev => {
@@ -160,6 +185,27 @@ export function useAsyncTask() {
         // Start polling immediately
         pollTask(task.taskId);
     }, [pollTask]);
+
+    // ── Register an already-submitted task by taskId ──────────────────────────
+    /**
+     * Use this when you've already made the API call and received a taskId.
+     * Just registers the taskId for polling + stores optional per-task callbacks.
+     */
+    const registerTask = useCallback((
+        taskId: string,
+        onComplete?: (taskId: string, result: any) => void,
+        onError?: (taskId: string, error: string) => void,
+        type: string = 'unknown'
+    ) => {
+        const task: PendingTask = {
+            taskId,
+            type,
+            startedAt: new Date().toISOString(),
+            onComplete: onComplete as any,
+            onError: onError as any
+        };
+        addTask(task);
+    }, [addTask]);
 
     // ── Remove a task (cleanup) ───────────────────────────────────────────────
     const removeTask = useCallback((taskId: string) => {
@@ -250,6 +296,7 @@ export function useAsyncTask() {
 
     return {
         submitTask,
+        registerTask,
         activeTasks,
         isTaskActive,
         getTaskByMeta,
