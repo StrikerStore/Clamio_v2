@@ -2822,19 +2822,36 @@ router.post('/download-label', async (req, res) => {
       console.log('✅ CONDITION 1: Direct download - all products claimed by vendor');
 
       if (isShiprocket) {
-        // Shiprocket direct download - AWB assign will be implemented later
-        console.log('🚀 Shiprocket direct download - AWB assign API pending implementation');
-        return res.status(200).json({
-          success: false,
-          message: 'Shiprocket direct download (AWB assign) is pending implementation',
-          data: {
-            original_order_id: order_id,
-            shipping_url: null,
-            awb: null,
-            carrier_id: null,
-            carrier_name: null
+        // Shiprocket direct download — AWB assign + label generation
+        console.log('🚀 Shiprocket direct download — assigning AWB + generating label...');
+        const labelResponse = await generateLabelForShiprocketOrder(order_id, claimedProducts, vendor, format);
+
+        // Store label in cache after successful generation (same pattern as Shipway)
+        if (labelResponse.success && labelResponse.data.shipping_url) {
+          try {
+            const labelDataToStore = {
+              order_id: order_id,
+              account_code: accountCode,
+              label_url: labelResponse.data.shipping_url,
+              awb: labelResponse.data.awb,
+              carrier_id: labelResponse.data.carrier_id,
+              carrier_name: labelResponse.data.carrier_name
+            };
+
+            console.log(`📦 Storing label data for Shiprocket direct download:`, labelDataToStore);
+            await database.upsertLabel(labelDataToStore);
+
+            // Mark all claimed products as label_downloaded
+            for (const product of claimedProducts) {
+              await database.updateOrder(product.unique_id, { label_downloaded: 1 });
+            }
+            console.log(`✅ Label cached and products marked as downloaded`);
+          } catch (cacheError) {
+            console.error('⚠️ Failed to cache Shiprocket label (continuing anyway):', cacheError.message);
           }
-        });
+        }
+
+        return res.json(labelResponse);
       } else {
         // Shipway direct download (existing flow)
       const labelResponse = await generateLabelForOrder(order_id, claimedProducts, vendor, format);
@@ -3613,13 +3630,14 @@ async function generateFormattedLabelPDF(shippingUrl, format) {
 }
 
 /**
- * Handle order cloning (Condition 2: Clone required)
+ * Handle order cloning (Condition 2: Clone required) — SHIPWAY
+ * Transaction-aware: checks for in-progress transaction and resumes from last successful step.
  */
 async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix = null) {
   const MAX_ATTEMPTS = 5;
-  let cloneOrderId;
+  const accountCode = claimedProducts[0]?.account_code;
 
-  console.log('🚀 Starting updated clone process...');
+  console.log('🚀 Starting Shipway clone process (transaction-aware)...');
   console.log(`📊 Input Analysis:`);
   console.log(`  - Original Order ID: ${originalOrderId}`);
   console.log(`  - Total products in order: ${allOrderProducts.length}`);
@@ -3629,123 +3647,120 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
     console.log(`  - Forced Clone Suffix: ${forceCloneSuffix} (Retry attempt to avoid conflict)`);
   }
 
+  // ============================================================================
+  // PHASE 1: CHECK FOR EXISTING TRANSACTION (RESUME PATH)
+  // ============================================================================
+  let tx = null;
+  let inputData = null;
+  let skipToStep = 0;
+
+  if (!forceCloneSuffix) {
+    tx = await findExistingCloneTransaction(originalOrderId, vendor.warehouseId, accountCode);
+  }
+
+  if (tx) {
+    // RESUME PATH — use the stored clone_order_id
+    console.log(`\n🔄 RESUME PATH: Found existing transaction #${tx.id} (last status: ${tx.status})`);
+    console.log(`  - Stored clone_order_id: ${tx.clone_order_id}`);
+
+    inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor);
+    inputData.cloneOrderId = tx.clone_order_id; // CRITICAL: use stored clone ID, don't generate new
+
+    // Determine which step to resume from
+    switch (tx.status) {
+      case 'initiated':        skipToStep = 1; break; // Restart from create clone
+      case 'clone_created':    skipToStep = 3; break; // Skip create+verify, go to update original
+      case 'original_updated': skipToStep = 5; break; // Skip to update local DB
+      case 'db_updated':       skipToStep = 6; break; // Skip to label generation
+      default:                 skipToStep = 1; break; // Fallback
+    }
+    console.log(`  - Resuming from step ${skipToStep}`);
+  } else {
+    // NEW PATH — generate fresh clone ID and record transaction
+    inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix);
+
+    tx = await createCloneTransaction({
+      original_order_id: originalOrderId,
+      clone_order_id: inputData.cloneOrderId,
+      account_code: accountCode,
+      vendor_warehouse_id: vendor.warehouseId,
+      shipping_partner: 'shipway',
+      claimed_product_unique_ids: JSON.stringify(claimedProducts.map(p => p.unique_id)),
+      claimed_product_codes: JSON.stringify(claimedProducts.map(p => p.product_code))
+    });
+    skipToStep = 1;
+  }
+
+  const cloneOrderId = inputData.cloneOrderId;
+  console.log(`  - Clone Order ID: ${cloneOrderId}`);
+  console.log(`  - Claimed products: ${inputData.claimedProducts.length}`);
+  console.log(`  - Remaining products: ${inputData.remainingProducts.length}`);
+
+  // ============================================================================
+  // PHASE 2: EXECUTE STEPS (skipping already-completed ones)
+  // ============================================================================
   try {
-    // ============================================================================
-    // STEP 0: DATA PREPARATION & CONSISTENCY
-    // ============================================================================
-    console.log('\n📋 STEP 0: Capturing and freezing input data...');
-
-    const inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix);
-    cloneOrderId = inputData.cloneOrderId;
-
-    console.log(`✅ Input data captured and frozen:`);
-    console.log(`  - Clone Order ID: ${cloneOrderId}`);
-    console.log(`  - Claimed products: ${inputData.claimedProducts.length}`);
-    console.log(`  - Remaining products: ${inputData.remainingProducts.length}`);
-    console.log(`  - Data timestamp: ${inputData.timestamp}`);
-
-    // ============================================================================
     // STEP 1: CREATE CLONE ORDER (NO LABEL)
-    // ============================================================================
-    console.log('\n🔧 STEP 1: Creating clone order (without label)...');
+    if (skipToStep <= 1) {
+      console.log('\n🔧 STEP 1: Creating clone order (without label)...');
+      await retryOperation((data) => createCloneOrderOnly(data), MAX_ATTEMPTS, 'Create clone order', inputData);
+      await updateCloneTransactionStatus(tx.id, 'clone_created');
+      console.log('✅ STEP 1 COMPLETED: Clone order created');
+    } else {
+      console.log('\n⏩ STEP 1: SKIPPED (already completed)');
+    }
 
-    await retryOperation(
-      (data) => createCloneOrderOnly(data),
-      MAX_ATTEMPTS,
-      'Create clone order',
-      inputData
-    );
-
-    console.log('✅ STEP 1 COMPLETED: Clone order created successfully');
-
-    // ============================================================================
     // STEP 2: VERIFY CLONE CREATION
-    // ============================================================================
-    console.log('\n🔍 STEP 2: Verifying clone creation...');
+    if (skipToStep <= 2) {
+      console.log('\n🔍 STEP 2: Verifying clone creation...');
+      await retryOperation((data) => verifyCloneExists(data), MAX_ATTEMPTS, 'Verify clone creation', inputData);
+      console.log('✅ STEP 2 COMPLETED: Clone verified');
+    } else {
+      console.log('\n⏩ STEP 2: SKIPPED (already completed)');
+    }
 
-    await retryOperation(
-      (data) => verifyCloneExists(data),
-      MAX_ATTEMPTS,
-      'Verify clone creation',
-      inputData
-    );
-
-    console.log('✅ STEP 2 COMPLETED: Clone creation verified');
-
-    // ============================================================================
     // STEP 3: UPDATE ORIGINAL ORDER
-    // ============================================================================
-    console.log('\n📝 STEP 3: Updating original order (removing claimed products)...');
+    if (skipToStep <= 3) {
+      console.log('\n📝 STEP 3: Updating original order (removing claimed products)...');
+      await retryOperation((data) => updateOriginalOrder(data), MAX_ATTEMPTS, 'Update original order', inputData);
+      console.log('✅ STEP 3 COMPLETED: Original order updated');
+    } else {
+      console.log('\n⏩ STEP 3: SKIPPED (already completed)');
+    }
 
-    await retryOperation(
-      (data) => updateOriginalOrder(data),
-      MAX_ATTEMPTS,
-      'Update original order',
-      inputData
-    );
-
-    console.log('✅ STEP 3 COMPLETED: Original order updated');
-
-    // ============================================================================
     // STEP 4: VERIFY ORIGINAL ORDER UPDATE
-    // ============================================================================
-    console.log('\n🔍 STEP 4: Verifying original order update...');
+    if (skipToStep <= 4) {
+      console.log('\n🔍 STEP 4: Verifying original order update...');
+      await retryOperation((data) => verifyOriginalOrderUpdate(data), MAX_ATTEMPTS, 'Verify original order update', inputData);
+      await updateCloneTransactionStatus(tx.id, 'original_updated');
+      console.log('✅ STEP 4 COMPLETED: Original order update verified');
+    } else {
+      console.log('\n⏩ STEP 4: SKIPPED (already completed)');
+    }
 
-    await retryOperation(
-      (data) => verifyOriginalOrderUpdate(data),
-      MAX_ATTEMPTS,
-      'Verify original order update',
-      inputData
-    );
+    // STEP 5: UPDATE LOCAL DATABASE
+    if (skipToStep <= 5) {
+      console.log('\n💾 STEP 5: Updating local database after clone creation...');
+      await retryOperation((data) => updateLocalDatabaseAfterClone(data), MAX_ATTEMPTS, 'Update local database', inputData);
+      await updateCloneTransactionStatus(tx.id, 'db_updated');
+      console.log('✅ STEP 5 COMPLETED: Local database updated');
+    } else {
+      console.log('\n⏩ STEP 5: SKIPPED (already completed)');
+    }
 
-    console.log('✅ STEP 4 COMPLETED: Original order update verified');
-
-    // ============================================================================
-    // STEP 5: UPDATE LOCAL DATABASE (AFTER CLONE CREATION)
-    // ============================================================================
-    console.log('\n💾 STEP 5: Updating local database after clone creation...');
-
-    await retryOperation(
-      (data) => updateLocalDatabaseAfterClone(data),
-      MAX_ATTEMPTS,
-      'Update local database after clone',
-      inputData
-    );
-
-    console.log('✅ STEP 5 COMPLETED: Local database updated');
-
-    // ============================================================================
     // STEP 6: GENERATE LABEL FOR CLONE
-    // ============================================================================
     console.log('\n🏷️ STEP 6: Generating label for clone order...');
+    const labelResponse = await retryOperation((data) => generateLabelForClone(data), MAX_ATTEMPTS, 'Generate clone label', inputData);
+    console.log('✅ STEP 6 COMPLETED: Label generated');
 
-    const labelResponse = await retryOperation(
-      (data) => generateLabelForClone(data),
-      MAX_ATTEMPTS,
-      'Generate clone order label',
-      inputData
-    );
-
-    console.log('✅ STEP 6 COMPLETED: Label generated successfully');
-
-    // ============================================================================
-    // STEP 7: MARK LABEL AS DOWNLOADED AND STORE IN LABELS TABLE
-    // ============================================================================
+    // STEP 7: MARK LABEL AS DOWNLOADED
     console.log('\n✅ STEP 7: Marking label as downloaded and caching URL...');
+    await retryOperation((data) => markLabelAsDownloaded(data, labelResponse), MAX_ATTEMPTS, 'Mark label downloaded', inputData);
+    await updateCloneTransactionStatus(tx.id, 'completed');
+    console.log('✅ STEP 7 COMPLETED: Label marked as downloaded');
 
-    await retryOperation(
-      (data) => markLabelAsDownloaded(data, labelResponse),
-      MAX_ATTEMPTS,
-      'Mark label as downloaded and cache URL',
-      inputData
-    );
-
-    console.log('✅ STEP 7 COMPLETED: Label marked as downloaded and cached');
-
-    // ============================================================================
     // STEP 8: RETURN SUCCESS
-    // ============================================================================
-    console.log('\n🎉 STEP 8: Clone process completed successfully!');
+    console.log('\n🎉 Clone process completed successfully!');
     console.log(`  - Original Order ID: ${inputData.originalOrderId}`);
     console.log(`  - Clone Order ID: ${cloneOrderId}`);
     console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
@@ -3763,7 +3778,9 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
     };
 
   } catch (error) {
-    console.error(`❌ Clone process failed after ${MAX_ATTEMPTS} attempts for each step:`, error);
+    // Record error in transaction but preserve last successful status for resume
+    await updateCloneTransactionStatus(tx.id, tx.status || 'initiated', { error_message: error.message });
+    console.error(`❌ Shipway clone failed (tx #${tx.id}):`, error.message);
     throw new Error(`Order cloning failed: ${error.message}`);
   }
 }
@@ -3806,13 +3823,104 @@ async function retryOperation(operation, maxAttempts, stepName, inputData) {
 }
 
 /**
- * Handle Shiprocket order cloning (Condition 2: Clone required)
+ * ============================================================================
+ * CLONE TRANSACTION HELPERS
+ * Used by both Shipway and Shiprocket clone flows to track progress and resume.
+ * ============================================================================
+ */
+
+/**
+ * Find an in-progress clone transaction for this order + vendor.
+ * Returns the most recent non-completed transaction, or null if none exists.
+ */
+async function findExistingCloneTransaction(originalOrderId, vendorWarehouseId, accountCode) {
+  const database = require('../config/database');
+  try {
+    const [rows] = await database.mysqlConnection.execute(
+      `SELECT * FROM clone_transactions 
+       WHERE original_order_id = ? 
+         AND vendor_warehouse_id = ? 
+         AND account_code = ?
+         AND status NOT IN ('completed', 'rolled_back')
+       ORDER BY created_at DESC LIMIT 1`,
+      [originalOrderId, vendorWarehouseId, accountCode]
+    );
+    if (rows.length > 0) {
+      console.log(`🔍 Found existing clone transaction #${rows[0].id} (status: ${rows[0].status}, clone_id: ${rows[0].clone_order_id})`);
+    }
+    return rows.length > 0 ? rows[0] : null;
+  } catch (error) {
+    console.error(`❌ Error finding clone transaction: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Record intent to clone before any external API calls are made.
+ * This ensures we can always find and resume a clone that started but didn't finish.
+ */
+async function createCloneTransaction(data) {
+  const database = require('../config/database');
+  const [result] = await database.mysqlConnection.execute(
+    `INSERT INTO clone_transactions 
+     (original_order_id, clone_order_id, account_code, vendor_warehouse_id,
+      shipping_partner, claimed_product_unique_ids, claimed_product_codes, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'initiated')`,
+    [data.original_order_id, data.clone_order_id, data.account_code,
+     data.vendor_warehouse_id, data.shipping_partner,
+     data.claimed_product_unique_ids, data.claimed_product_codes]
+  );
+  console.log(`📝 Clone transaction #${result.insertId} created (${data.shipping_partner}: ${data.original_order_id} → ${data.clone_order_id})`);
+  return { id: result.insertId, ...data, status: 'initiated' };
+}
+
+/**
+ * Update clone transaction status after each step completes.
+ * Also stores auxiliary data like shipment_id, awb_code, carrier_id as they become available.
+ */
+async function updateCloneTransactionStatus(txId, status, extras = {}) {
+  const database = require('../config/database');
+  
+  // Build dynamic SET clause for optional fields
+  let setClauses = ['status = ?'];
+  let params = [status];
+
+  if (extras.error_message !== undefined) {
+    setClauses.push('error_message = ?');
+    params.push(extras.error_message);
+  }
+  if (extras.clone_shipment_id !== undefined) {
+    setClauses.push('clone_shipment_id = ?');
+    params.push(extras.clone_shipment_id);
+  }
+  if (extras.awb_code !== undefined) {
+    setClauses.push('awb_code = ?');
+    params.push(extras.awb_code);
+  }
+  if (extras.assigned_carrier_id !== undefined) {
+    setClauses.push('assigned_carrier_id = ?');
+    params.push(extras.assigned_carrier_id);
+  }
+  
+  params.push(txId);
+  
+  await database.mysqlConnection.execute(
+    `UPDATE clone_transactions SET ${setClauses.join(', ')} WHERE id = ?`,
+    params
+  );
+  console.log(`📝 Clone transaction #${txId}: status → '${status}'${extras.clone_shipment_id ? ` (shipment: ${extras.clone_shipment_id})` : ''}${extras.awb_code ? ` (awb: ${extras.awb_code})` : ''}`);
+}
+
+/**
+ * Handle Shiprocket order cloning (Condition 2: Clone required) — SHIPROCKET
+ * Transaction-aware: checks for in-progress transaction and resumes from last successful step.
+ * Unlike Shipway, Shiprocket requires separate API calls for AWB assignment and label generation.
  */
 async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix = null) {
   const MAX_ATTEMPTS = 5;
-  let cloneOrderId;
+  const accountCode = claimedProducts[0]?.account_code;
 
-  console.log('🚀 Starting Shiprocket clone process...');
+  console.log('🚀 Starting Shiprocket clone process (transaction-aware)...');
   console.log(`📊 Input Analysis:`);
   console.log(`  - Original Order ID: ${originalOrderId}`);
   console.log(`  - Total products in order: ${allOrderProducts.length}`);
@@ -3822,111 +3930,162 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
     console.log(`  - Forced Clone Suffix: ${forceCloneSuffix} (Retry attempt to avoid conflict)`);
   }
 
-  try {
-    // ============================================================================
-    // STEP 0: DATA PREPARATION & CONSISTENCY
-    // ============================================================================
-    console.log('\n📋 STEP 0: Capturing and freezing input data...');
+  // ============================================================================
+  // PHASE 1: CHECK FOR EXISTING TRANSACTION (RESUME PATH)
+  // ============================================================================
+  let tx = null;
+  let inputData = null;
+  let skipToStep = 0;
 
-    const inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix);
-    cloneOrderId = inputData.cloneOrderId;
+  if (!forceCloneSuffix) {
+    tx = await findExistingCloneTransaction(originalOrderId, vendor.warehouseId, accountCode);
+  }
 
-    console.log(`✅ Input data captured and frozen:`);
-    console.log(`  - Clone Order ID: ${cloneOrderId}`);
-    console.log(`  - Claimed products: ${inputData.claimedProducts.length}`);
-    console.log(`  - Remaining products: ${inputData.remainingProducts.length}`);
-    console.log(`  - Data timestamp: ${inputData.timestamp}`);
+  if (tx) {
+    // RESUME PATH — use the stored clone_order_id and any partial data
+    console.log(`\n🔄 RESUME PATH: Found existing SR transaction #${tx.id} (last status: ${tx.status})`);
+    console.log(`  - Stored clone_order_id: ${tx.clone_order_id}`);
 
-    // Get warehouse mapping for pickup_location
-    const database = require('../config/database');
-    const whMapping = await database.getWhMappingByClaimioWhIdAndAccountCode(vendor.warehouseId, inputData.accountCode);
-    if (!whMapping || !whMapping.pickup_location) {
-      throw new Error(`Warehouse mapping not found or pickup_location missing for claimio_wh_id: ${vendor.warehouseId}, account_code: ${inputData.accountCode}`);
+    inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor);
+    inputData.cloneOrderId = tx.clone_order_id; // CRITICAL: use stored clone ID
+
+    // Restore partial data from transaction
+    if (tx.clone_shipment_id) {
+      inputData.cloneShipmentIdForShipment = tx.clone_shipment_id;
+      console.log(`  - Restored shipment_id: ${tx.clone_shipment_id}`);
     }
-    inputData.pickupLocation = whMapping.pickup_location;
-    console.log(`  - Pickup Location: ${whMapping.pickup_location}`);
+    if (tx.awb_code) {
+      inputData.awbCode = tx.awb_code;
+      console.log(`  - Restored awb_code: ${tx.awb_code}`);
+    }
+    if (tx.assigned_carrier_id) {
+      inputData.assignedCarrierId = tx.assigned_carrier_id;
+      console.log(`  - Restored carrier_id: ${tx.assigned_carrier_id}`);
+    }
 
-    // ============================================================================
-    // STEP 1: CREATE CLONE ORDER (NO LABEL)
-    // ============================================================================
-    console.log('\n🔧 STEP 1: Creating clone order (without label)...');
+    // Determine which step to resume from
+    switch (tx.status) {
+      case 'initiated':        skipToStep = 1; break;
+      case 'clone_created':    skipToStep = 2; break;
+      case 'awb_assigned':     skipToStep = 3; break;
+      case 'original_updated': skipToStep = 4; break;
+      case 'db_updated':       skipToStep = 5; break;
+      default:                 skipToStep = 1; break;
+    }
+    console.log(`  - Resuming from step ${skipToStep}`);
+  } else {
+    // NEW PATH
+    inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix);
 
-    await retryOperation(
-      (data) => createShiprocketCloneOrderOnly(data),
-      MAX_ATTEMPTS,
-      'Create Shiprocket clone order',
-      inputData
-    );
+    tx = await createCloneTransaction({
+      original_order_id: originalOrderId,
+      clone_order_id: inputData.cloneOrderId,
+      account_code: accountCode,
+      vendor_warehouse_id: vendor.warehouseId,
+      shipping_partner: 'shiprocket',
+      claimed_product_unique_ids: JSON.stringify(claimedProducts.map(p => p.unique_id)),
+      claimed_product_codes: JSON.stringify(claimedProducts.map(p => p.product_code))
+    });
+    skipToStep = 1;
+  }
 
-    console.log('✅ STEP 1 COMPLETED: Clone order created successfully');
+  // Get warehouse mapping for pickup_location
+  const database = require('../config/database');
+  const whMapping = await database.getWhMappingByClaimioWhIdAndAccountCode(vendor.warehouseId, inputData.accountCode);
+  if (!whMapping || !whMapping.pickup_location) {
+    throw new Error(`Warehouse mapping not found or pickup_location missing for claimio_wh_id: ${vendor.warehouseId}, account_code: ${inputData.accountCode}`);
+  }
+  inputData.pickupLocation = whMapping.pickup_location;
 
-    // ============================================================================
-    // STEP 2: VERIFY CLONE CREATION (SKIP FOR NOW - can be added later)
-    // ============================================================================
-    console.log('\n🔍 STEP 2: Skipping clone verification (to be implemented)...');
+  const cloneOrderId = inputData.cloneOrderId;
+  console.log(`  - Clone Order ID: ${cloneOrderId}`);
+  console.log(`  - Pickup Location: ${whMapping.pickup_location}`);
 
-    // ============================================================================
+  // ============================================================================
+  // PHASE 2: EXECUTE STEPS
+  // ============================================================================
+  try {
+    // STEP 1: CREATE CLONE ORDER
+    if (skipToStep <= 1) {
+      console.log('\n🔧 STEP 1: Creating Shiprocket clone order...');
+      await retryOperation((data) => createShiprocketCloneOrderOnly(data), MAX_ATTEMPTS, 'Create SR clone', inputData);
+      await updateCloneTransactionStatus(tx.id, 'clone_created', {
+        clone_shipment_id: inputData.cloneShipmentIdForShipment || null
+      });
+      console.log('✅ STEP 1 COMPLETED: Clone order created');
+    } else {
+      console.log('\n⏩ STEP 1: SKIPPED (already completed)');
+    }
+
+    // STEP 2: ASSIGN AWB (Shiprocket-specific)
+    if (skipToStep <= 2) {
+      console.log('\n🔗 STEP 2: Assigning AWB for Shiprocket clone...');
+      await retryOperation((data) => assignAWBForShiprocketClone(data), MAX_ATTEMPTS, 'Assign AWB', inputData);
+      await updateCloneTransactionStatus(tx.id, 'awb_assigned', {
+        awb_code: inputData.awbCode || null,
+        assigned_carrier_id: inputData.assignedCarrierId || null
+      });
+      console.log('✅ STEP 2 COMPLETED: AWB assigned');
+    } else {
+      console.log('\n⏩ STEP 2: SKIPPED (already completed)');
+    }
+
     // STEP 3: UPDATE ORIGINAL ORDER
-    // ============================================================================
-    console.log('\n📝 STEP 3: Updating original order (removing claimed products)...');
+    if (skipToStep <= 3) {
+      console.log('\n📝 STEP 3: Updating original Shiprocket order...');
+      await retryOperation((data) => updateShiprocketOriginalOrder(data), MAX_ATTEMPTS, 'Update SR original', inputData);
+      await updateCloneTransactionStatus(tx.id, 'original_updated');
+      console.log('✅ STEP 3 COMPLETED: Original order updated');
+    } else {
+      console.log('\n⏩ STEP 3: SKIPPED (already completed)');
+    }
 
-    await retryOperation(
-      (data) => updateShiprocketOriginalOrder(data),
-      MAX_ATTEMPTS,
-      'Update Shiprocket original order',
-      inputData
-    );
+    // STEP 4: UPDATE LOCAL DATABASE
+    if (skipToStep <= 4) {
+      console.log('\n💾 STEP 4: Updating local database after clone...');
+      await retryOperation((data) => updateLocalDatabaseAfterClone(data), MAX_ATTEMPTS, 'Update local DB', inputData);
+      await updateCloneTransactionStatus(tx.id, 'db_updated');
+      console.log('✅ STEP 4 COMPLETED: Local database updated');
+    } else {
+      console.log('\n⏩ STEP 4: SKIPPED (already completed)');
+    }
 
-    console.log('✅ STEP 3 COMPLETED: Original order updated');
+    // STEP 5: GENERATE LABEL
+    console.log('\n🏷️ STEP 5: Generating label for Shiprocket clone...');
+    const labelResponse = await retryOperation((data) => generateLabelForShiprocketClone(data), MAX_ATTEMPTS, 'Generate SR label', inputData);
+    console.log('✅ STEP 5 COMPLETED: Label generated');
 
-    // ============================================================================
-    // STEP 4: VERIFY ORIGINAL ORDER UPDATE (SKIP FOR NOW - can be added later)
-    // ============================================================================
-    console.log('\n🔍 STEP 4: Skipping original order update verification (to be implemented)...');
+    // STEP 6: MARK LABEL AS DOWNLOADED
+    console.log('\n✅ STEP 6: Marking label as downloaded...');
+    await retryOperation((data) => markLabelAsDownloaded(data, labelResponse), MAX_ATTEMPTS, 'Mark downloaded', inputData);
+    await updateCloneTransactionStatus(tx.id, 'completed');
+    console.log('✅ STEP 6 COMPLETED: Label marked as downloaded');
 
-    // ============================================================================
-    // STEP 5: UPDATE LOCAL DATABASE (AFTER CLONE CREATION)
-    // ============================================================================
-    console.log('\n💾 STEP 5: Updating local database after clone creation...');
-
-    await retryOperation(
-      (data) => updateLocalDatabaseAfterClone(data),
-      MAX_ATTEMPTS,
-      'Update local database after clone',
-      inputData
-    );
-
-    console.log('✅ STEP 5 COMPLETED: Local database updated');
-
-    // ============================================================================
-    // STEP 6: GENERATE LABEL FOR CLONE (SKIP FOR NOW - will be implemented later)
-    // ============================================================================
-    console.log('\n🏷️ STEP 6: Skipping label generation (AWB assign API - to be implemented)...');
-
-    // ============================================================================
-    // STEP 7: RETURN SUCCESS (WITHOUT LABEL)
-    // ============================================================================
-    console.log('\n🎉 STEP 7: Shiprocket clone process completed successfully!');
+    // RETURN SUCCESS
+    console.log('\n🎉 Shiprocket clone process completed successfully!');
     console.log(`  - Original Order ID: ${inputData.originalOrderId}`);
     console.log(`  - Clone Order ID: ${cloneOrderId}`);
-    console.log(`  - Note: Label generation (AWB assign) will be implemented separately`);
+    console.log(`  - Label URL: ${labelResponse?.data?.shipping_url || 'N/A'}`);
+    console.log(`  - AWB: ${inputData.awbCode || 'N/A'}`);
 
     return {
       success: true,
-      message: `Shiprocket clone order created successfully.`,
+      message: 'Shiprocket clone order created and label generated successfully',
       data: {
         original_order_id: inputData.originalOrderId,
         clone_order_id: cloneOrderId,
-        clone_shipment_id: inputData.cloneShipmentIdForShipment || null, // Use actual shipment_id from create response (if not available, will be fetched from DB in fallback)
-        shipping_url: null, // Will be populated after label generation
-        awb: null, // Will be populated after AWB assign
-        carrier_id: null, // Will be populated after AWB assign
-        carrier_name: null // Will be populated after AWB assign
+        clone_shipment_id: inputData.cloneShipmentIdForShipment || null,
+        shipping_url: labelResponse?.data?.shipping_url || null,
+        awb: inputData.awbCode || null,
+        carrier_id: inputData.assignedCarrierId || null,
+        carrier_name: inputData.assignedCarrierName || null
       }
     };
 
   } catch (error) {
-    console.error('❌ SHIPROCKET CLONE ERROR:', error);
+    // Record error but preserve last successful status for resume
+    await updateCloneTransactionStatus(tx.id, tx.status || 'initiated', { error_message: error.message });
+    console.error(`❌ Shiprocket clone failed (tx #${tx.id}):`, error.message);
     throw error;
   }
 }
@@ -4066,6 +4225,201 @@ async function updateShiprocketOriginalOrder(inputData) {
   }
 }
 
+/**
+ * Step 2 (Shiprocket clone): Assign AWB to the clone order
+ * Tries each priority carrier in sequence (same fallback pattern as Shipway).
+ * Stores assigned carrier_id, carrier_name, and awb_code in inputData for later steps.
+ */
+async function assignAWBForShiprocketClone(inputData) {
+  const { cloneOrderId, accountCode, claimedProducts } = inputData;
+
+  // shipment_id was stored in inputData during Step 1 (createShiprocketCloneOrderOnly)
+  const shipmentId = inputData.cloneShipmentIdForShipment;
+  if (!shipmentId) {
+    throw new Error(`shipment_id not available for clone ${cloneOrderId}. Cannot assign AWB. Please retry — it may be populated on next attempt.`);
+  }
+
+  console.log(`🔗 Assigning AWB for Shiprocket clone...`);
+  console.log(`  - Clone Order ID: ${cloneOrderId}`);
+  console.log(`  - Shipment ID: ${shipmentId}`);
+
+  // Get priority carriers (already assigned during claim)
+  const priorityCarrierStr = claimedProducts[0]?.priority_carrier || '[]';
+  let priorityCarriers;
+  try {
+    priorityCarriers = JSON.parse(priorityCarrierStr);
+  } catch (e) {
+    priorityCarriers = [];
+  }
+  if (!Array.isArray(priorityCarriers) || priorityCarriers.length === 0) {
+    throw new Error(`No priority carriers assigned for clone ${cloneOrderId}. Please contact admin to assign carriers.`);
+  }
+
+  console.log(`  - Priority carriers to try: ${JSON.stringify(priorityCarriers)}`);
+
+  // Initialize Shiprocket service
+  const ShiprocketService = require('../services/shiprocketService');
+  const shiprocketService = new ShiprocketService(accountCode);
+
+  // Try each carrier in sequence (fallback pattern)
+  let awbResult = null;
+  let lastError = null;
+
+  for (const carrierId of priorityCarriers) {
+    try {
+      console.log(`  - Attempting AWB assign with carrier ${carrierId}...`);
+      awbResult = await shiprocketService.assignAWB(shipmentId, carrierId);
+      if (awbResult.success) {
+        inputData.assignedCarrierId = String(carrierId);
+        inputData.assignedCarrierName = awbResult.courier_name || '';
+        inputData.awbCode = awbResult.awb_code;
+        console.log(`  ✅ AWB assigned: ${awbResult.awb_code} (carrier: ${awbResult.courier_name})`);
+        break;
+      } else {
+        console.log(`  ❌ Carrier ${carrierId} rejected: ${awbResult.message}`);
+        lastError = new Error(awbResult.message || `AWB assign failed for carrier ${carrierId}`);
+      }
+    } catch (error) {
+      console.log(`  ❌ Carrier ${carrierId} error: ${error.message}`);
+      lastError = error;
+      continue;
+    }
+  }
+
+  if (!awbResult?.success) {
+    throw lastError || new Error(`All ${priorityCarriers.length} priority carriers failed for AWB assignment on clone ${cloneOrderId}.`);
+  }
+
+  return awbResult;
+}
+
+/**
+ * Step 5 (Shiprocket clone): Generate label using Shiprocket API
+ * Requires shipment_id from Step 1.
+ */
+async function generateLabelForShiprocketClone(inputData) {
+  const { cloneOrderId, accountCode } = inputData;
+  const shipmentId = inputData.cloneShipmentIdForShipment;
+
+  if (!shipmentId) {
+    throw new Error(`shipment_id not available for clone ${cloneOrderId}. Cannot generate label.`);
+  }
+
+  console.log(`🏷️ Generating label for Shiprocket clone...`);
+  console.log(`  - Clone Order ID: ${cloneOrderId}`);
+  console.log(`  - Shipment ID: ${shipmentId}`);
+
+  const ShiprocketService = require('../services/shiprocketService');
+  const shiprocketService = new ShiprocketService(accountCode);
+
+  const labelResult = await shiprocketService.generateLabel(
+    [parseInt(shipmentId)],
+    'thermal' // Default format
+  );
+
+  if (!labelResult.success) {
+    throw new Error(`Label generation failed for clone ${cloneOrderId}: ${labelResult.message}`);
+  }
+
+  console.log(`  ✅ Label generated: ${labelResult.label_url}`);
+
+  return {
+    success: true,
+    data: {
+      shipping_url: labelResult.label_url,
+      awb: inputData.awbCode || null,
+      carrier_id: inputData.assignedCarrierId || null,
+      carrier_name: inputData.assignedCarrierName || null
+    }
+  };
+}
+
+/**
+ * Shiprocket Direct Download (Condition 1): AWB assign + label generation for existing orders
+ * Used when ALL products are claimed by one vendor — no cloning needed.
+ * The original order already exists in Shiprocket, so we assign AWB + generate label directly.
+ */
+async function generateLabelForShiprocketOrder(orderId, products, vendor, format = 'thermal') {
+  const database = require('../config/database');
+  const accountCode = products[0]?.account_code;
+
+  console.log(`🚀 Shiprocket direct download (Condition 1) for order ${orderId}...`);
+
+  // Get shipment_id from orders table (already stored from sync)
+  const shipmentId = products[0]?.shipment_id;
+  if (!shipmentId) {
+    throw new Error(`shipment_id not found for order ${orderId}. The order may not have been synced yet. Please wait for the next sync cycle.`);
+  }
+
+  // Get priority carriers (already assigned during claim)
+  const priorityCarrierStr = products[0]?.priority_carrier || '[]';
+  let priorityCarriers;
+  try {
+    priorityCarriers = JSON.parse(priorityCarrierStr);
+  } catch (e) {
+    priorityCarriers = [];
+  }
+  if (!Array.isArray(priorityCarriers) || priorityCarriers.length === 0) {
+    throw new Error(`No priority carriers assigned for order ${orderId}. Please contact admin.`);
+  }
+
+  console.log(`  - Shipment ID: ${shipmentId}`);
+  console.log(`  - Priority carriers: ${JSON.stringify(priorityCarriers)}`);
+
+  // Initialize Shiprocket service
+  const ShiprocketService = require('../services/shiprocketService');
+  const shiprocketService = new ShiprocketService(accountCode);
+
+  // Try each carrier in sequence for AWB assignment
+  let awbResult = null;
+  let assignedCarrier = null;
+  let lastError = null;
+
+  for (const carrierId of priorityCarriers) {
+    try {
+      console.log(`  - Attempting AWB assign with carrier ${carrierId}...`);
+      awbResult = await shiprocketService.assignAWB(shipmentId, carrierId);
+      if (awbResult.success) {
+        assignedCarrier = { carrier_id: carrierId, carrier_name: awbResult.courier_name };
+        console.log(`  ✅ AWB assigned: ${awbResult.awb_code} (carrier: ${awbResult.courier_name})`);
+        break;
+      } else {
+        console.log(`  ❌ Carrier ${carrierId} rejected: ${awbResult.message}`);
+        lastError = new Error(awbResult.message || `AWB assign failed for carrier ${carrierId}`);
+      }
+    } catch (error) {
+      console.log(`  ❌ Carrier ${carrierId} error: ${error.message}`);
+      lastError = error;
+      continue;
+    }
+  }
+
+  if (!awbResult?.success) {
+    throw lastError || new Error(`All priority carriers failed for AWB assignment on order ${orderId}. Contact admin.`);
+  }
+
+  // Generate label
+  console.log(`  - Generating label (format: ${format})...`);
+  const labelResult = await shiprocketService.generateLabel([parseInt(shipmentId)], format);
+  if (!labelResult.success) {
+    throw new Error(`Label generation failed for order ${orderId}: ${labelResult.message}`);
+  }
+
+  console.log(`  ✅ Label generated: ${labelResult.label_url}`);
+
+  return {
+    success: true,
+    message: 'Label generated successfully (Shiprocket direct download)',
+    data: {
+      shipping_url: labelResult.label_url,
+      awb: awbResult.awb_code,
+      order_id: orderId,
+      carrier_id: assignedCarrier.carrier_id,
+      carrier_name: assignedCarrier.carrier_name
+    }
+  };
+}
+
 // Step 0: Prepare and freeze input data
 async function prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix = null) {
   console.log('📋 Capturing input data for clone process...');
@@ -4078,11 +4432,18 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
 
   console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
 
-  // Generate unique clone ID (with account_code for store-specific verification)
-  const cloneOrderId = await generateUniqueCloneId(originalOrderId, forceCloneSuffix, accountCode);
+  // Get database reference early (needed for both store lookup and customer info)
+  const database = require('../config/database');
+
+  // Detect shipping partner for this store (needed for partner-aware clone ID generation)
+  const store = await database.getStoreByAccountCode(accountCode);
+  const shippingPartner = (store?.shipping_partner || 'Shipway').toLowerCase();
+  console.log(`  - Shipping Partner: ${shippingPartner}`);
+
+  // Generate unique clone ID (partner-aware: skips Shipway API check for Shiprocket)
+  const cloneOrderId = await generateUniqueCloneId(originalOrderId, forceCloneSuffix, accountCode, shippingPartner);
 
   // Get customer info from database
-  const database = require('../config/database');
   const customerInfo = await database.getCustomerInfoByOrderId(originalOrderId);
 
   if (!customerInfo) {
@@ -4158,8 +4519,8 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
   return inputData;
 }
 
-// Generate unique clone order ID
-async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, accountCode = null) {
+// Generate unique clone order ID (partner-aware: skips Shipway API check for Shiprocket orders)
+async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, accountCode = null, shippingPartner = 'shipway') {
   const database = require('../config/database');
 
   // If forceCloneSuffix is provided, use it directly (for retry scenarios)
@@ -4192,9 +4553,9 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, a
     cloneOrderId = `${originalOrderId}_${counter}`;
   }
 
-  // Additional check: Verify with Shipway API to ensure no conflicts
-  // CRITICAL: Use account_code to fetch orders from the correct store
-  if (accountCode) {
+  // Additional check: Verify with Shipway API to ensure no conflicts (ONLY for Shipway orders)
+  // For Shiprocket: skip external check — conflict is detected at createOrder time
+  if (accountCode && shippingPartner === 'shipway') {
     try {
       const ShipwayService = require('../services/shipwayService');
       const shipwayService = new ShipwayService(accountCode);
@@ -4210,8 +4571,10 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, a
       console.log(`  - Warning: Could not verify clone ID with Shipway (store: ${accountCode}):`, shipwayError.message);
       console.log('  - Proceeding with MySQL-only check');
     }
+  } else if (shippingPartner === 'shiprocket') {
+    console.log('  - Shiprocket: skipping external API check (conflict detected at createOrder time)');
   } else {
-    console.log('  - Warning: No account_code provided, skipping Shipway verification');
+    console.log('  - Warning: No account_code provided, skipping external verification');
   }
 
   console.log(`  - ✅ Generated unique Clone Order ID: ${cloneOrderId} (counter: ${counter})`);
