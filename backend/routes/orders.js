@@ -3795,7 +3795,9 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
     // STEP 7: MARK LABEL AS DOWNLOADED
     console.log('\n✅ STEP 7: Marking label as downloaded and caching URL...');
     await retryOperation((data) => markLabelAsDownloaded(data, labelResponse), MAX_ATTEMPTS, 'Mark label downloaded', inputData);
-    await updateCloneTransactionStatus(tx.id, 'completed');
+    await updateCloneTransactionStatus(tx.id, 'completed', {
+      awb_code: labelResponse.data?.awb || null
+    });
     console.log('✅ STEP 7 COMPLETED: Label marked as downloaded');
 
     // STEP 8: RETURN SUCCESS
@@ -5534,11 +5536,12 @@ router.post('/bulk-download-labels', async (req, res) => {
         if (isShiprocket) {
           console.log(`🚀 [${batchId}] Shiprocket order detected: ${orderId}`);
 
-          let shipmentId = firstClaimedProduct.shipment_id;
-          let actualOrderId = orderId;
+          const isPartialClaim = orderProducts.length !== claimedProducts.length && claimedProducts.length > 0;
 
-          // Check if clone is needed
-          if (orderProducts.length !== claimedProducts.length && claimedProducts.length > 0) {
+          // ============================================================
+          // PARTIAL CLAIM: Clone path (clone already handled everything)
+          // ============================================================
+          if (isPartialClaim) {
             console.log(`🔄 [${batchId}] Clone required for Shiprocket order ${orderId}`);
 
             let cloneResponse;
@@ -5557,31 +5560,71 @@ router.post('/bulk-download-labels', async (req, res) => {
               }
             }
 
-            // Get shipment_id from clone response or database
-            shipmentId = cloneResponse.data?.clone_shipment_id || null;
-            console.log(`  - [${batchId}] Clone response shipment_id: ${shipmentId || 'null'}`);
-            
-            if (!shipmentId) {
-              const cloneOid = cloneResponse.data?.clone_order_id;
-              console.log(`  - [${batchId}] shipment_id not in response, fetching from DB for clone order: ${cloneOid}`);
-              if (cloneOid) {
-                const cloneProds = await database.getOrdersByOrderId(cloneOid);
-                if (cloneProds.length > 0 && cloneProds[0].shipment_id) {
-                  shipmentId = cloneProds[0].shipment_id;
-                  console.log(`  - [${batchId}] Found shipment_id in DB: ${shipmentId}`);
-                } else {
-                  console.log(`  - [${batchId}] ⚠️ shipment_id not found in DB for clone order: ${cloneOid}`);
-                }
-              }
+            // Clone process already completed: created clone, assigned AWB, generated label, stored in DB
+            // We just need to fetch the label info and return success with clone_order_id
+            const cloneOrderId = cloneResponse.data?.clone_order_id;
+            if (!cloneOrderId) {
+              throw new Error(`Clone order_id not found in clone response for order ${orderId}`);
             }
-            actualOrderId = cloneResponse.data?.clone_order_id || orderId;
+
+            console.log(`✅ [${batchId}] Clone completed successfully. Fetching label for clone order: ${cloneOrderId}`);
+
+            // Fetch label from DB (clone process already stored it)
+            const cloneLabel = await database.getLabelByOrderId(cloneOrderId, accountCode);
+            
+            if (!cloneLabel || !cloneLabel.label_url) {
+              // Fallback: use data from clone response if DB lookup fails
+              const fallbackUrl = cloneResponse.data?.shipping_url;
+              const fallbackAwb = cloneResponse.data?.awb;
+              
+              if (!fallbackUrl) {
+                throw new Error(`Label not found in DB for clone order ${cloneOrderId} and not in clone response`);
+              }
+
+              console.log(`⚠️ [${batchId}] Label not in DB yet, using clone response data for ${cloneOrderId}`);
+              
+              return {
+                success: true,
+                order_id: cloneOrderId,
+                shipping_url: fallbackUrl,
+                awb: fallbackAwb || 'N/A',
+                carrier_id: cloneResponse.data?.carrier_id || null,
+                carrier_name: cloneResponse.data?.carrier_name || null,
+                account_code: accountCode,
+                unique_ids: claimedProducts.map(p => p.unique_id),
+                shipping_partner: 'shiprocket',
+                already_cached: true,
+                original_order_id: orderId
+              };
+            }
+
+            // Label found in DB - return success with clone order_id
+            console.log(`✅ [${batchId}] Found label in DB for clone order ${cloneOrderId}`);
+            return {
+              success: true,
+              order_id: cloneOrderId,
+              shipping_url: cloneLabel.label_url,
+              awb: cloneLabel.awb || 'N/A',
+              carrier_id: cloneLabel.carrier_id || null,
+              carrier_name: cloneLabel.carrier_name || null,
+              account_code: accountCode,
+              unique_ids: claimedProducts.map(p => p.unique_id),
+              shipping_partner: 'shiprocket',
+              already_cached: true,
+              original_order_id: orderId
+            };
           }
 
+          // ============================================================
+          // FULL CLAIM: Non-clone path (all products claimed)
+          // ============================================================
+          let shipmentId = firstClaimedProduct.shipment_id;
+          
           if (!shipmentId) {
             throw new Error(`shipment_id missing for Shiprocket order ${orderId}`);
           }
 
-          // AWB Assign with carrier fallback
+          // AWB Assign with carrier fallback (only for full claims, not partial)
           const priorityCarrierStr = firstClaimedProduct?.priority_carrier || '';
           let carrierIds = [];
           try {
@@ -5618,7 +5661,7 @@ router.post('/bulk-download-labels', async (req, res) => {
           // Return Shiprocket result (label will be generated in bulk later)
           return {
             success: true,
-            order_id: actualOrderId,
+            order_id: orderId,
             shipment_id: String(shipmentId),
             awb: awbResult.awb_code,
             courier_company_id: awbResult.courier_company_id,
