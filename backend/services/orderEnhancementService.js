@@ -22,32 +22,21 @@ class OrderEnhancementService {
         return { success: false, message: 'MySQL connection not available' };
       }
 
-      // Get all orders from MySQL
-      const orders = await database.getAllOrders();
-      console.log(`📊 OrderEnhancementService: Processing ${orders.length} orders from MySQL`);
+      // 3.5 — Targeted query: only fetch orders missing customer_name (was: getAllOrders() then .some() check)
+      const [orders] = await database.mysqlConnection.execute(
+        'SELECT unique_id, order_id, customer_name FROM orders WHERE customer_name IS NULL OR customer_name = \'\''
+      );
+      console.log(`📊 OrderEnhancementService: ${orders.length} orders need customer_name from MySQL`);
 
       if (orders.length === 0) {
-        console.log('ℹ️  OrderEnhancementService: No orders found in MySQL, skipping enhancement');
+        console.log('ℹ️  OrderEnhancementService: All orders already have customer_name, skipping');
         return { success: true, message: 'No orders to enhance' };
       }
 
-      // Check if enhancement is needed by checking ALL orders, not just the first one
-      const needsCustomerNames = orders.some(order => !order.customer_name);
-
-      if (!needsCustomerNames) {
-        console.log('✅ OrderEnhancementService: All orders already enhanced, skipping');
-        return { success: true, message: 'All orders already enhanced' };
-      }
-
-      console.log(`🔍 OrderEnhancementService: Enhancement needed - Customer names: ${needsCustomerNames}`);
-
       let customerNamesAdded = 0;
 
-      // Add customer names if needed
-      if (needsCustomerNames) {
-        console.log('👥 OrderEnhancementService: Adding customer names to MySQL...');
-        customerNamesAdded = await this.addCustomerNamesToMySQL(orders);
-      }
+      console.log(`🖊️ OrderEnhancementService: Adding customer names for ${orders.length} orders...`);
+      customerNamesAdded = await this.addCustomerNamesToMySQL(orders);
 
       console.log(`✅ OrderEnhancementService: MySQL enhancement completed - Customer names: ${customerNamesAdded}`);
       

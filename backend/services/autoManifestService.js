@@ -149,8 +149,8 @@ class AutoManifestService {
                 await database.updateManifestStatus(orderId, true);
                 
                 // Update claim status to ready_for_handover for all products in this order
-                const orders = await database.getAllOrders();
-                const orderProducts = orders.filter(order => order.order_id === orderId);
+                // 3.7 — Targeted query: only fetch products for this specific order
+                const orderProducts = await database.getOrdersByOrderId(orderId);
                 
                 for (const product of orderProducts) {
                   await database.updateOrder(product.unique_id, {
@@ -233,9 +233,8 @@ class AutoManifestService {
       // Update is_manifest = 1 in database
       await database.updateManifestStatus(order.order_id, true);
       
-      // Update claim status to ready_for_handover for all products in this order
-      const orders = await database.getAllOrders();
-      const orderProducts = orders.filter(o => o.order_id === order.order_id);
+      // 3.7 — Targeted query: only fetch products for this specific order
+      const orderProducts = await database.getOrdersByOrderId(order.order_id);
       
       for (const product of orderProducts) {
         await database.updateOrder(product.unique_id, {

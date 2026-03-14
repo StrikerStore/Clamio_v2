@@ -220,7 +220,7 @@ const authenticateAdmin = async (req, res, next) => {
  * Optional authentication middleware
  * Adds user to request if Basic Auth is valid, but doesn't require it
  */
-const optionalAuth = (req, res, next) => {
+const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
 
@@ -228,7 +228,7 @@ const optionalAuth = (req, res, next) => {
       const credentials = decodeBasicAuth(authHeader);
       if (credentials) {
         const { email, password } = credentials;
-        const user = database.getUserByEmail(email);
+        const user = await database.getUserByEmail(email);
 
         if (user && user.status === 'active' && bcrypt.compareSync(password, user.password)) {
           req.user = user;

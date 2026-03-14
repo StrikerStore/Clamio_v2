@@ -8,8 +8,9 @@ const mysql = require('mysql2/promise');
  */
 class Database {
   constructor() {
-    this.mysqlConnection = null;
-    this.mysqlInitialized = false;
+    this.pool = null;
+    // 'pending' while init is in progress, 'ready' on success, 'failed' on error
+    this.mysqlState = 'pending';
     this.initializeMySQL();
   }
 
@@ -38,27 +39,36 @@ class Database {
         password: dbConfig.password
       });
 
+      // 2.1 — Sanitize DB name to prevent SQL injection in CREATE DATABASE
+      const safeName = dbConfig.database.replace(/[^a-zA-Z0-9_]/g, '');
+      if (!safeName) throw new Error('DB_NAME contains no valid characters after sanitization');
+
       // Create database if it doesn't exist
-      await connection.execute(`CREATE DATABASE IF NOT EXISTS ${dbConfig.database}`);
+      await connection.execute(`CREATE DATABASE IF NOT EXISTS \`${safeName}\``);
       await connection.end();
 
-      // Create connection pool for parallel query execution (20 connections)
-      this.mysqlPool = mysql.createPool({
+      // 2.3 / 2.4 — Create pool (named pool, not mysqlConnection) with queue + timeout limits
+      this.pool = mysql.createPool({
         host: dbConfig.host,
         user: dbConfig.user,
         password: dbConfig.password,
         database: dbConfig.database,
-        timezone: '+05:30', // Set to IST (Indian Standard Time)
-        connectionLimit: 20, // 20 connections in pool for parallel execution
-        queueLimit: 0, // No limit on queued requests
-        waitForConnections: true, // Wait if all connections are busy
-        enableKeepAlive: true, // Keep connections alive
-        keepAliveInitialDelay: 0 // Start keepalive immediately
+        timezone: '+05:30',
+        connectionLimit: 20,
+        queueLimit: 100,       // Reject new requests instead of queueing indefinitely
+        acquireTimeout: 10000,  // 10 s to get a connection from pool before error
+        waitForConnections: true,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 0
       });
 
-      // Keep mysqlConnection for backward compatibility (point to pool for single-connection operations)
-      // Pool can be used as connection for single operations
-      this.mysqlConnection = this.mysqlPool;
+      // 2.4 — Log pool-level errors (e.g. unexpected disconnects)
+      this.pool.on('error', (err) => {
+        console.error('Pool error:', err.code, err.message);
+      });
+
+      // Keep mysqlConnection as an alias so existing callers don't break
+      this.mysqlConnection = this.pool;
 
       console.log('✅ MySQL connection pool established with IST timezone (+05:30) - 20 connections available');
       await this.createUtilityTable();
@@ -74,13 +84,14 @@ class Database {
       await this.createWhMappingTable();
       await this.createCustomerMessageTrackingTable();
       await this.createCloneTransactionsTable();
-      this.mysqlInitialized = true;
+      // 2.2 — Mark as 'ready' only after all tables are created
+      this.mysqlState = 'ready';
     } catch (error) {
       console.error('❌ MySQL connection pool failed:', error.message);
-      // MySQL connection failed - application will not function without database
-      this.mysqlPool = null;
+      // 2.2 — 'failed' lets waitForMySQLInitialization() reject instead of spinning
+      this.mysqlState = 'failed';
+      this.pool = null;
       this.mysqlConnection = null;
-      this.mysqlInitialized = true; // Mark as initialized even if failed
       throw new Error(`Database initialization failed: ${error.message}`);
     }
   }
@@ -3931,7 +3942,7 @@ class Database {
           c.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -3982,7 +3993,7 @@ class Database {
           c.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -4055,7 +4066,7 @@ class Database {
             ELSE c.status 
           END as status
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -4115,7 +4126,7 @@ class Database {
           c.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -4178,7 +4189,7 @@ class Database {
             ELSE c.status 
           END as status
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -4209,6 +4220,128 @@ class Database {
       console.error('Error getting all orders:', error);
       throw new Error('Failed to get orders from database');
     }
+  }
+
+  /**
+   * 3.1 — Get all products for a specific order_id (targeted replacement for getAllOrders() + filter)
+   * Returns the same columns as getAllOrders() so all existing callers work without changes.
+   * @param {string} orderId - The order_id to look up
+   * @returns {Promise<Array>} Array of order rows for that order_id
+   */
+  async getOrdersByOrderId(orderId) {
+    const db = this.pool || this.mysqlConnection;
+    if (!db) throw new Error('MySQL connection not available');
+
+    try {
+      const [rows] = await db.execute(
+        `SELECT
+           o.*,
+           p.image as product_image,
+           c.status as claims_status,
+           c.claimed_by,
+           c.claimed_at,
+           c.last_claimed_by,
+           c.last_claimed_at,
+           c.clone_status,
+           c.cloned_order_id,
+           c.is_cloned_row,
+           c.label_downloaded,
+           l.label_url,
+           l.awb,
+           l.carrier_id,
+           l.carrier_name,
+           l.handover_at,
+           c.priority_carrier,
+           l.is_manifest,
+           l.manifest_id,
+           l.current_shipment_status,
+           l.is_handover,
+           s.store_name,
+           s.status as store_status,
+           CASE
+             WHEN l.current_shipment_status IS NOT NULL AND l.current_shipment_status != ''
+             THEN l.current_shipment_status
+             ELSE c.status
+           END as status
+         FROM orders o
+         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
+           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
+           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
+           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+           AND o.account_code = p.account_code
+         )
+         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+         LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
+         LEFT JOIN store_info s ON o.account_code = s.account_code
+         WHERE o.order_id = ?
+         ORDER BY o.product_name`,
+        [orderId]
+      );
+      return rows;
+    } catch (error) {
+      console.error('Error getting orders by order_id:', error);
+      throw new Error('Failed to get orders from database');
+    }
+  }
+
+  /**
+   * Stage 4.1 — Atomically claim an order.
+   * Single conditional UPDATE: no read-then-write race window.
+   * Returns true  → this caller won the claim.
+   * Returns false → already claimed by someone else (HTTP 409).
+   * @param {string} uniqueId        - The unique_id of the claims row
+   * @param {string} warehouseId     - Vendor warehouse ID to claim as
+   * @param {string} priorityCarrier - Top-3 carrier JSON string (may be empty)
+   * @returns {Promise<boolean>}
+   */
+  async atomicClaimOrder(uniqueId, warehouseId, priorityCarrier) {
+    const db = this.pool || this.mysqlConnection;
+    if (!db) throw new Error('MySQL connection not available');
+
+    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const [result] = await db.execute(
+      `UPDATE claims
+          SET status          = 'claimed',
+              claimed_by      = ?,
+              claimed_at      = ?,
+              last_claimed_by = ?,
+              last_claimed_at = ?,
+              priority_carrier = ?
+        WHERE order_unique_id = ?
+          AND status = 'unclaimed'`,
+      [warehouseId, now, warehouseId, now, priorityCarrier || '', uniqueId]
+    );
+    return result.affectedRows === 1; // false = already claimed
+  }
+
+  /**
+   * Stage 4.4 — Atomically unclaim an order.
+   * Only succeeds if the row is still owned by warehouseId.
+   * Returns true  → successfully unclaimed.
+   * Returns false → row was not owned by this vendor (concurrent modification).
+   * @param {string} uniqueId    - The unique_id of the claims row
+   * @param {string} warehouseId - Must match current claimed_by
+   * @returns {Promise<boolean>}
+   */
+  async atomicUnclaimOrder(uniqueId, warehouseId) {
+    const db = this.pool || this.mysqlConnection;
+    if (!db) throw new Error('MySQL connection not available');
+
+    const [result] = await db.execute(
+      `UPDATE claims
+          SET status           = 'unclaimed',
+              claimed_by       = NULL,
+              claimed_at       = NULL,
+              last_claimed_by  = NULL,
+              last_claimed_at  = NULL,
+              label_downloaded = 0,
+              priority_carrier = NULL
+        WHERE order_unique_id = ?
+          AND claimed_by      = ?`,
+      [uniqueId, warehouseId]
+    );
+    return result.affectedRows === 1;
   }
 
   /**
@@ -4320,7 +4453,7 @@ class Database {
             ELSE c.status 
           END as status
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -4555,7 +4688,7 @@ class Database {
             ELSE NULL
           END as customer_name_from_info
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -4950,7 +5083,7 @@ class Database {
           c.priority_carrier,
           l.is_manifest
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -5010,7 +5143,7 @@ class Database {
             ELSE c.status 
           END as status
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -5078,7 +5211,7 @@ class Database {
             ELSE c.status 
           END as status
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -5155,7 +5288,7 @@ class Database {
             ELSE c.status 
           END as status
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -5219,7 +5352,7 @@ class Database {
             ELSE c.status 
           END as status
         FROM orders o
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -5474,7 +5607,7 @@ class Database {
       const [rows] = await this.mysqlConnection.execute(
         `SELECT o.*, p.image as product_image
          FROM orders o
-         LEFT JOIN products p ON (
+         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
@@ -5499,24 +5632,34 @@ class Database {
   }
 
   /**
-   * Wait for MySQL initialization to complete
-   * @returns {Promise<boolean>} True if MySQL is available
+   * Wait for MySQL initialization to complete.
+   * Rejects if initialization failed so callers don't spin forever.
+   * @returns {Promise<boolean>} True if MySQL pool is available
    */
   async waitForMySQLInitialization() {
-    // Wait for initialization to complete
-    while (!this.mysqlInitialized) {
+    // Poll until state leaves 'pending'
+    while (this.mysqlState === 'pending') {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    return this.mysqlConnection !== null;
+    if (this.mysqlState === 'failed') {
+      throw new Error('Database initialization failed — pool is not available');
+    }
+    return this.pool !== null;
   }
 
   /**
-   * Check if MySQL connection is available
-   * @returns {boolean} True if MySQL is available
+   * @deprecated Use mysqlState === 'ready' directly or waitForMySQLInitialization()
+   */
+  get mysqlInitialized() {
+    return this.mysqlState !== 'pending';
+  }
+
+  /**
+   * Check if MySQL pool is available
+   * @returns {boolean} True if pool is ready
    */
   isMySQLAvailable() {
-    // Check pool first (preferred), then fall back to connection for backward compatibility
-    return (this.mysqlPool !== null) || (this.mysqlConnection !== null);
+    return this.mysqlState === 'ready' && this.pool !== null;
   }
 
   /**
@@ -5524,50 +5667,42 @@ class Database {
    * @returns {Promise<boolean>} True if connection is healthy
    */
   async testConnection() {
-    if (!this.mysqlConnection) {
+    if (!this.pool) {
       return false;
     }
 
     try {
-      await this.mysqlConnection.execute('SELECT 1');
+      await this.pool.execute('SELECT 1');
       return true;
     } catch (error) {
       console.error('❌ Database connection test failed:', error.message);
-
-      // Check if it's a connection lost error
-      if (error.code === 'PROTOCOL_CONNECTION_LOST' ||
-        error.code === 'ECONNRESET' ||
-        error.code === 'ETIMEDOUT' ||
-        error.code === 'ENOTFOUND') {
-        console.log('🔄 Stale connection detected');
-      }
-
       return false;
     }
   }
 
   /**
-   * Reconnect to database if connection is lost
+   * Reconnect to database if pool is lost
    * @returns {Promise<boolean>} True if reconnection successful
    */
   async reconnect() {
     try {
       console.log('🔄 Attempting to reconnect to database...');
 
-      // Close existing connection
-      if (this.mysqlConnection) {
+      // Drain old pool
+      if (this.pool) {
         try {
-          await this.mysqlConnection.end();
+          await this.pool.end();
         } catch (error) {
-          console.log('ℹ️ Error closing old connection (expected if connection was lost):', error.message);
+          console.log('ℹ️ Error draining old pool (expected if connection was lost):', error.message);
         }
       }
 
-      // Reset state
+      // Reset state so waitForMySQLInitialization() will wait again
+      this.pool = null;
       this.mysqlConnection = null;
-      this.mysqlInitialized = false;
+      this.mysqlState = 'pending';
 
-      // Reinitialize connection
+      // Reinitialize
       await this.initializeMySQL();
 
       console.log('✅ Database reconnected successfully');
@@ -7686,7 +7821,7 @@ class Database {
           END as customer_name_from_info
         FROM claims c
         INNER JOIN orders o ON c.order_unique_id = o.unique_id AND c.account_code = o.account_code
-        LEFT JOIN products p ON (
+        LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR

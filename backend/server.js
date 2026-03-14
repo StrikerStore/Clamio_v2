@@ -72,24 +72,6 @@ if (process.env.CORS_ORIGIN) {
   allowedOrigins.push(process.env.CORS_ORIGIN);
 }
 
-// Handle OPTIONS preflight requests quickly (before other middleware)
-// This helps with slow mobile networks where preflight can timeout
-app.options('*', (req, res) => {
-  const origin = req.headers.origin;
-
-  // Allow if origin matches or is a PWA (no origin)
-  if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-    res.header('Access-Control-Allow-Origin', origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Max-Age', '86400'); // Cache preflight for 24 hours
-    return res.status(204).send();
-  }
-
-  res.status(403).send('CORS not allowed');
-});
-
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, PWAs, or curl requests)
@@ -110,28 +92,31 @@ app.use(cors({
 }));
 
 /**
- * Rate Limiting - TEMPORARILY DISABLED
+ * Rate Limiting
  */
-// const limiter = rateLimit({
-//   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-//   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-//   message: {
-//     success: false,
-//     message: 'Too many requests from this IP, please try again later.'
-//   },
-//   standardHeaders: true,
-//   legacyHeaders: false,
-// });
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
+  message: {
+    success: false,
+    message: 'Too many requests from this IP, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-// Rate limiting temporarily disabled for testing
-// app.use((req, res, next) => {
-//   // Skip rate limiting for auth routes
-//   if (req.path.startsWith('/api/auth')) {
-//     return next();
-//   }
-//   // Apply rate limiting for all other routes
-//   return limiter(req, res, next);
-// });
+// Stricter limiter for auth endpoints — 5 attempts per 15 minutes
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, message: { success: false, message: 'Too many login attempts, please try again later.' }, standardHeaders: true, legacyHeaders: false });
+app.use('/api/auth/login', authLimiter);
+
+app.use((req, res, next) => {
+  // Skip rate limiting for auth routes (already handled above)
+  if (req.path.startsWith('/api/auth')) {
+    return next();
+  }
+  // Apply rate limiting for all other routes
+  return limiter(req, res, next);
+});
 
 /**
  * Body Parsing Middleware
@@ -156,7 +141,7 @@ if (process.env.NODE_ENV === 'development') {
  */
 app.use(async (req, res, next) => {
   // Skip database check for health, test endpoints, and OPTIONS preflight requests
-  if (req.path === '/health' || req.path === '/test' || req.path === '/env-check' || req.method === 'OPTIONS') {
+  if (req.path === '/health' || req.path === '/test' || req.method === 'OPTIONS') {
     return next();
   }
 
@@ -228,26 +213,7 @@ app.get('/test', (req, res) => {
   });
 });
 
-/**
- * Environment Check Endpoint (for debugging)
- */
-app.get('/env-check', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Environment variables check',
-    database: {
-      host: process.env.DB_HOST ? process.env.DB_HOST : 'Missing',
-      user: process.env.DB_USER ? process.env.DB_USER : 'Missing',
-      password: process.env.DB_PASSWORD ? process.env.DB_PASSWORD : 'Missing',
-      database: process.env.DB_NAME ? process.env.DB_NAME : 'Missing',
-      port: process.env.DB_PORT ? process.env.DB_PORT : 'Missing',
-      ssl: process.env.DB_SSL ? process.env.DB_SSL : 'Missing'
-    },
-    cors: {
-      origin: process.env.CORS_ORIGIN || 'Not set'
-    }
-  });
-});
+// /env-check endpoint removed — it was an unauthenticated endpoint that exposed DB credentials.
 
 /**
  * Database Connection Test Endpoint
@@ -552,10 +518,8 @@ app.listen(PORT, async () => {
     console.error('❌ User session initialization failed:', error.message);
   }
 
-  // Log default superadmin credentials
-  console.log('👤 Default superadmin: superadmin@example.com / password123');
-  console.log(process.env.SHOPIFY_ACCESS_TOKEN);
-  console.log(process.env.SHOPIFY_PRODUCTS_API_URL);
+  // NOTE: Default superadmin credentials and API tokens must NOT be logged.
+  // Check your .env file or password manager for credentials.
 
   // Fetch Shopify products on startup (only if store is configured)
   // This will gracefully skip if no stores are configured yet

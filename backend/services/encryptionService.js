@@ -19,10 +19,7 @@ class EncryptionService {
     this.encryptionKey = process.env.ENCRYPTION_KEY;
     
     if (!this.encryptionKey) {
-      console.warn('⚠️ WARNING: ENCRYPTION_KEY not set in environment variables!');
-      console.warn('⚠️ Using a temporary key - THIS IS NOT SECURE FOR PRODUCTION!');
-      // Generate a temporary key for development (NOT SECURE FOR PRODUCTION)
-      this.encryptionKey = crypto.randomBytes(32).toString('hex');
+      throw new Error('FATAL: ENCRYPTION_KEY environment variable is required. Set it to a stable 64-character hex string.');
     }
   }
 

@@ -222,7 +222,15 @@ class CarrierServiceabilityService {
         return [];
       }
 
-      const orders = await database.getAllOrders();
+      // 3.6 — Targeted query: only fetch columns needed for carrier assignment
+      // (was: getAllOrders() loading all JOINed columns including product images)
+      const [orders] = await database.mysqlConnection.execute(
+        `SELECT o.unique_id, o.order_id, o.account_code, o.pincode, o.payment_type,
+                c.status, c.claimed_by, c.priority_carrier
+         FROM orders o
+         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+         WHERE o.is_in_new_order = 1 OR c.label_downloaded = 1`
+      );
 
       console.log('✅ CARRIER SERVICEABILITY: Orders loaded from MySQL');
       console.log('  - Total orders:', orders.length);

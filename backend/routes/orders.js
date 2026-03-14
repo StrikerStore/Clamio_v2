@@ -10,6 +10,52 @@ const taskStore = require('../services/taskStore');
 // Apply authentication to all order routes
 router.use(authenticateBasicAuth);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 5 — Input validation helpers (used across bulk endpoints)
+// ─────────────────────────────────────────────────────────────────────────────
+const MAX_BATCH_SIZE = 200;
+
+/**
+ * Validates a bulk-array input (unique_ids / order_ids).
+ * Returns { ok: true, items } on success, or { ok: false, message } on failure.
+ */
+function validateBulkArray(arr, fieldName = 'ids') {
+  if (!arr || !Array.isArray(arr)) {
+    return { ok: false, message: `${fieldName} must be an array` };
+  }
+  if (arr.length === 0) {
+    return { ok: false, message: `${fieldName} array must not be empty` };
+  }
+  if (arr.length > MAX_BATCH_SIZE) {
+    return { ok: false, message: `Maximum ${MAX_BATCH_SIZE} items per batch request (got ${arr.length})` };
+  }
+  const nonStrings = arr.filter(id => typeof id !== 'string' || id.trim() === '');
+  if (nonStrings.length > 0) {
+    return { ok: false, message: `${fieldName} must be an array of non-empty strings` };
+  }
+  // Deduplicate silently and return cleaned list
+  return { ok: true, items: [...new Set(arr.map(id => id.trim()))] };
+}
+
+/**
+ * Validates a single ID string.
+ */
+function validateId(id, fieldName = 'id') {
+  if (!id || typeof id !== 'string' || id.trim() === '') {
+    return { ok: false, message: `${fieldName} must be a non-empty string` };
+  }
+  return { ok: true, value: id.trim() };
+}
+
+/**
+ * Validate and clamp pagination params. Returns { page, limit, offset }.
+ */
+function validatePagination(query) {
+  const page  = Math.max(1, parseInt(query.page)  || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 50));
+  return { page, limit, offset: (page - 1) * limit };
+}
+
 /**
  * Helper function to create notification when label generation fails
  * @param {string} errorMessage - The error message from Shipway API
@@ -221,18 +267,14 @@ router.get('/', requireAnyUser, async (req, res) => {
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
-    // Extract pagination parameters
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
-    const status = req.query.status || 'unclaimed'; // Filter by status (default: unclaimed)
-    const search = req.query.search || ''; // Search term
-    const dateFrom = req.query.dateFrom; // Date from filter
-    const dateTo = req.query.dateTo; // Date to filter
+    // 5.2 — Validated + clamped pagination params (limit max 100)
+    const { page, limit, offset } = validatePagination(req.query);
+    const status = req.query.status || 'unclaimed';
+    const search = req.query.search || '';
+    const dateFrom = req.query.dateFrom;
+    const dateTo = req.query.dateTo;
 
     console.log('📄 Orders pagination params:', { page, limit, status, search, dateFrom, dateTo });
-
-    // Calculate offset for pagination
-    const offset = (page - 1) * limit;
 
     // Use optimized paginated query with LIMIT/OFFSET in SQL
     // This is MUCH faster than fetching all orders and filtering in JavaScript
@@ -275,7 +317,7 @@ router.get('/', requireAnyUser, async (req, res) => {
     });
   } catch (err) {
     console.error('Error getting orders:', err);
-    return res.status(500).json({ success: false, message: 'Failed to read orders', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to read orders' });
   }
 });
 
@@ -442,9 +484,10 @@ router.post('/claim', async (req, res) => {
   console.log('  - unique_id:', unique_id);
   console.log('  - user:', vendor.name);
 
-  if (!unique_id) {
-    console.log('❌ CLAIM FAILED: Missing unique_id');
-    return res.status(400).json({ success: false, message: 'unique_id required' });
+  // 5.2 — Validate unique_id is a non-empty string
+  const idCheck = validateId(unique_id, 'unique_id');
+  if (!idCheck.ok) {
+    return res.status(400).json({ success: false, message: idCheck.message });
   }
 
   if (vendor.role !== 'vendor') {
@@ -521,65 +564,40 @@ router.post('/claim', async (req, res) => {
       }
     }
 
-    // Update order
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    console.log('🔄 UPDATING ORDER');
-    console.log('  - Setting status to: claimed');
-    console.log('  - Setting claimed_by to:', warehouseId);
-    console.log('  - Setting timestamp to:', now);
-
-    // Update order object in memory (like Excel behavior)
-    const updatedOrder = {
-      ...order,
-      status: 'claimed',
-      claimed_by: warehouseId,
-      claimed_at: now,
-      last_claimed_by: warehouseId,
-      last_claimed_at: now
-    };
-
     // Assign top 3 priority carriers during claim
     // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
     console.log('🚚 ASSIGNING TOP 3 PRIORITY CARRIERS...');
     let priorityCarrier = '';
     try {
-      priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(updatedOrder);
+      // Build a temporary order object with claimed_by pre-filled for carrier lookup
+      const orderForCarrier = { ...order, claimed_by: warehouseId };
+      priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(orderForCarrier);
       console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
-      updatedOrder.priority_carrier = priorityCarrier;
     } catch (carrierError) {
-      console.log(`⚠️ Carrier assignment failed: ${carrierError.message}`);
-      console.log('  - Order will be claimed without priority carriers');
-      updatedOrder.priority_carrier = '';
+      console.log(`⚠️ Carrier assignment failed (non-fatal): ${carrierError.message}`);
     }
 
-    // Now save everything to MySQL in one go
-    console.log('💾 SAVING TO MYSQL');
-    const finalUpdatedOrder = await database.updateOrder(unique_id, {
-      status: updatedOrder.status,
-      claimed_by: updatedOrder.claimed_by,
-      claimed_at: updatedOrder.claimed_at,
-      last_claimed_by: updatedOrder.last_claimed_by,
-      last_claimed_at: updatedOrder.last_claimed_at,
-      priority_carrier: updatedOrder.priority_carrier
-    });
+    // 4.2 — Atomic claim: single conditional UPDATE (no race window)
+    // If another vendor claimed between our read above and this write, affectedRows=0 → 409
+    console.log('💾 ATOMIC CLAIM TO MYSQL');
+    const claimed = await database.atomicClaimOrder(unique_id, warehouseId, priorityCarrier);
 
-    if (!finalUpdatedOrder) {
-      console.log('❌ FAILED TO UPDATE ORDER IN MYSQL');
-      return res.status(500).json({ success: false, message: 'Failed to update order' });
+    if (!claimed) {
+      console.log('❌ ORDER ALREADY CLAIMED (concurrent request won)');
+      return res.status(409).json({ success: false, message: 'Order already claimed by another vendor' });
     }
 
-    console.log('✅ MYSQL SAVED SUCCESSFULLY');
+    console.log('✅ MYSQL CLAIM SAVED SUCCESSFULLY');
+    console.log('🟢 CLAIM SUCCESS — Order claimed by:', warehouseId);
 
-    console.log('🟢 CLAIM SUCCESS');
-    console.log('  - Order claimed by:', warehouseId);
-    console.log('  - Updated order:', { unique_id: updatedOrder.unique_id, status: updatedOrder.status, claimed_by: updatedOrder.claimed_by });
+    // Return the updated order for UI refresh
+    const finalOrder = await database.getOrderByUniqueId(unique_id);
+    return res.json({ success: true, data: finalOrder || { ...order, status: 'claimed', claimed_by: warehouseId, priority_carrier: priorityCarrier } });
 
-    return res.json({ success: true, data: updatedOrder });
 
   } catch (error) {
-    console.log('💥 CLAIM ERROR:', error.message);
-    console.log('📍 Stack trace:', error.stack);
-    return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
+    console.error('💥 CLAIM ERROR:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 
@@ -596,12 +614,15 @@ router.post('/bulk-claim', async (req, res) => {
   console.log('  - unique_ids:', unique_ids);
   console.log('  - token received:', token ? 'YES' : 'NO');
 
-  if (!unique_ids || !Array.isArray(unique_ids) || unique_ids.length === 0 || !token) {
-    console.log('❌ BULK CLAIM FAILED: Missing required fields');
-    return res.status(400).json({
-      success: false,
-      message: 'unique_ids array and Authorization token required'
-    });
+  // 5.1 + 5.2 — Batch size limit + type validation
+  const arrayCheck = validateBulkArray(unique_ids, 'unique_ids');
+  if (!arrayCheck.ok) {
+    return res.status(400).json({ success: false, message: arrayCheck.message });
+  }
+  const sanitizedUniqueIds = arrayCheck.items;
+
+  if (!token) {
+    return res.status(400).json({ success: false, message: 'unique_ids array and Authorization token required' });
   }
 
   // Load users from MySQL
@@ -632,13 +653,12 @@ router.post('/bulk-claim', async (req, res) => {
 
     console.log('🔍 Processing bulk claim for', unique_ids.length, 'orders');
 
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const successfulClaims = [];
     const failedClaims = [];
 
     // OPTIMIZATION 1: Fetch all orders in one database query instead of N individual queries
     console.log('📦 Fetching all orders in bulk...');
-    const allOrders = await database.getOrdersByUniqueIds(unique_ids);
+    const allOrders = await database.getOrdersByUniqueIds(sanitizedUniqueIds);
     console.log(`✅ Fetched ${allOrders.length} orders from database`);
 
     // Create a map for quick lookup: unique_id -> order
@@ -647,9 +667,8 @@ router.post('/bulk-claim', async (req, res) => {
       ordersMap.set(order.unique_id, order);
     });
 
-    // OPTIMIZATION 2: Process orders in parallel with concurrency limit
-    // This processes multiple orders simultaneously instead of one-by-one
-    const CONCURRENCY_LIMIT = 15; // Process 15 orders at the same time
+    // Process orders in parallel with concurrency limit
+    const CONCURRENCY_LIMIT = 15;
     console.log(`⚡ Using parallel processing with concurrency limit of ${CONCURRENCY_LIMIT}`);
 
     // Helper function to process a single order
@@ -697,49 +716,26 @@ router.post('/bulk-claim', async (req, res) => {
           }
         }
 
-        // Update order
-        console.log('🔄 CLAIMING ORDER:', unique_id);
-
-        // Update order object in memory (like Excel behavior)
-        const updatedOrder = {
-          ...order,
-          status: 'claimed',
-          claimed_by: warehouseId,
-          claimed_at: now,
-          last_claimed_by: warehouseId,
-          last_claimed_at: now
-        };
-
-        // Assign top 3 priority carriers during claim
-        // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
-        console.log(`🚚 ASSIGNING TOP 3 PRIORITY CARRIERS for ${order.order_id}...`);
+        // 4.3 — Atomic claim in bulk: single conditional UPDATE (race-safe for parallel execution)
+        // carrierService needs claimed_by pre-filled — pass a temporary view without writing
         let priorityCarrier = '';
         try {
-          priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(updatedOrder);
-          console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
-          updatedOrder.priority_carrier = priorityCarrier;
+          const orderForCarrier = { ...order, claimed_by: warehouseId };
+          priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(orderForCarrier);
+          console.log(`✅ Top 3 carriers assigned for ${order.order_id}: ${priorityCarrier}`);
         } catch (carrierError) {
-          console.log(`⚠️ Carrier assignment failed: ${carrierError.message}`);
-          console.log('  - Order will be claimed without priority carriers');
-          updatedOrder.priority_carrier = '';
+          console.log(`⚠️ Carrier assignment failed for ${order.order_id} (non-fatal): ${carrierError.message}`);
         }
 
-        // Now save everything to MySQL in one go
-        const finalUpdatedOrder = await database.updateOrder(unique_id, {
-          status: updatedOrder.status,
-          claimed_by: updatedOrder.claimed_by,
-          claimed_at: updatedOrder.claimed_at,
-          last_claimed_by: updatedOrder.last_claimed_by,
-          last_claimed_at: updatedOrder.last_claimed_at,
-          priority_carrier: updatedOrder.priority_carrier
-        });
+        console.log('🔄 ATOMIC CLAIMING ORDER:', unique_id);
+        const claimed = await database.atomicClaimOrder(unique_id, warehouseId, priorityCarrier);
 
-        if (finalUpdatedOrder) {
+        if (claimed) {
           console.log('✅ ORDER CLAIMED SUCCESSFULLY:', unique_id);
           return { success: true, unique_id, order_id: order.order_id };
         } else {
-          console.log('❌ FAILED TO UPDATE ORDER:', unique_id);
-          return { success: false, unique_id, reason: 'Failed to update order' };
+          console.log('❌ ORDER ALREADY CLAIMED (concurrent request won):', unique_id);
+          return { success: false, unique_id, reason: 'Order already claimed by another vendor' };
         }
       } catch (error) {
         console.log(`💥 ERROR PROCESSING ORDER ${unique_id}:`, error.message);
@@ -748,10 +744,10 @@ router.post('/bulk-claim', async (req, res) => {
     };
 
     // Process orders in batches with concurrency limit
-    for (let i = 0; i < unique_ids.length; i += CONCURRENCY_LIMIT) {
-      const batch = unique_ids.slice(i, i + CONCURRENCY_LIMIT);
+    for (let i = 0; i < sanitizedUniqueIds.length; i += CONCURRENCY_LIMIT) {
+      const batch = sanitizedUniqueIds.slice(i, i + CONCURRENCY_LIMIT);
       const batchNumber = Math.floor(i / CONCURRENCY_LIMIT) + 1;
-      const totalBatches = Math.ceil(unique_ids.length / CONCURRENCY_LIMIT);
+      const totalBatches = Math.ceil(sanitizedUniqueIds.length / CONCURRENCY_LIMIT);
 
       console.log(`📦 Processing batch ${batchNumber}/${totalBatches} (${batch.length} orders in parallel)...`);
 
@@ -790,8 +786,8 @@ router.post('/bulk-claim', async (req, res) => {
     });
 
   } catch (error) {
-    console.log('💥 BULK CLAIM ERROR:', error.message);
-    return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
+    console.error('💥 BULK CLAIM ERROR:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 
@@ -2047,7 +2043,14 @@ router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmi
   console.log('  - unique_ids count:', Array.isArray(unique_ids) ? unique_ids.length : 0);
   console.log('  - vendor_warehouse_id:', vendor_warehouse_id);
 
-  if (!Array.isArray(unique_ids) || unique_ids.length === 0 || !vendor_warehouse_id) {
+  // 5.1 + 5.2 — Batch size limit + type validation
+  const arrayCheck = validateBulkArray(unique_ids, 'unique_ids');
+  if (!arrayCheck.ok) {
+    return res.status(400).json({ success: false, message: arrayCheck.message });
+  }
+  const sanitizedUniqueIds = arrayCheck.items;
+
+  if (!vendor_warehouse_id || typeof vendor_warehouse_id !== 'string' || vendor_warehouse_id.trim() === '') {
     return res.status(400).json({ success: false, message: 'unique_ids (array) and vendor_warehouse_id are required' });
   }
 
@@ -2071,7 +2074,7 @@ router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmi
     let updatedCount = 0;
 
     // Update each order in MySQL
-    for (const uid of unique_ids) {
+    for (const uid of sanitizedUniqueIds) {
       try {
         // Get order details for priority carrier assignment
         const order = await database.getOrderByUniqueId(uid);
@@ -2161,9 +2164,12 @@ router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperad
   console.log('🔵 ADMIN BULK UNASSIGN REQUEST START');
   console.log('  - unique_ids count:', Array.isArray(unique_ids) ? unique_ids.length : 0);
 
-  if (!Array.isArray(unique_ids) || unique_ids.length === 0) {
-    return res.status(400).json({ success: false, message: 'unique_ids (array) is required' });
+  // 5.1 + 5.2 — Batch size limit + type validation
+  const arrayCheck = validateBulkArray(unique_ids, 'unique_ids');
+  if (!arrayCheck.ok) {
+    return res.status(400).json({ success: false, message: arrayCheck.message });
   }
+  const sanitizedUniqueIds = arrayCheck.items;
 
   try {
     const database = require('../config/database');
@@ -2181,7 +2187,7 @@ router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperad
     const ShipwayService = require('../services/shipwayService');
 
     // Process each order
-    for (const uid of unique_ids) {
+    for (const uid of sanitizedUniqueIds) {
       try {
         // Get order from database
         const order = await database.getOrderByUniqueId(uid);
@@ -2771,11 +2777,8 @@ router.post('/download-label', async (req, res) => {
     console.log('  - Role:', vendor.role);
     console.log('  - Active session:', vendor.active_session);
 
-    // Get orders from MySQL
-    const orders = await database.getAllOrders();
-
-    // Get all products for this order_id
-    const orderProducts = orders.filter(order => order.order_id === order_id);
+    // 3.2 — Targeted query: fetch only rows for this order_id (was: getAllOrders() + filter)
+    const orderProducts = await database.getOrdersByOrderId(order_id);
     const claimedProducts = orderProducts.filter(order =>
       order.claimed_by === vendor.warehouseId &&
       (order.is_handover !== 1 && order.is_handover !== '1')  // Allow download until handed over
@@ -4571,7 +4574,7 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, a
     return forcedCloneOrderId;
   }
 
-  // Get ALL orders from database (no filters) for clone ID checking
+  // 3.4 — Minimal targeted query: only need order_id column for clone conflict checking
   let allOrders;
   try {
     const [rows] = await database.mysqlConnection.execute(
@@ -4579,10 +4582,8 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, a
     );
     allOrders = rows;
   } catch (dbError) {
-    console.log('⚠️ Direct query failed, falling back to getAllOrders method');
-    // Fallback: use getAllOrders but understand it might be filtered
-    const orders = await database.getAllOrders();
-    allOrders = orders;
+    console.log('⚠️ Direct query failed, skipping MySQL clone-ID check');
+    allOrders = [];
   }
 
   let cloneOrderId = `${originalOrderId}_1`;
@@ -5342,13 +5343,15 @@ router.post('/bulk-download-labels', async (req, res) => {
   console.log(`🔵 [${batchId}] BULK DOWNLOAD LABELS REQUEST: order_ids=${order_ids?.length}, format: ${format}, generate_only: ${generate_only}, runAsync: ${runAsync}`);
   console.log(`  - [${batchId}] Start time: ${new Date().toISOString()}`);
 
-  if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
-    console.log(`❌ [${batchId}] BULK DOWNLOAD LABELS FAILED: Missing required fields`);
+  // 5.1 + 5.2 — Batch size limit + type validation
+  const arrayCheck = validateBulkArray(order_ids, 'order_ids');
+  if (!arrayCheck.ok || !token) {
     return res.status(400).json({
       success: false,
-      message: 'order_ids array and Authorization token required'
+      message: arrayCheck.ok ? 'order_ids array and Authorization token required' : arrayCheck.message
     });
   }
+  const sanitizedOrderIds = arrayCheck.items;
 
   // ── ASYNC MODE ─────────────────────────────────────────────────────────────
   if (runAsync) {
@@ -6068,12 +6071,15 @@ router.post('/bulk-download-labels-merge', async (req, res) => {
   const { order_ids, format = 'thermal', async: runAsync = false } = req.body;
   const token = req.headers['authorization'];
 
-  if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
+  // 5.1 + 5.2 — Batch size limit + type validation
+  const arrayCheck = validateBulkArray(order_ids, 'order_ids');
+  if (!arrayCheck.ok || !token) {
     return res.status(400).json({
       success: false,
-      message: 'order_ids array and Authorization token required'
+      message: arrayCheck.ok ? 'order_ids array and Authorization token required' : arrayCheck.message
     });
   }
+  const sanitizedOrderIds = arrayCheck.items;
 
   // ── ASYNC MODE ─────────────────────────────────────────────────────────────
   if (runAsync) {
@@ -6625,9 +6631,8 @@ router.post('/mark-ready', async (req, res) => {
     console.log('  - Email:', vendor.email);
     console.log('  - Warehouse ID:', vendor.warehouseId);
 
-    // Get orders from MySQL to verify the order belongs to this vendor
-    const orders = await database.getAllOrders();
-    const orderProducts = orders.filter(order => order.order_id === order_id);
+    // 3.3 — Targeted query: fetch only rows for this order_id (was: getAllOrders() + filter)
+    const orderProducts = await database.getOrdersByOrderId(order_id);
     const claimedProducts = orderProducts.filter(order =>
       order.claimed_by === vendor.warehouseId && order.claims_status === 'claimed'
     );
@@ -6745,13 +6750,16 @@ router.post('/bulk-mark-ready', async (req, res) => {
   console.log('  - order_ids:', order_ids);
   console.log('  - token received:', token ? 'YES' : 'NO');
 
-  if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
-    console.log('❌ BULK MARK READY FAILED: Missing required fields');
+  // 5.1 + 5.2 — Batch size limit + type validation
+  const arrayCheck = validateBulkArray(order_ids, 'order_ids');
+  if (!arrayCheck.ok || !token) {
+    console.log('❌ BULK MARK READY FAILED: Missing or invalid required fields');
     return res.status(400).json({
       success: false,
-      message: 'order_ids array and Authorization token required'
+      message: arrayCheck.ok ? 'order_ids array and Authorization token required' : arrayCheck.message
     });
   }
+  const sanitizedOrderIds = arrayCheck.items;
 
   try {
     // Load users from MySQL to get vendor info
@@ -7073,13 +7081,14 @@ router.post('/shiprocket/start-pickup', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    // Get orders and validate
-    const orders = await database.getAllOrders();
+    // 3.4 — Single batch query for all order_ids (race-condition-safe: 1 round-trip vs N parallel)
+    // getOrdersByOrderIds uses WHERE order_id IN (...) — no parallel pool pressure
+    const orderDetailsFlat = await database.getOrdersByOrderIds(order_ids);
     const orderDetails = [];
     const processedShipmentIds = new Set();
 
     for (const order_id of order_ids) {
-      const orderProducts = orders.filter(order => order.order_id === order_id);
+      const orderProducts = orderDetailsFlat.filter(order => order.order_id === order_id);
       const claimedProducts = orderProducts.filter(order =>
         order.claimed_by === vendor.warehouseId && order.claims_status === 'claimed'
       );
@@ -8089,19 +8098,12 @@ router.post('/reverse', async (req, res) => {
       console.log('✅ MANIFEST FIELDS RESET (including manifest_id)');
     }
 
-    // Clear claim information (both cases)
-    await database.mysqlConnection.execute(
-      `UPDATE claims SET 
-        claimed_by = NULL, 
-        claimed_at = NULL, 
-        last_claimed_by = NULL, 
-        last_claimed_at = NULL, 
-        status = 'unclaimed',
-        label_downloaded = 0,
-        priority_carrier = NULL
-      WHERE order_unique_id = ?`,
-      [unique_id]
-    );
+    // 4.4 — Atomic unclaim: WHERE claimed_by=? prevents overwriting a concurrent re-claim
+    const unclaimed = await database.atomicUnclaimOrder(unique_id, vendor.warehouseId);
+    if (!unclaimed) {
+      console.log('⚠️ atomicUnclaimOrder: affectedRows=0 — row concurrently modified');
+      return res.status(409).json({ success: false, message: 'Order state changed concurrently — please refresh and try again' });
+    }
 
     console.log('✅ CLAIM DATA CLEARED');
 
@@ -8183,10 +8185,12 @@ router.post('/reverse-grouped', async (req, res) => {
     return res.status(400).json({ success: false, message: 'order_id is required' });
   }
 
-  if (!unique_ids || !Array.isArray(unique_ids) || unique_ids.length === 0) {
-    console.log('❌ REVERSE GROUPED FAILED: Missing or invalid unique_ids');
-    return res.status(400).json({ success: false, message: 'unique_ids array is required' });
+  // 5.1 + 5.2 — Batch size limit + type validation
+  const arrayCheck = validateBulkArray(unique_ids, 'unique_ids');
+  if (!arrayCheck.ok) {
+    return res.status(400).json({ success: false, message: arrayCheck.message });
   }
+  const sanitizedUniqueIds = arrayCheck.items;
 
   if (!token) {
     console.log('❌ REVERSE GROUPED FAILED: Missing token');

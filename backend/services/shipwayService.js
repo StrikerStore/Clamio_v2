@@ -849,9 +849,21 @@ class ShipwayService {
     let maxUniqueId = 0;
 
     try {
-      const allOrders = await database.getAllOrders();
-      // Filter orders to only include current store's orders
-      existingOrders = allOrders.filter(row => row.account_code === this.accountCode);
+      // 3.4 — Targeted query: load only this store's orders for claim preservation
+      // (was: getAllOrders() loading ALL orders + JS filter by account_code)
+      const [existingOrderRows] = await database.mysqlConnection.execute(
+        `SELECT o.unique_id, o.order_id, o.product_code, o.order_date, o.product_name, o.pincode,
+                o.payment_type, o.is_partial_paid, o.account_code,
+                c.status, c.claimed_by, c.claimed_at, c.last_claimed_by, c.last_claimed_at,
+                c.clone_status, c.cloned_order_id, c.is_cloned_row, c.label_downloaded,
+                c.priority_carrier, l.handover_at, o.customer_name
+         FROM orders o
+         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
+         LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
+         WHERE o.account_code = ?`,
+        [this.accountCode]
+      );
+      existingOrders = existingOrderRows;
 
       // Build map of existing claim data with account_code in key
       existingOrders.forEach(row => {

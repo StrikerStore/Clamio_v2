@@ -90,21 +90,32 @@ router.get('/vendors-report', requireAdminOrSuperadmin, async (req, res) => {
     const users = await database.getAllUsers();
     const vendors = users.filter(u => u.role === 'vendor');
 
-    // Load orders for stats from MySQL
-    let orders = [];
+    // 3.8 — Targeted aggregate query per vendor instead of getAllOrders() + JS reduce
+    // Returns { claimed_by, total_orders, completed_orders, revenue } per vendor warehouse_id
+    let vendorStats = new Map();
     try {
-      orders = await database.getAllOrders();
+      const [statsRows] = await database.mysqlConnection.execute(
+        `SELECT c.claimed_by,
+                COUNT(*) as total_orders,
+                SUM(CASE WHEN c.status IN ('delivered','ready_for_handover') THEN 1 ELSE 0 END) as completed_orders,
+                SUM(COALESCE(o.order_total_split, 0)) as revenue
+         FROM claims c
+         JOIN orders o ON o.unique_id = c.order_unique_id
+         WHERE c.claimed_by IS NOT NULL AND c.claimed_by != ''
+         GROUP BY c.claimed_by`
+      );
+      statsRows.forEach(r => vendorStats.set(String(r.claimed_by), r));
     } catch (error) {
-      console.log('Warning: Could not load orders for vendor stats:', error.message);
+      console.log('Warning: Could not load vendor stats:', error.message);
     }
 
     const buildVendor = async (v) => {
-      // Stats
+      // Stats from pre-computed aggregate query
       const warehouseId = v.warehouseId || v.warehouse_id || v.warehouse || v.vendor_warehouse_id || v.warehouseid || '';
-      const vOrders = warehouseId ? orders.filter(o => String(o.claimed_by) === String(warehouseId)) : [];
-      const totalOrders = vOrders.length;
-      const completedOrders = vOrders.filter(o => (o.status === 'delivered' || o.status === 'ready_for_handover')).length;
-      const revenue = vOrders.reduce((sum, o) => sum + (parseFloat(o.order_total_split) || parseFloat(o.value) || 0), 0);
+      const stats = warehouseId ? vendorStats.get(String(warehouseId)) : null;
+      const totalOrders = parseInt(stats?.total_orders || 0);
+      const completedOrders = parseInt(stats?.completed_orders || 0);
+      const revenue = parseFloat(stats?.revenue || 0);
 
       // City from Shipway if not stored
       // Note: Warehouse lookup requires account_code for store isolation
