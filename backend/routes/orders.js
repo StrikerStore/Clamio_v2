@@ -6,6 +6,8 @@ const fetch = require('node-fetch');
 const { authenticateBasicAuth, requireAdminOrSuperadmin, requireAnyUser } = require('../middleware/auth');
 const carrierServiceabilityService = require('../services/carrierServiceabilityService');
 const taskStore = require('../services/taskStore');
+const TransactionManager = require('../utils/transactionManager');
+const logger = require('../utils/logger');
 
 // Apply authentication to all order routes
 router.use(authenticateBasicAuth);
@@ -66,19 +68,14 @@ function validatePagination(query) {
  */
 async function createLabelGenerationNotification(errorMessage, orderId, vendor, errorCategory = 'UNKNOWN_ERROR', errorType = 'UNKNOWN') {
   try {
-    console.log('📢 Creating notification for label generation error...');
-    console.log('  - Error:', errorMessage);
-    console.log('  - Order ID:', orderId);
-    console.log('  - Vendor:', vendor.name);
-    console.log('  - Error Category:', errorCategory);
-    console.log('  - Error Type:', errorType);
+    logger.info('📢 Creating notification for label generation error...');
 
     const database = require('../config/database');
     let notificationData = null;
 
     // Pattern 1: Insufficient Shipping Balance
     if (errorMessage.toLowerCase().includes('insufficient') && errorMessage.toLowerCase().includes('balance')) {
-      console.log('✅ Detected: Insufficient Shipping Balance error');
+      logger.info('✅ Detected: Insufficient Shipping Balance error');
 
       // Extract carrier_id from message (format: "carrier id {carrier_id}")
       const carrierMatch = errorMessage.match(/carrier\s+id\s+(\d+)/i);
@@ -105,7 +102,7 @@ async function createLabelGenerationNotification(errorMessage, orderId, vendor, 
 
     // Pattern 2: Delivery pincode not serviceable
     else if (errorMessage.toLowerCase().includes('pincode') && errorMessage.toLowerCase().includes('serviceable')) {
-      console.log('✅ Detected: Delivery pincode not serviceable error');
+      logger.info('✅ Detected: Delivery pincode not serviceable error');
 
       // Extract carrier_id from message (format: "carrier id {carrier_id}")
       const carrierMatch = errorMessage.match(/carrier\s+id\s+(\d+)/i);
@@ -137,7 +134,7 @@ async function createLabelGenerationNotification(errorMessage, orderId, vendor, 
 
     // Pattern 3: Order already exists error
     else if (errorMessage.toLowerCase().includes('order already exists')) {
-      console.log('✅ Detected: Order already exists error');
+      logger.info('✅ Detected: Order already exists error');
 
       notificationData = {
         type: 'shipment_assignment_error',
@@ -160,7 +157,7 @@ async function createLabelGenerationNotification(errorMessage, orderId, vendor, 
     // Pattern 4: No priority carriers assigned
     else if (errorMessage.toLowerCase().includes('no priority carriers') ||
       errorMessage.toLowerCase().includes('priority carriers assigned')) {
-      console.log('✅ Detected: No priority carriers assigned error');
+      logger.info('✅ Detected: No priority carriers assigned error');
 
       notificationData = {
         type: 'carrier_unavailable',
@@ -184,7 +181,7 @@ async function createLabelGenerationNotification(errorMessage, orderId, vendor, 
     else if (errorMessage.toLowerCase().includes('label') ||
       errorMessage.toLowerCase().includes('download') ||
       errorMessage.toLowerCase().includes('generation')) {
-      console.log('✅ Detected: Generic label/download error');
+      logger.info('✅ Detected: Generic label/download error');
 
       notificationData = {
         type: 'label_download_error',
@@ -206,7 +203,7 @@ async function createLabelGenerationNotification(errorMessage, orderId, vendor, 
 
     // If we identified a pattern, create the notification
     if (notificationData) {
-      console.log('📝 Creating notification in database:', notificationData);
+      logger.info('📝 Creating notification in database:', notificationData);
 
       // Insert notification into database
       await database.query(
@@ -227,15 +224,15 @@ async function createLabelGenerationNotification(errorMessage, orderId, vendor, 
         ]
       );
 
-      console.log('✅ Notification created successfully');
+      logger.info('✅ Notification created successfully');
       return true;
     } else {
-      console.log('⚠️ No matching error pattern found for notification');
+      logger.info('⚠️ No matching error pattern found for notification');
       return false;
     }
 
   } catch (error) {
-    console.error('❌ Failed to create notification:', error);
+    logger.error('❌ Failed to create notification:', error);
     // Don't throw error - we don't want notification creation failure to break label generation
     return false;
   }
@@ -274,7 +271,7 @@ router.get('/', requireAnyUser, async (req, res) => {
     const dateFrom = req.query.dateFrom;
     const dateTo = req.query.dateTo;
 
-    console.log('📄 Orders pagination params:', { page, limit, status, search, dateFrom, dateTo });
+    logger.info('📄 Orders pagination params:', { page, limit, status, search, dateFrom, dateTo });
 
     // Use optimized paginated query with LIMIT/OFFSET in SQL
     // This is MUCH faster than fetching all orders and filtering in JavaScript
@@ -292,7 +289,7 @@ router.get('/', requireAnyUser, async (req, res) => {
     const totalQuantity = result.totalQuantity;
     const hasMore = (offset + paginatedOrders.length) < totalCount;
 
-    console.log('📊 Orders pagination result:', {
+    logger.info('📊 Orders pagination result:', {
       total: totalCount,
       totalQuantity: totalQuantity,
       page: page,
@@ -316,7 +313,7 @@ router.get('/', requireAnyUser, async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error getting orders:', err);
+    logger.error('Error getting orders:', err);
     return res.status(500).json({ success: false, message: 'Failed to read orders' });
   }
 });
@@ -347,7 +344,7 @@ router.get('/last-updated', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error getting last updated time:', err);
+    logger.error('Error getting last updated time:', err);
     return res.status(500).json({
       success: false,
       message: 'Failed to get last updated time',
@@ -379,7 +376,7 @@ router.get('/distinct-statuses', requireAdminOrSuperadmin, async (req, res) => {
       data: statuses
     });
   } catch (err) {
-    console.error('Error getting distinct statuses:', err);
+    logger.error('Error getting distinct statuses:', err);
     return res.status(500).json({
       success: false,
       message: 'Failed to get distinct statuses',
@@ -397,9 +394,7 @@ router.post('/verify-status', async (req, res) => {
   const { unique_ids } = req.body;
   const vendor = req.user;
 
-  console.log('🔵 VERIFY STATUS REQUEST START');
-  console.log('  - unique_ids:', unique_ids);
-  console.log('  - user:', vendor.name);
+  logger.info('🔵 VERIFY STATUS REQUEST START');
 
   if (!unique_ids || !Array.isArray(unique_ids) || unique_ids.length === 0) {
     return res.status(400).json({
@@ -449,8 +444,7 @@ router.post('/verify-status', async (req, res) => {
       }
     });
 
-    console.log('✅ Status verification complete');
-    console.log('  - Verified orders:', Object.keys(statusMap).length);
+    logger.info('✅ Status verification complete');
 
     return res.json({
       success: true,
@@ -462,7 +456,7 @@ router.post('/verify-status', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ VERIFY STATUS ERROR:', error);
+    logger.error('❌ VERIFY STATUS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to verify order statuses',
@@ -480,9 +474,7 @@ router.post('/claim', async (req, res) => {
   const { unique_id } = req.body;
   const vendor = req.user;
 
-  console.log('🔵 CLAIM REQUEST START');
-  console.log('  - unique_id:', unique_id);
-  console.log('  - user:', vendor.name);
+  logger.info('🔵 CLAIM REQUEST START');
 
   // 5.2 — Validate unique_id is a non-empty string
   const idCheck = validateId(unique_id, 'unique_id');
@@ -506,89 +498,82 @@ router.post('/claim', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     // Get order from MySQL
-    console.log('📂 Loading order from MySQL...');
-    console.log('🔍 Looking for unique_id:', unique_id);
+    logger.info('📂 Loading order from MySQL...');
+    logger.info('🔍 Looking for unique_id:', unique_id);
 
     const order = await database.getOrderByUniqueId(unique_id);
 
     if (!order) {
-      console.log('❌ ORDER NOT FOUND');
+      logger.info('❌ ORDER NOT FOUND');
       return res.status(404).json({ success: false, message: 'Order row not found' });
     }
 
-    console.log('✅ ORDER FOUND');
-    console.log('  - order_id:', order.order_id);
-    console.log('  - product_name:', order.product_name);
-    console.log('  - current status:', order.status);
-    console.log('  - current claimed_by:', order.claimed_by);
+    logger.info('✅ ORDER FOUND');
 
     if (order.status !== 'unclaimed') {
-      console.log('❌ ORDER NOT UNCLAIMED');
-      console.log('  - Current status:', order.status);
+      logger.info('❌ ORDER NOT UNCLAIMED');
       return res.status(400).json({ success: false, message: 'Order row is not unclaimed' });
     }
 
     // For Shiprocket orders: Change pickup address to vendor's pickup_location before claiming
     const store = await database.getStoreByAccountCode(order.account_code);
     if (store && store.shipping_partner?.toLowerCase() === 'shiprocket') {
-      console.log('📍 Shiprocket order detected — changing pickup address before claim...');
+      logger.info('📍 Shiprocket order detected — changing pickup address before claim...');
 
       if (!order.partner_order_id) {
-        console.log('❌ Cannot change pickup address: partner_order_id is missing for order', order.order_id);
+        logger.info('❌ Cannot change pickup address: partner_order_id is missing for order', order.order_id);
         return res.status(400).json({ success: false, message: 'partner_order_id is missing for this Shiprocket order. Cannot change pickup address.' });
       }
 
       // Get vendor's pickup_location from wh_mapping
       const whMapping = await database.getWhMappingByClaimioWhIdAndAccountCode(warehouseId, order.account_code);
       if (!whMapping || !whMapping.pickup_location) {
-        console.log('❌ Warehouse mapping or pickup_location not found for vendor', warehouseId, 'and store', order.account_code);
+        logger.info('❌ Warehouse mapping or pickup_location not found for vendor', warehouseId, 'and store', order.account_code);
         return res.status(400).json({ success: false, message: `Pickup location not configured for your warehouse (${warehouseId}) and store (${order.account_code}). Please contact admin.` });
       }
 
-      console.log(`  - Partner Order ID (order.id): ${order.partner_order_id}`);
-      console.log(`  - Pickup Location: ${whMapping.pickup_location}`);
 
       try {
         const ShiprocketService = require('../services/shiprocketService');
         const shiprocketService = new ShiprocketService(order.account_code);
         await shiprocketService.changePickupAddress([parseInt(order.partner_order_id)], whMapping.pickup_location);
-        console.log('✅ Pickup address changed successfully');
+        logger.info('✅ Pickup address changed successfully');
       } catch (pickupError) {
-        console.error('❌ Failed to change pickup address:', pickupError.message);
+        logger.error('❌ Failed to change pickup address:', pickupError.message);
         return res.status(500).json({ success: false, message: `Failed to change pickup address on Shiprocket: ${pickupError.message}` });
       }
     }
 
     // Assign top 3 priority carriers during claim
     // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
-    console.log('🚚 ASSIGNING TOP 3 PRIORITY CARRIERS...');
+    logger.info('🚚 ASSIGNING TOP 3 PRIORITY CARRIERS...');
     let priorityCarrier = '';
     try {
       // Build a temporary order object with claimed_by pre-filled for carrier lookup
       const orderForCarrier = { ...order, claimed_by: warehouseId };
       priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(orderForCarrier);
-      console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
+      logger.info(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
     } catch (carrierError) {
-      console.log(`⚠️ Carrier assignment failed (non-fatal): ${carrierError.message}`);
+      logger.info(`⚠️ Carrier assignment failed (non-fatal): ${carrierError.message}`);
     }
 
     // 4.2 — Atomic claim: single conditional UPDATE (no race window)
     // If another vendor claimed between our read above and this write, affectedRows=0 → 409
-    console.log('💾 ATOMIC CLAIM TO MYSQL');
+    logger.info('💾 ATOMIC CLAIM TO MYSQL');
     const claimed = await database.atomicClaimOrder(unique_id, warehouseId, priorityCarrier);
 
     if (!claimed) {
-      console.log('❌ ORDER ALREADY CLAIMED (concurrent request won)');
+      logger.info('❌ ORDER ALREADY CLAIMED (concurrent request won)');
       return res.status(409).json({ success: false, message: 'Order already claimed by another vendor' });
     }
 
-    console.log('✅ MYSQL CLAIM SAVED SUCCESSFULLY');
-    console.log('🟢 CLAIM SUCCESS — Order claimed by:', warehouseId);
+    logger.info('✅ MYSQL CLAIM SAVED SUCCESSFULLY');
+    logger.info('🟢 CLAIM SUCCESS — Order claimed by:', warehouseId);
 
     // Return the updated order for UI refresh
     const finalOrder = await database.getOrderByUniqueId(unique_id);
@@ -596,7 +581,7 @@ router.post('/claim', async (req, res) => {
 
 
   } catch (error) {
-    console.error('💥 CLAIM ERROR:', error);
+    logger.error('💥 CLAIM ERROR:', error);
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -610,9 +595,7 @@ router.post('/bulk-claim', async (req, res) => {
   const { unique_ids } = req.body;
   const token = req.headers['authorization'];
 
-  console.log('🔵 BULK CLAIM REQUEST START');
-  console.log('  - unique_ids:', unique_ids);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  logger.info('🔵 BULK CLAIM REQUEST START');
 
   // 5.1 + 5.2 — Batch size limit + type validation
   const arrayCheck = validateBulkArray(unique_ids, 'unique_ids');
@@ -627,14 +610,14 @@ router.post('/bulk-claim', async (req, res) => {
 
   // Load users from MySQL
   const database = require('../config/database');
-  console.log('📂 Loading users from MySQL...');
+  logger.info('📂 Loading users from MySQL...');
 
   try {
     // Wait for MySQL initialization
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
     const vendor = req.user;
@@ -648,18 +631,17 @@ router.post('/bulk-claim', async (req, res) => {
     }
 
     const warehouseId = vendor.warehouseId;
-    console.log('✅ VENDOR FOUND');
-    console.log('  - warehouseId:', warehouseId);
+    logger.info('✅ VENDOR FOUND');
 
-    console.log('🔍 Processing bulk claim for', unique_ids.length, 'orders');
+    logger.info('🔍 Processing bulk claim for', unique_ids.length, 'orders');
 
     const successfulClaims = [];
     const failedClaims = [];
 
     // OPTIMIZATION 1: Fetch all orders in one database query instead of N individual queries
-    console.log('📦 Fetching all orders in bulk...');
+    logger.info('📦 Fetching all orders in bulk...');
     const allOrders = await database.getOrdersByUniqueIds(sanitizedUniqueIds);
-    console.log(`✅ Fetched ${allOrders.length} orders from database`);
+    logger.info(`✅ Fetched ${allOrders.length} orders from database`);
 
     // Create a map for quick lookup: unique_id -> order
     const ordersMap = new Map();
@@ -669,39 +651,39 @@ router.post('/bulk-claim', async (req, res) => {
 
     // Process orders in parallel with concurrency limit
     const CONCURRENCY_LIMIT = 15;
-    console.log(`⚡ Using parallel processing with concurrency limit of ${CONCURRENCY_LIMIT}`);
+    logger.info(`⚡ Using parallel processing with concurrency limit of ${CONCURRENCY_LIMIT}`);
 
     // Helper function to process a single order
     const processSingleOrder = async (unique_id) => {
       try {
-        console.log('🔍 Processing unique_id:', unique_id);
+        logger.info('🔍 Processing unique_id:', unique_id);
 
         // Get order from the map (already fetched)
         const order = ordersMap.get(unique_id);
 
         if (!order) {
-          console.log('❌ ORDER NOT FOUND:', unique_id);
+          logger.info('❌ ORDER NOT FOUND:', unique_id);
           return { success: false, unique_id, reason: 'Order not found' };
         }
 
         if (order.status !== 'unclaimed') {
-          console.log('❌ ORDER NOT UNCLAIMED:', unique_id, 'Status:', order.status);
+          logger.info('❌ ORDER NOT UNCLAIMED:', unique_id, 'Status:', order.status);
           return { success: false, unique_id, reason: 'Order is not unclaimed' };
         }
 
         // For Shiprocket orders: Change pickup address to vendor's pickup_location before claiming
         const store = await database.getStoreByAccountCode(order.account_code);
         if (store && store.shipping_partner?.toLowerCase() === 'shiprocket') {
-          console.log(`📍 Shiprocket order ${order.order_id} — changing pickup address before claim...`);
+          logger.info(`📍 Shiprocket order ${order.order_id} — changing pickup address before claim...`);
 
           if (!order.partner_order_id) {
-            console.log(`❌ Cannot change pickup address: partner_order_id is missing for order ${order.order_id}`);
+            logger.info(`❌ Cannot change pickup address: partner_order_id is missing for order ${order.order_id}`);
             return { success: false, unique_id, reason: 'partner_order_id is missing for this Shiprocket order' };
           }
 
           const whMapping = await database.getWhMappingByClaimioWhIdAndAccountCode(warehouseId, order.account_code);
           if (!whMapping || !whMapping.pickup_location) {
-            console.log(`❌ Pickup location not configured for vendor ${warehouseId} and store ${order.account_code}`);
+            logger.info(`❌ Pickup location not configured for vendor ${warehouseId} and store ${order.account_code}`);
             return { success: false, unique_id, reason: `Pickup location not configured for warehouse ${warehouseId}` };
           }
 
@@ -709,9 +691,9 @@ router.post('/bulk-claim', async (req, res) => {
             const ShiprocketService = require('../services/shiprocketService');
             const shiprocketService = new ShiprocketService(order.account_code);
             await shiprocketService.changePickupAddress([parseInt(order.partner_order_id)], whMapping.pickup_location);
-            console.log(`✅ Pickup address changed for order ${order.order_id}`);
+            logger.info(`✅ Pickup address changed for order ${order.order_id}`);
           } catch (pickupError) {
-            console.error(`❌ Failed to change pickup address for order ${order.order_id}:`, pickupError.message);
+            logger.error(`❌ Failed to change pickup address for order ${order.order_id}:`, pickupError.message);
             return { success: false, unique_id, reason: `Failed to change pickup address: ${pickupError.message}` };
           }
         }
@@ -722,23 +704,23 @@ router.post('/bulk-claim', async (req, res) => {
         try {
           const orderForCarrier = { ...order, claimed_by: warehouseId };
           priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(orderForCarrier);
-          console.log(`✅ Top 3 carriers assigned for ${order.order_id}: ${priorityCarrier}`);
+          logger.info(`✅ Top 3 carriers assigned for ${order.order_id}: ${priorityCarrier}`);
         } catch (carrierError) {
-          console.log(`⚠️ Carrier assignment failed for ${order.order_id} (non-fatal): ${carrierError.message}`);
+          logger.info(`⚠️ Carrier assignment failed for ${order.order_id} (non-fatal): ${carrierError.message}`);
         }
 
-        console.log('🔄 ATOMIC CLAIMING ORDER:', unique_id);
+        logger.info('🔄 ATOMIC CLAIMING ORDER:', unique_id);
         const claimed = await database.atomicClaimOrder(unique_id, warehouseId, priorityCarrier);
 
         if (claimed) {
-          console.log('✅ ORDER CLAIMED SUCCESSFULLY:', unique_id);
+          logger.info('✅ ORDER CLAIMED SUCCESSFULLY:', unique_id);
           return { success: true, unique_id, order_id: order.order_id };
         } else {
-          console.log('❌ ORDER ALREADY CLAIMED (concurrent request won):', unique_id);
+          logger.info('❌ ORDER ALREADY CLAIMED (concurrent request won):', unique_id);
           return { success: false, unique_id, reason: 'Order already claimed by another vendor' };
         }
       } catch (error) {
-        console.log(`💥 ERROR PROCESSING ORDER ${unique_id}:`, error.message);
+        logger.info(`💥 ERROR PROCESSING ORDER ${unique_id}:`, error.message);
         return { success: false, unique_id, reason: error.message };
       }
     };
@@ -749,7 +731,7 @@ router.post('/bulk-claim', async (req, res) => {
       const batchNumber = Math.floor(i / CONCURRENCY_LIMIT) + 1;
       const totalBatches = Math.ceil(sanitizedUniqueIds.length / CONCURRENCY_LIMIT);
 
-      console.log(`📦 Processing batch ${batchNumber}/${totalBatches} (${batch.length} orders in parallel)...`);
+      logger.info(`📦 Processing batch ${batchNumber}/${totalBatches} (${batch.length} orders in parallel)...`);
 
       // Process all orders in this batch in parallel
       const batchResults = await Promise.all(batch.map(processSingleOrder));
@@ -763,16 +745,14 @@ router.post('/bulk-claim', async (req, res) => {
         }
       });
 
-      console.log(`✅ Batch ${batchNumber}/${totalBatches} completed - Success: ${batchResults.filter(r => r.success).length}, Failed: ${batchResults.filter(r => !r.success).length}`);
+      logger.info(`✅ Batch ${batchNumber}/${totalBatches} completed - Success: ${batchResults.filter(r => r.success).length}, Failed: ${batchResults.filter(r => !r.success).length}`);
     }
 
     if (successfulClaims.length > 0) {
-      console.log('✅ MYSQL BULK UPDATE COMPLETED');
+      logger.info('✅ MYSQL BULK UPDATE COMPLETED');
     }
 
-    console.log('🟢 BULK CLAIM COMPLETE');
-    console.log('  - Successful claims:', successfulClaims.length);
-    console.log('  - Failed claims:', failedClaims.length);
+    logger.info('🟢 BULK CLAIM COMPLETE');
 
     return res.json({
       success: true,
@@ -786,7 +766,7 @@ router.post('/bulk-claim', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('💥 BULK CLAIM ERROR:', error);
+    logger.error('💥 BULK CLAIM ERROR:', error);
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
@@ -797,17 +777,17 @@ router.post('/bulk-claim', async (req, res) => {
  * @access  Vendor (token required)
  */
 router.get('/my-orders', async (req, res) => {
-  console.log('\n🔵 MY ORDERS REQUEST START');
-  console.log('================================');
-  console.log('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('📥 Request Method:', req.method);
-  console.log('📥 Request URL:', req.url);
-  console.log('📥 Request IP:', req.ip);
+  logger.info('\n🔵 MY ORDERS REQUEST START');
+  logger.info('================================');
+  logger.info('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
+  logger.info('📥 Request Method:', req.method);
+  logger.info('📥 Request URL:', req.url);
+  logger.info('📥 Request IP:', req.ip);
 
   // Extract pagination parameters
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 50;
-  console.log('📄 Pagination params:', { page, limit });
+  logger.info('📄 Pagination params:', { page, limit });
 
   const vendor = req.user;
   const database = require('../config/database');
@@ -816,7 +796,7 @@ router.get('/my-orders', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -827,11 +807,11 @@ router.get('/my-orders', async (req, res) => {
     const warehouseId = vendor.warehouseId;
 
     // Get My Orders from MySQL
-    console.log('📂 Loading My Orders from MySQL...');
+    logger.info('📂 Loading My Orders from MySQL...');
 
     const myOrders = await database.getMyOrders(warehouseId);
 
-    console.log('📦 My Orders loaded:', myOrders.length);
+    logger.info('📦 My Orders loaded:', myOrders.length);
 
     // Group orders by order_id (exact same logic as original Excel flow)
     const groupedOrders = {};
@@ -886,16 +866,15 @@ router.get('/my-orders', async (req, res) => {
       return new Date(b.order_date) - new Date(a.order_date);
     });
 
-    console.log('📊 Grouped My Orders processed:', groupedOrdersArray.length);
+    logger.info('📊 Grouped My Orders processed:', groupedOrdersArray.length);
 
     const totalQuantityAcrossAllOrders = groupedOrdersArray.reduce((sum, order) => {
       return sum + order.total_quantity;
     }, 0);
 
-    console.log('📊 Total quantity across all My Orders:', totalQuantityAcrossAllOrders);
+    logger.info('📊 Total quantity across all My Orders:', totalQuantityAcrossAllOrders);
 
     if (groupedOrdersArray.length > 0) {
-      console.log('  - First order:', JSON.stringify(groupedOrdersArray[0], null, 2));
     }
 
     const totalCount = groupedOrdersArray.length;
@@ -925,20 +904,18 @@ router.get('/my-orders', async (req, res) => {
       }
     };
 
-    console.log('✅ MY ORDERS SUCCESS');
-    console.log('  - My Orders Count:', responseData.data.myOrders.length);
+    logger.info('✅ MY ORDERS SUCCESS');
 
     // Debug: Log each grouped order's total_quantity
     if (responseData.data.myOrders.length > 0) {
       responseData.data.myOrders.forEach((order, index) => {
-        console.log(`  - Order ${index + 1}: ${order.order_id} - ${order.total_quantity} items`);
       });
     }
 
     return res.json(responseData);
 
   } catch (error) {
-    console.error('❌ MY ORDERS ERROR:', error);
+    logger.error('❌ MY ORDERS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Internal server error: ' + error.message
@@ -952,17 +929,17 @@ router.get('/my-orders', async (req, res) => {
  * @access  Vendor (token required)
  */
 router.get('/handover', async (req, res) => {
-  console.log('\n🔵 HANDOVER ORDERS REQUEST START');
-  console.log('================================');
-  console.log('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('📥 Request Method:', req.method);
-  console.log('📥 Request URL:', req.url);
-  console.log('📥 Request IP:', req.ip);
+  logger.info('\n🔵 HANDOVER ORDERS REQUEST START');
+  logger.info('================================');
+  logger.info('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
+  logger.info('📥 Request Method:', req.method);
+  logger.info('📥 Request URL:', req.url);
+  logger.info('📥 Request IP:', req.ip);
 
   // Extract pagination parameters
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 50;
-  console.log('📄 Pagination params:', { page, limit });
+  logger.info('📄 Pagination params:', { page, limit });
 
   const vendor = req.user;
   const database = require('../config/database');
@@ -971,7 +948,7 @@ router.get('/handover', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -982,11 +959,11 @@ router.get('/handover', async (req, res) => {
     const warehouseId = vendor.warehouseId;
 
     // Get Handover Orders from MySQL
-    console.log('📂 Loading Handover Orders from MySQL...');
+    logger.info('📂 Loading Handover Orders from MySQL...');
 
     const handoverOrders = await database.getHandoverOrders(warehouseId);
 
-    console.log('📦 Handover Orders loaded:', handoverOrders.length);
+    logger.info('📦 Handover Orders loaded:', handoverOrders.length);
 
     // Get shipping partners for all unique account codes
     const uniqueAccountCodes = [...new Set(handoverOrders.map(o => o.account_code).filter(Boolean))];
@@ -998,7 +975,7 @@ router.get('/handover', async (req, res) => {
           shippingPartnerMap[s.account_code] = s.shipping_partner || 'shipway'; 
         });
       } catch (err) {
-        console.warn('⚠️ Could not fetch store shipping partners:', err.message);
+        logger.warn('⚠️ Could not fetch store shipping partners:', err.message);
       }
     }
 
@@ -1058,16 +1035,15 @@ router.get('/handover', async (req, res) => {
       return new Date(b.order_date) - new Date(a.order_date);
     });
 
-    console.log('📊 Grouped Handover Orders processed:', groupedOrdersArray.length);
+    logger.info('📊 Grouped Handover Orders processed:', groupedOrdersArray.length);
 
     const totalQuantityAcrossAllOrders = groupedOrdersArray.reduce((sum, order) => {
       return sum + order.total_quantity;
     }, 0);
 
-    console.log('📊 Total quantity across all Handover Orders:', totalQuantityAcrossAllOrders);
+    logger.info('📊 Total quantity across all Handover Orders:', totalQuantityAcrossAllOrders);
 
     if (groupedOrdersArray.length > 0) {
-      console.log('  - First order:', JSON.stringify(groupedOrdersArray[0], null, 2));
     }
 
     const totalCount = groupedOrdersArray.length;
@@ -1097,20 +1073,18 @@ router.get('/handover', async (req, res) => {
       }
     };
 
-    console.log('✅ HANDOVER ORDERS SUCCESS');
-    console.log('  - Handover Orders Count:', responseData.data.handoverOrders.length);
+    logger.info('✅ HANDOVER ORDERS SUCCESS');
 
     // Debug: Log each grouped order's total_quantity
     if (responseData.data.handoverOrders.length > 0) {
       responseData.data.handoverOrders.forEach((order, index) => {
-        console.log(`  - Order ${index + 1}: ${order.order_id} - ${order.total_quantity} items`);
       });
     }
 
     return res.json(responseData);
 
   } catch (error) {
-    console.error('❌ HANDOVER ORDERS ERROR:', error);
+    logger.error('❌ HANDOVER ORDERS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Internal server error: ' + error.message
@@ -1124,12 +1098,12 @@ router.get('/handover', async (req, res) => {
  * @access  Vendor (token required)
  */
 router.get('/order-tracking', async (req, res) => {
-  console.log('\n🔵 ORDER TRACKING ORDERS REQUEST START');
-  console.log('================================');
-  console.log('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('📥 Request Method:', req.method);
-  console.log('📥 Request URL:', req.url);
-  console.log('📥 Request IP:', req.ip);
+  logger.info('\n🔵 ORDER TRACKING ORDERS REQUEST START');
+  logger.info('================================');
+  logger.info('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
+  logger.info('📥 Request Method:', req.method);
+  logger.info('📥 Request URL:', req.url);
+  logger.info('📥 Request IP:', req.ip);
 
   const vendor = req.user;
   const database = require('../config/database');
@@ -1138,7 +1112,7 @@ router.get('/order-tracking', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -1149,11 +1123,11 @@ router.get('/order-tracking', async (req, res) => {
     const warehouseId = vendor.warehouseId;
 
     // Get Order Tracking Orders from MySQL
-    console.log('📂 Loading Order Tracking Orders from MySQL...');
+    logger.info('📂 Loading Order Tracking Orders from MySQL...');
 
     const trackingOrders = await database.getOrderTrackingOrders(warehouseId);
 
-    console.log('📦 Order Tracking Orders loaded:', trackingOrders.length);
+    logger.info('📦 Order Tracking Orders loaded:', trackingOrders.length);
 
     // Group orders by order_id (exact same logic as original Excel flow)
     const groupedOrders = {};
@@ -1210,16 +1184,15 @@ router.get('/order-tracking', async (req, res) => {
       return new Date(b.order_date) - new Date(a.order_date);
     });
 
-    console.log('📊 Grouped Order Tracking Orders processed:', groupedOrdersArray.length);
+    logger.info('📊 Grouped Order Tracking Orders processed:', groupedOrdersArray.length);
 
     const totalQuantityAcrossAllOrders = groupedOrdersArray.reduce((sum, order) => {
       return sum + order.total_quantity;
     }, 0);
 
-    console.log('📊 Total quantity across all Order Tracking Orders:', totalQuantityAcrossAllOrders);
+    logger.info('📊 Total quantity across all Order Tracking Orders:', totalQuantityAcrossAllOrders);
 
     if (groupedOrdersArray.length > 0) {
-      console.log('  - First order:', JSON.stringify(groupedOrdersArray[0], null, 2));
     }
 
     const totalCount = groupedOrdersArray.length;
@@ -1227,7 +1200,7 @@ router.get('/order-tracking', async (req, res) => {
     // Extract pagination parameters
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
-    console.log('📄 Order Tracking pagination params:', { page, limit });
+    logger.info('📄 Order Tracking pagination params:', { page, limit });
 
     // Apply pagination
     const startIndex = (page - 1) * limit;
@@ -1256,23 +1229,18 @@ router.get('/order-tracking', async (req, res) => {
       }
     };
 
-    console.log('✅ ORDER TRACKING ORDERS SUCCESS');
-    console.log('  - Total Orders:', totalCount);
-    console.log('  - Returned Orders:', paginatedOrders.length);
-    console.log('  - Page:', page);
-    console.log('  - Has More:', hasMore);
+    logger.info('✅ ORDER TRACKING ORDERS SUCCESS');
 
     // Debug: Log each grouped order's total_quantity
     if (paginatedOrders.length > 0) {
       paginatedOrders.forEach((order, index) => {
-        console.log(`  - Order ${index + 1}: ${order.order_id} - ${order.total_quantity} items`);
       });
     }
 
     return res.json(responseData);
 
   } catch (error) {
-    console.error('❌ ORDER TRACKING ORDERS ERROR:', error);
+    logger.error('❌ ORDER TRACKING ORDERS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Internal server error: ' + error.message
@@ -1286,8 +1254,8 @@ router.get('/order-tracking', async (req, res) => {
  * @access  Vendor (token required)
  */
 router.get('/dashboard-stats', async (req, res) => {
-  console.log('\n📊 DASHBOARD STATS REQUEST START');
-  console.log('================================');
+  logger.info('\n📊 DASHBOARD STATS REQUEST START');
+  logger.info('================================');
 
   const vendor = req.user;
   const database = require('../config/database');
@@ -1296,7 +1264,7 @@ router.get('/dashboard-stats', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -1308,7 +1276,7 @@ router.get('/dashboard-stats', async (req, res) => {
 
     // Calculate all statistics using SQL aggregations (much faster than JavaScript)
     // Run all 4 queries in parallel using connection pool for maximum performance
-    console.log('📊 Calculating dashboard statistics in parallel...');
+    logger.info('📊 Calculating dashboard statistics in parallel...');
 
     // 1. All Orders (unclaimed) - Total Count and Total Quantity
     // Orders that are unclaimed (must match frontend logic: status = 'unclaimed')
@@ -1408,11 +1376,7 @@ router.get('/dashboard-stats', async (req, res) => {
     const orderTrackingCount = parseInt(orderTrackingResult[0]?.total_count || 0);
     const orderTrackingQuantity = parseInt(orderTrackingResult[0]?.total_quantity || 0);
 
-    console.log('✅ Dashboard statistics calculated:');
-    console.log('  - All Orders:', { count: allOrdersCount, quantity: allOrdersQuantity });
-    console.log('  - My Orders:', { count: myOrdersCount, quantity: myOrdersQuantity });
-    console.log('  - Handover:', { count: handoverCount, quantity: handoverQuantity });
-    console.log('  - Order Tracking:', { count: orderTrackingCount, quantity: orderTrackingQuantity });
+    logger.info('✅ Dashboard statistics calculated:');
 
     const responseData = {
       success: true,
@@ -1441,7 +1405,7 @@ router.get('/dashboard-stats', async (req, res) => {
     return res.json(responseData);
 
   } catch (error) {
-    console.error('❌ DASHBOARD STATS ERROR:', error);
+    logger.error('❌ DASHBOARD STATS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Internal server error: ' + error.message
@@ -1455,17 +1419,17 @@ router.get('/dashboard-stats', async (req, res) => {
  * @access  Vendor (token required)
  */
 router.get('/grouped', async (req, res) => {
-  console.log('\n🔵 GROUPED ORDERS REQUEST START');
-  console.log('================================');
-  console.log('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('📥 Request Method:', req.method);
-  console.log('📥 Request URL:', req.url);
-  console.log('📥 Request IP:', req.ip);
+  logger.info('\n🔵 GROUPED ORDERS REQUEST START');
+  logger.info('================================');
+  logger.info('📥 Request Headers:', JSON.stringify(req.headers, null, 2));
+  logger.info('📥 Request Method:', req.method);
+  logger.info('📥 Request URL:', req.url);
+  logger.info('📥 Request IP:', req.ip);
 
   // Extract pagination parameters
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 50;
-  console.log('📄 Pagination params:', { page, limit });
+  logger.info('📄 Pagination params:', { page, limit });
 
   const vendor = req.user;
   const database = require('../config/database');
@@ -1474,7 +1438,7 @@ router.get('/grouped', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -1485,11 +1449,11 @@ router.get('/grouped', async (req, res) => {
     const warehouseId = vendor.warehouseId;
 
     // Get individual orders from MySQL (like original Excel flow)
-    console.log('📂 Loading vendor orders from MySQL...');
+    logger.info('📂 Loading vendor orders from MySQL...');
 
     const vendorOrders = await database.getGroupedOrders(warehouseId);
 
-    console.log('📦 Vendor orders loaded:', vendorOrders.length);
+    logger.info('📦 Vendor orders loaded:', vendorOrders.length);
 
     // Fetch shipping_partner for all unique account_codes
     const uniqueAccountCodes = [...new Set(vendorOrders.map(o => o.account_code).filter(Boolean))];
@@ -1499,7 +1463,7 @@ router.get('/grouped', async (req, res) => {
         const stores = await database.getStoresByAccountCodes(uniqueAccountCodes);
         stores.forEach(s => { shippingPartnerMap[s.account_code] = s.shipping_partner || 'shipway'; });
       } catch (err) {
-        console.warn('⚠️ Could not fetch store shipping partners:', err.message);
+        logger.warn('⚠️ Could not fetch store shipping partners:', err.message);
       }
     }
 
@@ -1554,17 +1518,16 @@ router.get('/grouped', async (req, res) => {
       return dateB - dateA; // Most recent first
     });
 
-    console.log('📊 Grouped orders processed:', groupedOrdersArray.length);
+    logger.info('📊 Grouped orders processed:', groupedOrdersArray.length);
 
     // Calculate total quantity across all orders (for tab count)
     const totalQuantityAcrossAllOrders = groupedOrdersArray.reduce((sum, order) => {
       return sum + (order.total_quantity || 0);
     }, 0);
 
-    console.log('📊 Total quantity across all orders:', totalQuantityAcrossAllOrders);
-    console.log('📊 Sample order data for debugging:');
+    logger.info('📊 Total quantity across all orders:', totalQuantityAcrossAllOrders);
+    logger.info('📊 Sample order data for debugging:');
     if (groupedOrdersArray.length > 0) {
-      console.log('  - First order:', JSON.stringify(groupedOrdersArray[0], null, 2));
     }
 
     // Apply pagination
@@ -1574,15 +1537,8 @@ router.get('/grouped', async (req, res) => {
     const paginatedOrders = groupedOrdersArray.slice(startIndex, endIndex);
     const hasMore = endIndex < totalCount;
 
-    console.log('📄 Pagination applied:');
-    console.log('  - Total orders:', totalCount);
-    console.log('  - Page:', page);
-    console.log('  - Limit:', limit);
-    console.log('  - Start index:', startIndex);
-    console.log('  - End index:', endIndex);
-    console.log('  - Returned orders:', paginatedOrders.length);
-    console.log('  - Has more:', hasMore);
-    console.log('🟢 GROUPED ORDERS SUCCESS');
+    logger.info('📄 Pagination applied:');
+    logger.info('🟢 GROUPED ORDERS SUCCESS');
 
     const responseData = {
       success: true,
@@ -1601,34 +1557,22 @@ router.get('/grouped', async (req, res) => {
       }
     };
 
-    console.log('\n📤 RESPONSE DATA:');
-    console.log('  - Status: 200');
-    console.log('  - Success:', responseData.success);
-    console.log('  - Total Orders:', responseData.data.totalOrders);
-    console.log('  - Total Products:', responseData.data.totalProducts);
-    console.log('  - Total Quantity:', responseData.data.totalQuantity);
-    console.log('  - Grouped Orders Count:', responseData.data.groupedOrders.length);
+    logger.info('\n📤 RESPONSE DATA:');
 
     // Debug: Log each grouped order's total_quantity
-    console.log('🔍 DEBUG: Individual order quantities:');
+    logger.info('🔍 DEBUG: Individual order quantities:');
     responseData.data.groupedOrders.forEach((order, index) => {
-      console.log(`  Order ${index} (${order.order_id}): total_quantity = ${order.total_quantity}`);
+      logger.info(`  Order ${index} (${order.order_id}): total_quantity = ${order.total_quantity}`);
     });
 
-    console.log('  - Response JSON:', JSON.stringify(responseData, null, 2));
 
     return res.json(responseData);
 
   } catch (error) {
-    console.log('\n💥 GROUPED ORDERS ERROR:');
-    console.log('  - Error message:', error.message);
-    console.log('  - Error stack:', error.stack);
-    console.log('  - Error name:', error.name);
+    logger.info('\n💥 GROUPED ORDERS ERROR:');
 
     const errorResponse = { success: false, message: 'Internal server error: ' + error.message };
-    console.log('\n📤 ERROR RESPONSE:');
-    console.log('  - Status: 500');
-    console.log('  - Response JSON:', JSON.stringify(errorResponse, null, 2));
+    logger.info('\n📤 ERROR RESPONSE:');
 
     return res.status(500).json(errorResponse);
   }
@@ -1640,7 +1584,7 @@ router.get('/grouped', async (req, res) => {
  * @access  Admin/Superadmin only
  */
 router.get('/admin/dashboard-stats', requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔵 ADMIN DASHBOARD STATS REQUEST START');
+  logger.info('🔵 ADMIN DASHBOARD STATS REQUEST START');
 
   try {
     const database = require('../config/database');
@@ -1661,7 +1605,7 @@ router.get('/admin/dashboard-stats', requireAdminOrSuperadmin, async (req, res) 
         numberOfDays = parseInt(daysValue, 10);
       }
     } catch (dbError) {
-      console.log(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`);
+      logger.info(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`);
     }
 
     // Calculate cutoff date
@@ -1697,7 +1641,7 @@ router.get('/admin/dashboard-stats', requireAdminOrSuperadmin, async (req, res) 
     }
     const showInactiveStores = req.query.showInactiveStores === 'true';
 
-    console.log('📊 Admin Dashboard Stats params:', { search, dateFrom, dateTo, status, vendor, store });
+    logger.info('📊 Admin Dashboard Stats params:', { search, dateFrom, dateTo, status, vendor, store });
 
     // Get stats from database
     const stats = await database.getAdminDashboardStats({
@@ -1711,10 +1655,7 @@ router.get('/admin/dashboard-stats', requireAdminOrSuperadmin, async (req, res) 
       cutoffDate
     });
 
-    console.log('✅ ADMIN DASHBOARD STATS SUCCESS');
-    console.log('  - Total:', stats.totalOrders);
-    console.log('  - Claimed:', stats.claimedOrders);
-    console.log('  - Unclaimed:', stats.unclaimedOrders);
+    logger.info('✅ ADMIN DASHBOARD STATS SUCCESS');
 
     return res.status(200).json({
       success: true,
@@ -1722,7 +1663,7 @@ router.get('/admin/dashboard-stats', requireAdminOrSuperadmin, async (req, res) 
     });
 
   } catch (error) {
-    console.error('💥 ADMIN DASHBOARD STATS ERROR:', error.message);
+    logger.error('💥 ADMIN DASHBOARD STATS ERROR:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch admin dashboard stats',
@@ -1737,7 +1678,7 @@ router.get('/admin/dashboard-stats', requireAdminOrSuperadmin, async (req, res) 
  * @access  Admin/Superadmin only
  */
 router.get('/admin/all', requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔵 ADMIN ORDERS REQUEST START');
+  logger.info('🔵 ADMIN ORDERS REQUEST START');
 
   try {
     const database = require('../config/database');
@@ -1756,10 +1697,10 @@ router.get('/admin/all', requireAdminOrSuperadmin, async (req, res) => {
       const daysValue = await database.getUtilityParameter('number_of_day_of_order_include');
       if (daysValue) {
         numberOfDays = parseInt(daysValue, 10);
-        console.log(`📅 Using ${numberOfDays} days from utility configuration`);
+        logger.info(`📅 Using ${numberOfDays} days from utility configuration`);
       }
     } catch (dbError) {
-      console.log(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`);
+      logger.info(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`);
     }
 
     // Calculate cutoff date
@@ -1797,7 +1738,7 @@ router.get('/admin/all', requireAdminOrSuperadmin, async (req, res) => {
     }
     const showInactiveStores = req.query.showInactiveStores === 'true';
 
-    console.log('📄 Admin Orders pagination params:', { page, limit, search, dateFrom, dateTo, status, vendor, store });
+    logger.info('📄 Admin Orders pagination params:', { page, limit, search, dateFrom, dateTo, status, vendor, store });
 
     // Calculate offset
     const offset = (page - 1) * limit;
@@ -1824,7 +1765,7 @@ router.get('/admin/all', requireAdminOrSuperadmin, async (req, res) => {
     const uniqueOrdersReturned = new Set(paginatedOrders.map(o => o.unique_id)).size;
     const hasMore = (offset + uniqueOrdersReturned) < totalCount;
 
-    console.log('📊 Admin Orders pagination result:', {
+    logger.info('📊 Admin Orders pagination result:', {
       total: totalCount,
       totalQuantity: totalQuantity,
       page: page,
@@ -1857,8 +1798,7 @@ router.get('/admin/all', requireAdminOrSuperadmin, async (req, res) => {
       awb: order.awb || null
     }));
 
-    console.log('✅ ADMIN ORDERS SUCCESS');
-    console.log('  - Processed orders:', processedOrders.length);
+    logger.info('✅ ADMIN ORDERS SUCCESS');
 
     return res.status(200).json({
       success: true,
@@ -1876,7 +1816,7 @@ router.get('/admin/all', requireAdminOrSuperadmin, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('💥 ADMIN ORDERS ERROR:', error.message);
+    logger.error('💥 ADMIN ORDERS ERROR:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch orders for admin panel',
@@ -1893,9 +1833,7 @@ router.get('/admin/all', requireAdminOrSuperadmin, async (req, res) => {
 router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
   const { unique_id, vendor_warehouse_id } = req.body;
 
-  console.log('🔵 ADMIN ASSIGN ORDER REQUEST START');
-  console.log('  - unique_id:', unique_id);
-  console.log('  - vendor_warehouse_id:', vendor_warehouse_id);
+  logger.info('🔵 ADMIN ASSIGN ORDER REQUEST START');
 
   if (!unique_id || !vendor_warehouse_id) {
     return res.status(400).json({
@@ -1905,14 +1843,12 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
   }
 
   try {
-    // Load users from MySQL to verify vendor exists
     const database = require('../config/database');
 
-    // Wait for MySQL initialization
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -1924,98 +1860,96 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
       });
     }
 
-    console.log('✅ VENDOR FOUND:', vendor.name);
+    logger.info('✅ VENDOR FOUND:', vendor.name);
 
-    // Get order from MySQL
+    // Fetch order to validate existence + derive carrier
     const order = await database.getOrderByUniqueId(unique_id);
 
     if (!order) {
-      return res.status(404).json({
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    logger.info('✅ ORDER FOUND:', order.order_id);
+
+    // Guard: order must be unclaimed before we even look up carriers.
+    // This is a fast pre-check — the real race-safe guard is the conditional
+    // UPDATE below (affectedRows check).
+    if (order.status !== 'unclaimed') {
+      logger.info(`❌ Order ${order.order_id} is already claimed by ${order.claimed_by}`);
+      return res.status(409).json({
         success: false,
-        message: 'Order not found'
+        already_claimed: true,
+        message: `Order ${order.order_id} has already been claimed by another vendor`,
+        claimed_by: order.claimed_by
       });
     }
 
-    console.log('✅ ORDER FOUND:', order.order_id);
-
-    // Check if store is active (prevent assigning orders from inactive stores)
+    // Check if store is active
     const store = await database.getStoreByAccountCode(order.account_code);
     if (store && store.status !== 'active') {
-      console.log('❌ Cannot assign order from inactive store');
       return res.status(400).json({
         success: false,
         message: 'Cannot assign order from inactive store. Please activate the store first.'
       });
     }
 
-    // Update order assignment in MySQL
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
-    // Update order object in memory (like vendor claim behavior)
-    const updatedOrder = {
-      ...order,
-      status: 'claimed',
-      claimed_by: vendor_warehouse_id,
-      claimed_at: now,
-      last_claimed_by: vendor_warehouse_id,
-      last_claimed_at: now
-    };
-
-    // Assign top 3 priority carriers during admin assignment (same as vendor claim)
-    // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
-    console.log('🚚 ASSIGNING TOP 3 PRIORITY CARRIERS...');
-    console.log('  - Order data for carrier assignment:');
-    console.log('    - order_id:', updatedOrder.order_id);
-    console.log('    - pincode:', updatedOrder.pincode);
-    console.log('    - payment_type:', updatedOrder.payment_type);
-    console.log('    - unique_id:', updatedOrder.unique_id);
-    console.log('    - claimed_by:', updatedOrder.claimed_by);
-
+    // Carrier lookup (non-fatal if it fails)
+    logger.info('🚚 ASSIGNING TOP 3 PRIORITY CARRIERS...');
     let priorityCarrier = '';
     try {
-      priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(updatedOrder);
-      console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
-      updatedOrder.priority_carrier = priorityCarrier;
+      const orderForCarrier = {
+        ...order,
+        status: 'claimed',
+        claimed_by: vendor_warehouse_id,
+        claimed_at: now,
+        last_claimed_by: vendor_warehouse_id,
+        last_claimed_at: now
+      };
+      priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(orderForCarrier);
+      logger.info(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
     } catch (carrierError) {
-      console.log(`⚠️ Carrier assignment failed: ${carrierError.message}`);
-      console.log('  - Order will be assigned without priority carriers');
-      updatedOrder.priority_carrier = '';
+      logger.info(`⚠️ Carrier assignment failed (non-fatal): ${carrierError.message}`);
     }
 
-    // Now save everything to MySQL in one go (same as vendor claim)
-    console.log('💾 SAVING TO MYSQL');
-    console.log('  - Update data being sent to database:');
-    console.log('    - status:', updatedOrder.status);
-    console.log('    - claimed_by:', updatedOrder.claimed_by);
-    console.log('    - claimed_at:', updatedOrder.claimed_at);
-    console.log('    - last_claimed_by:', updatedOrder.last_claimed_by);
-    console.log('    - last_claimed_at:', updatedOrder.last_claimed_at);
-    console.log('    - priority_carrier:', updatedOrder.priority_carrier);
+    // ── Atomic conditional UPDATE — first-come-first-served ──
+    // The WHERE status='unclaimed' guard ensures that if a vendor (or another admin)
+    // locked this row between our pre-check and now, affectedRows will be 0 and
+    // we return 409 instead of silently overwriting.
+    logger.info('💾 ATOMIC CONDITIONAL UPDATE...');
+    const [result] = await database.pool.execute(
+      `UPDATE claims
+       SET status          = 'claimed',
+           claimed_by      = ?,
+           claimed_at      = ?,
+           last_claimed_by = ?,
+           last_claimed_at = ?,
+           priority_carrier = ?
+       WHERE order_unique_id = ?
+         AND status = 'unclaimed'`,
+      [vendor_warehouse_id, now, vendor_warehouse_id, now, priorityCarrier, unique_id]
+    );
 
-    const finalUpdatedOrder = await database.updateOrder(unique_id, {
-      status: updatedOrder.status,
-      claimed_by: updatedOrder.claimed_by,
-      claimed_at: updatedOrder.claimed_at,
-      last_claimed_by: updatedOrder.last_claimed_by,
-      last_claimed_at: updatedOrder.last_claimed_at,
-      priority_carrier: updatedOrder.priority_carrier
-    });
-
-    if (!finalUpdatedOrder) {
-      return res.status(500).json({
+    if (result.affectedRows === 0) {
+      // Someone else (vendor or admin) locked the row between our pre-check and UPDATE.
+      const fresh = await database.getOrderByUniqueId(unique_id);
+      logger.info(`❌ Order ${order.order_id} was claimed in the race window by ${fresh?.claimed_by}`);
+      return res.status(409).json({
         success: false,
-        message: 'Failed to update order'
+        already_claimed: true,
+        message: `Order ${order.order_id} was just claimed by another vendor`,
+        claimed_by: fresh?.claimed_by
       });
     }
 
-    console.log('✅ ORDER ASSIGNED SUCCESSFULLY');
-    console.log(`  - Order ${order.order_id} assigned to ${vendor.name} (${vendor_warehouse_id})`);
+    logger.info(`✅ ORDER ASSIGNED SUCCESSFULLY — ${order.order_id} → ${vendor.name} (${vendor_warehouse_id})`);
 
     return res.json({
       success: true,
-      message: `Order ${updatedOrder.order_id} assigned to ${vendor.name}`,
+      message: `Order ${order.order_id} assigned to ${vendor.name}`,
       data: {
-        order_id: updatedOrder.order_id,
+        order_id: order.order_id,
         vendor_name: vendor.name,
         vendor_warehouse_id: vendor_warehouse_id,
         assigned_at: now
@@ -2023,13 +1957,14 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
     });
 
   } catch (error) {
-    console.error('💥 ADMIN ASSIGN ERROR:', error.message);
+    logger.error('💥 ADMIN ASSIGN ERROR:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Internal server error: ' + error.message
     });
   }
 });
+
 
 /**
  * @route   POST /api/orders/admin/bulk-assign
@@ -2039,9 +1974,7 @@ router.post('/admin/assign', authenticateBasicAuth, requireAdminOrSuperadmin, as
 router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
   const { unique_ids, vendor_warehouse_id } = req.body || {};
 
-  console.log('🔵 ADMIN BULK ASSIGN REQUEST START');
-  console.log('  - unique_ids count:', Array.isArray(unique_ids) ? unique_ids.length : 0);
-  console.log('  - vendor_warehouse_id:', vendor_warehouse_id);
+  logger.info('🔵 ADMIN BULK ASSIGN REQUEST START');
 
   // 5.1 + 5.2 — Batch size limit + type validation
   const arrayCheck = validateBulkArray(unique_ids, 'unique_ids');
@@ -2057,98 +1990,126 @@ router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmi
   try {
     const database = require('../config/database');
 
-    // Wait for MySQL initialization
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
-    // Verify vendor exists in MySQL
+    // Verify vendor exists
     const vendor = await database.getUserByWarehouseId(vendor_warehouse_id);
     if (!vendor || vendor.role !== 'vendor') {
       return res.status(400).json({ success: false, message: 'Vendor not found or invalid warehouse ID' });
     }
 
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-    let updatedCount = 0;
 
-    // Update each order in MySQL
+    // ── Step 1: Fetch ALL orders in one query ──
+    logger.info(`📦 Fetching ${sanitizedUniqueIds.length} orders in one query...`);
+    const allOrders = await database.getOrdersByUniqueIds(sanitizedUniqueIds);
+    const ordersMap = new Map(allOrders.map(o => [o.unique_id, o]));
+
+    // Immediately separate not-found + pre-claimed orders so the frontend gets a clear list
+    const notFound = sanitizedUniqueIds.filter(uid => !ordersMap.has(uid));
+    const alreadyClaimed = []; // orders not in 'unclaimed' status
+    const toAssign = [];       // orders safe to claim
+
     for (const uid of sanitizedUniqueIds) {
-      try {
-        // Get order details for priority carrier assignment
-        const order = await database.getOrderByUniqueId(uid);
-        if (!order) {
-          console.error(`❌ Order not found: ${uid}`);
-          continue;
-        }
-
-        // Update order object in memory (like vendor claim behavior)
-        const updatedOrder = {
-          ...order,
-          status: 'claimed',
-          claimed_by: vendor_warehouse_id,
-          claimed_at: now,
-          last_claimed_by: vendor_warehouse_id,
-          last_claimed_at: now
-        };
-
-        // Assign top 3 priority carriers during bulk assignment (same as vendor claim)
-        // Pass updatedOrder (not original order) so claimed_by is available for Shiprocket serviceability
-        console.log(`🚚 ASSIGNING TOP 3 PRIORITY CARRIERS for ${order.order_id}...`);
-        console.log('  - Order data for carrier assignment:');
-        console.log('    - order_id:', updatedOrder.order_id);
-        console.log('    - pincode:', updatedOrder.pincode);
-        console.log('    - payment_type:', updatedOrder.payment_type);
-        console.log('    - unique_id:', updatedOrder.unique_id);
-        console.log('    - claimed_by:', updatedOrder.claimed_by);
-
-        let priorityCarrier = '';
-        try {
-          priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(updatedOrder);
-          console.log(`✅ Top 3 carriers assigned: ${priorityCarrier}`);
-          updatedOrder.priority_carrier = priorityCarrier;
-        } catch (carrierError) {
-          console.log(`⚠️ Carrier assignment failed for ${order.order_id}: ${carrierError.message}`);
-          console.log('  - Order will be assigned without priority carriers');
-          updatedOrder.priority_carrier = '';
-        }
-
-        console.log('💾 SAVING TO MYSQL (BULK)');
-        console.log('  - Update data being sent to database:');
-        console.log('    - status:', updatedOrder.status);
-        console.log('    - claimed_by:', updatedOrder.claimed_by);
-        console.log('    - claimed_at:', updatedOrder.claimed_at);
-        console.log('    - last_claimed_by:', updatedOrder.last_claimed_by);
-        console.log('    - last_claimed_at:', updatedOrder.last_claimed_at);
-        console.log('    - priority_carrier:', updatedOrder.priority_carrier);
-
-        const result = await database.updateOrder(uid, {
-          status: updatedOrder.status,
-          claimed_by: updatedOrder.claimed_by,
-          claimed_at: updatedOrder.claimed_at,
-          last_claimed_by: updatedOrder.last_claimed_by,
-          last_claimed_at: updatedOrder.last_claimed_at,
-          priority_carrier: updatedOrder.priority_carrier
-        });
-
-        // database.updateOrder returns the updated order object (or null), not { success: true }
-        // Treat any truthy result as a successful update
-        if (result) {
-          updatedCount += 1;
-        }
-      } catch (error) {
-        console.error(`❌ Failed to update order ${uid}:`, error.message);
+      const order = ordersMap.get(uid);
+      if (!order) continue; // already captured in notFound
+      if (order.status !== 'unclaimed') {
+        alreadyClaimed.push({ unique_id: uid, order_id: order.order_id, claimed_by: order.claimed_by, status: order.status });
+      } else {
+        toAssign.push(uid);
       }
     }
 
+    if (alreadyClaimed.length > 0) {
+      logger.info(`⚠️ ${alreadyClaimed.length} orders are already claimed — skipping them`);
+    }
+
+    if (toAssign.length === 0) {
+      return res.json({
+        success: false,
+        already_claimed: true,
+        message: 'All selected orders have already been claimed by other vendors',
+        data: { updated: 0, vendor_warehouse_id, already_claimed_orders: alreadyClaimed }
+      });
+    }
+
+    // ── Step 2: Parallel carrier lookups for unclaimed orders only ──
+    logger.info(`⚡ Running ${toAssign.length} carrier lookups in parallel...`);
+    const carrierResults = await Promise.allSettled(
+      toAssign.map(async (uid) => {
+        const order = ordersMap.get(uid);
+        const orderForCarrier = {
+          ...order, status: 'claimed', claimed_by: vendor_warehouse_id,
+          claimed_at: now, last_claimed_by: vendor_warehouse_id, last_claimed_at: now
+        };
+        try {
+          const priorityCarrier = await carrierServiceabilityService.getTop3PriorityCarriers(orderForCarrier);
+          return { uid, priorityCarrier };
+        } catch (err) {
+          logger.info(`⚠️ Carrier lookup failed for ${order.order_id} (non-fatal): ${err.message}`);
+          return { uid, priorityCarrier: '' };
+        }
+      })
+    );
+
+    const carrierMap = new Map();
+    carrierResults.forEach((result, i) => {
+      const uid = toAssign[i];
+      carrierMap.set(uid, result.status === 'fulfilled' ? result.value.priorityCarrier : '');
+    });
+    logger.info(`✅ Carrier lookups complete`);
+
+    // ── Step 3: Batch UPDATE with AND status='unclaimed' guard ──
+    // First-come-first-served: if a vendor locked any of these rows between
+    // pre-check and now, the WHERE clause will skip those rows — affectedRows
+    // will be less than toAssign.length, telling us races happened.
+    const caseParts = toAssign.map(() => 'WHEN ? THEN ?').join(' ');
+    const caseParams = toAssign.flatMap(uid => [uid, carrierMap.get(uid) || '']);
+    const inPlaceholders = toAssign.map(() => '?').join(',');
+
+    const txManager = new TransactionManager(database.pool);
+    let updatedCount = 0;
+    await txManager.runInTransaction(async (conn) => {
+      const [result] = await conn.execute(
+        `UPDATE claims
+         SET status          = 'claimed',
+             claimed_by      = ?,
+             claimed_at      = ?,
+             last_claimed_by = ?,
+             last_claimed_at = ?,
+             priority_carrier = CASE order_unique_id ${caseParts} ELSE priority_carrier END
+         WHERE order_unique_id IN (${inPlaceholders})
+           AND status = 'unclaimed'`,
+        [vendor_warehouse_id, now, vendor_warehouse_id, now, ...caseParams, ...toAssign]
+      );
+      updatedCount = result.affectedRows;
+    });
+
+    // If affectedRows < toAssign.length, some were claimed in the race window —
+    // count them but we already gave the user the pre-check list for the bulk UI.
+    const raceConflicts = toAssign.length - updatedCount;
+    if (raceConflicts > 0) {
+      logger.info(`⚠️ ${raceConflicts} order(s) were claimed in the race window — skipped`);
+    }
+
+    const totalBlocked = alreadyClaimed.length + raceConflicts;
+    logger.info(`✅ BULK ASSIGN COMPLETE — Updated ${updatedCount} orders for ${vendor.name}, blocked ${totalBlocked}`);
+
     return res.json({
       success: true,
-      message: `Assigned ${updatedCount} orders to ${vendor.name}`,
-      data: { updated: updatedCount, vendor_warehouse_id }
+      message: `Assigned ${updatedCount} order(s) to ${vendor.name}${totalBlocked > 0 ? ` (${totalBlocked} already claimed by another vendor)` : ''}`,
+      data: {
+        updated: updatedCount,
+        vendor_warehouse_id,
+        already_claimed_orders: alreadyClaimed.length > 0 ? alreadyClaimed : undefined
+      }
     });
   } catch (error) {
-    console.error('💥 ADMIN BULK ASSIGN ERROR:', error.message);
+    logger.error('💥 ADMIN BULK ASSIGN ERROR:', error.message);
     return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
   }
 });
@@ -2161,8 +2122,7 @@ router.post('/admin/bulk-assign', authenticateBasicAuth, requireAdminOrSuperadmi
 router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
   const { unique_ids } = req.body || {};
 
-  console.log('🔵 ADMIN BULK UNASSIGN REQUEST START');
-  console.log('  - unique_ids count:', Array.isArray(unique_ids) ? unique_ids.length : 0);
+  logger.info('🔵 ADMIN BULK UNASSIGN REQUEST START');
 
   // 5.1 + 5.2 — Batch size limit + type validation
   const arrayCheck = validateBulkArray(unique_ids, 'unique_ids');
@@ -2174,146 +2134,139 @@ router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperad
   try {
     const database = require('../config/database');
 
-    // Wait for MySQL initialization
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
-    let updatedCount = 0;
     let labelCancelledCount = 0;
     const errors = [];
+    const successfulUids = []; // collect UIDs that passed all per-order checks
     const ShipwayService = require('../services/shipwayService');
 
-    // Process each order
+    // ── 7.3 Step 1: Fetch ALL orders in one query instead of N getOrderByUniqueId calls ──
+    logger.info(`📦 Fetching ${sanitizedUniqueIds.length} orders in one query...`);
+    const allOrders = await database.getOrdersByUniqueIds(sanitizedUniqueIds);
+    const ordersMap = new Map(allOrders.map(o => [o.unique_id, o]));
+    logger.info(`✅ Fetched ${allOrders.length} orders`);
+
+    // ── 7.3 Step 2: Per-order work (Shipway API + label clearing) ──
+    // These cannot be batched: each order may have a different AWB/account_code,
+    // and external API calls are inherently sequential per order.
     for (const uid of sanitizedUniqueIds) {
       try {
-        // Get order from database
-        const order = await database.getOrderByUniqueId(uid);
+        const order = ordersMap.get(uid);
 
         if (!order) {
           errors.push({ unique_id: uid, error: 'Order not found' });
           continue;
         }
 
-        // Validate order is actually claimed
         if (order.status === 'unclaimed' || !order.claimed_by || order.claimed_by.trim() === '') {
           errors.push({ unique_id: uid, order_id: order.order_id, error: 'Order is not claimed by any vendor' });
           continue;
         }
 
-        const previousVendor = order.claimed_by;
-        console.log(`🔄 Processing order ${order.order_id} (claimed by ${previousVendor})...`);
+        logger.info(`🔄 Processing order ${order.order_id} (claimed by ${order.claimed_by})...`);
 
-        // Validate vendor exists (for audit trail, but don't fail if vendor was deleted)
-        const vendor = await database.getUserByWarehouseId(previousVendor);
-        if (!vendor) {
-          console.log(`⚠️ Vendor ${previousVendor} not found for order ${order.order_id} - proceeding with unassign anyway (cleanup)`);
-        }
-
-        // Check label_downloaded status
         const isLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === true || order.label_downloaded === '1';
+        const accountCode = order.account_code;
 
         if (isLabelDownloaded) {
-          console.log(`🔄 CASE 2: Label downloaded for order ${order.order_id} - calling Shipway cancel API`);
+          logger.info(`🔄 CASE 2: Label downloaded for order ${order.order_id} — calling Shipway cancel API`);
 
-          // Get account_code from order to use correct store credentials
-          const accountCode = order.account_code;
           if (!accountCode) {
             errors.push({ unique_id: uid, order_id: order.order_id, error: 'Store information not found. Cannot cancel shipment.' });
             continue;
           }
 
-          // Get AWB number from labels table (with account_code filter for store-specific retrieval)
           const label = await database.getLabelByOrderId(order.order_id, accountCode);
-
           if (!label || !label.awb) {
             errors.push({ unique_id: uid, order_id: order.order_id, error: 'AWB number not found. Cannot cancel shipment.' });
             continue;
           }
 
-          console.log(`✅ AWB FOUND for order ${order.order_id}:`, label.awb);
+          logger.info(`✅ AWB FOUND for order ${order.order_id}:`, label.awb);
 
-          // Call Shipway cancel API with store-specific credentials
           const shipwayService = new ShipwayService(accountCode);
           await shipwayService.initialize();
 
           try {
             const cancelResult = await shipwayService.cancelShipment([label.awb]);
-            console.log(`✅ SHIPWAY CANCEL SUCCESS for order ${order.order_id}:`, cancelResult);
+            logger.info(`✅ SHIPWAY CANCEL SUCCESS for order ${order.order_id}:`, cancelResult);
             labelCancelledCount++;
           } catch (cancelError) {
-            console.error(`❌ SHIPWAY CANCEL FAILED for order ${order.order_id}:`);
-            console.error('  - Error message:', cancelError.message);
-            console.error('  - Account Code:', accountCode);
-            console.error('  - AWB:', label.awb);
-            errors.push({
-              unique_id: uid,
-              order_id: order.order_id,
-              error: `Failed to cancel shipment: ${cancelError.message}`
-            });
-            continue; // Skip this order if cancellation fails
+            logger.error(`❌ SHIPWAY CANCEL FAILED for order ${order.order_id}: ${cancelError.message}`);
+            errors.push({ unique_id: uid, order_id: order.order_id, error: `Failed to cancel shipment: ${cancelError.message}` });
+            continue;
           }
 
-          // Clear label data after successful cancellation (with account_code filter for store isolation)
-          await database.mysqlConnection.execute(
+          // Clear label data per-order (different order_id + account_code per row)
+          await database.pool.execute(
             'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL, is_manifest = 0, manifest_id = NULL, current_shipment_status = NULL WHERE order_id = ? AND account_code = ?',
             [order.order_id, accountCode]
           );
-          console.log(`✅ LABEL DATA CLEARED for order ${order.order_id}`);
+          logger.info(`✅ LABEL DATA CLEARED for order ${order.order_id}`);
+
         } else {
-          console.log(`🔄 CASE 1: No label downloaded for order ${order.order_id} - simple reverse`);
-          // Even without label download, reset manifest fields if they exist
-          const accountCode = order.account_code;
+          logger.info(`🔄 CASE 1: No label for order ${order.order_id} — resetting manifest fields`);
           if (accountCode) {
-            await database.mysqlConnection.execute(
+            await database.pool.execute(
               'UPDATE labels SET is_manifest = 0, manifest_id = NULL, current_shipment_status = NULL WHERE order_id = ? AND account_code = ?',
               [order.order_id, accountCode]
             );
           } else {
-            await database.mysqlConnection.execute(
+            await database.pool.execute(
               'UPDATE labels SET is_manifest = 0, manifest_id = NULL, current_shipment_status = NULL WHERE order_id = ?',
               [order.order_id]
             );
           }
-          console.log(`✅ MANIFEST FIELDS RESET for order ${order.order_id}`);
+          logger.info(`✅ MANIFEST FIELDS RESET for order ${order.order_id}`);
         }
 
-        // Clear claim information (both cases)
-        await database.mysqlConnection.execute(
-          `UPDATE claims SET 
-            claimed_by = NULL, 
-            claimed_at = NULL, 
-            last_claimed_by = NULL, 
-            last_claimed_at = NULL, 
-            status = 'unclaimed',
-            label_downloaded = 0,
-            priority_carrier = NULL
-          WHERE order_unique_id = ?`,
-          [uid]
-        );
+        // Order passed all checks — mark for batch DB reset below
+        successfulUids.push(uid);
 
-        // Set is_in_new_order = 1 so unclaimed order appears in All Orders tab
-        await database.mysqlConnection.execute(
-          'UPDATE orders SET is_in_new_order = 1 WHERE unique_id = ?',
-          [uid]
-        );
-
-        console.log(`✅ ORDER ${order.order_id} UNASSIGNED SUCCESSFULLY`);
-        updatedCount += 1;
       } catch (error) {
-        console.error(`❌ Failed to unassign order ${uid}:`, error.message);
+        logger.error(`❌ Failed to unassign order ${uid}:`, error.message);
         errors.push({ unique_id: uid, error: error.message });
       }
     }
 
+    // ── 7.3 Step 3: Batch reset claims + orders for all successfully processed orders ──
+    // Instead of 2×N individual UPDATE queries, two single batch queries suffice.
+    let updatedCount = 0;
+    if (successfulUids.length > 0) {
+      const placeholders = successfulUids.map(() => '?').join(',');
+
+      const txManager = new TransactionManager(database.pool);
+      await txManager.runInTransaction(async (conn) => {
+        await conn.execute(
+          `UPDATE claims
+           SET claimed_by      = NULL,
+               claimed_at      = NULL,
+               last_claimed_by = NULL,
+               last_claimed_at = NULL,
+               status          = 'unclaimed',
+               label_downloaded = 0,
+               priority_carrier = NULL
+           WHERE order_unique_id IN (${placeholders})`,
+          successfulUids
+        );
+        await conn.execute(
+          `UPDATE orders SET is_in_new_order = 1 WHERE unique_id IN (${placeholders})`,
+          successfulUids
+        );
+      });
+
+      updatedCount = successfulUids.length;
+      logger.info(`✅ Batch reset ${updatedCount} claims and orders rows`);
+    }
+
     const message = `Unassigned ${updatedCount} orders${labelCancelledCount > 0 ? ` (${labelCancelledCount} labels cancelled)` : ''}`;
 
-    console.log('✅ BULK UNASSIGN COMPLETE:');
-    console.log(`  - Successfully unassigned: ${updatedCount}`);
-    console.log(`  - Labels cancelled: ${labelCancelledCount}`);
-    console.log(`  - Errors: ${errors.length}`);
+    logger.info('✅ BULK UNASSIGN COMPLETE:');
 
     return res.json({
       success: true,
@@ -2325,8 +2278,8 @@ router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperad
       }
     });
   } catch (error) {
-    console.error('💥 ADMIN BULK UNASSIGN ERROR:', error.message);
-    console.error('  - Stack:', error.stack);
+    logger.error('💥 ADMIN BULK UNASSIGN ERROR:', error.message);
+    logger.error('  - Stack:', error.stack);
     return res.status(500).json({ success: false, message: 'Internal server error: ' + error.message });
   }
 });
@@ -2339,8 +2292,7 @@ router.post('/admin/bulk-unassign', authenticateBasicAuth, requireAdminOrSuperad
 router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
   const { unique_id } = req.body;
 
-  console.log('🔵 ADMIN UNASSIGN ORDER REQUEST START');
-  console.log('  - unique_id:', unique_id);
+  logger.info('🔵 ADMIN UNASSIGN ORDER REQUEST START');
 
   if (!unique_id) {
     return res.status(400).json({
@@ -2355,7 +2307,7 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -2369,7 +2321,7 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
       });
     }
 
-    console.log('✅ ORDER FOUND:', order.order_id);
+    logger.info('✅ ORDER FOUND:', order.order_id);
 
     // Validate order is actually claimed
     if (order.status === 'unclaimed' || !order.claimed_by || order.claimed_by.trim() === '') {
@@ -2382,27 +2334,25 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
     const previousVendor = order.claimed_by;
 
     // Validate vendor exists (for audit trail, but don't fail if vendor was deleted)
-    console.log('🔍 VALIDATING VENDOR BEFORE UNASSIGN:');
-    console.log('  - Order ID:', order.order_id);
-    console.log('  - Claimed by (warehouse ID):', previousVendor);
+    logger.info('🔍 VALIDATING VENDOR BEFORE UNASSIGN:');
 
     const vendor = await database.getUserByWarehouseId(previousVendor);
     if (!vendor) {
-      console.log(`⚠️ Vendor ${previousVendor} not found - proceeding with unassign anyway (cleanup)`);
+      logger.info(`⚠️ Vendor ${previousVendor} not found - proceeding with unassign anyway (cleanup)`);
     } else {
-      console.log(`✅ Verified vendor: ${vendor.name || 'N/A'} (${vendor.email || 'N/A'})`);
+      logger.info(`✅ Verified vendor: ${vendor.name || 'N/A'} (${vendor.email || 'N/A'})`);
     }
 
     // Check label_downloaded status (same logic as vendor panel)
     const isLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === true || order.label_downloaded === '1';
 
     if (isLabelDownloaded) {
-      console.log('🔄 CASE 2: Label downloaded - cancelling shipment before unclaim');
+      logger.info('🔄 CASE 2: Label downloaded - cancelling shipment before unclaim');
 
       // Get account_code from order to use correct store credentials
       const accountCode = order.account_code;
       if (!accountCode) {
-        console.log('❌ ACCOUNT_CODE NOT FOUND for order:', order.order_id);
+        logger.info('❌ ACCOUNT_CODE NOT FOUND for order:', order.order_id);
         return res.status(400).json({
           success: false,
           message: 'Store information not found for this order. Cannot cancel shipment.'
@@ -2413,14 +2363,14 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
       const label = await database.getLabelByOrderId(order.order_id, accountCode);
 
       if (!label || !label.awb) {
-        console.log('❌ AWB NOT FOUND for order:', order.order_id);
+        logger.info('❌ AWB NOT FOUND for order:', order.order_id);
         return res.status(400).json({
           success: false,
           message: 'AWB number not found for this order. Cannot cancel shipment.'
         });
       }
 
-      console.log('✅ AWB FOUND:', label.awb);
+      logger.info('✅ AWB FOUND:', label.awb);
 
       // Determine shipping partner for this store
       const storeInfo = await database.getStoreByAccountCode(accountCode);
@@ -2428,24 +2378,24 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
 
       try {
         if (shippingPartner === 'shiprocket') {
-          console.log('🔄 Using Shiprocket cancel API for order:', order.order_id);
+          logger.info('🔄 Using Shiprocket cancel API for order:', order.order_id);
           const ShiprocketService = require('../services/shiprocketService');
           const shiprocketService = new ShiprocketService(accountCode);
           const cancelResult = await shiprocketService.cancelShipmentsByAwbs([label.awb]);
-          console.log('✅ SHIPROCKET CANCEL SUCCESS:', cancelResult);
+          logger.info('✅ SHIPROCKET CANCEL SUCCESS:', cancelResult);
         } else {
-          console.log('🔄 Using Shipway cancel API for order:', order.order_id);
+          logger.info('🔄 Using Shipway cancel API for order:', order.order_id);
           const ShipwayService = require('../services/shipwayService');
           const shipwayService = new ShipwayService(accountCode);
           await shipwayService.initialize();
           const cancelResult = await shipwayService.cancelShipment([label.awb]);
-          console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+          logger.info('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
         }
       } catch (cancelError) {
-        console.error('❌ SHIPMENT CANCEL FAILED:');
-        console.error('  - Error message:', cancelError.message);
-        console.error('  - Account Code:', accountCode);
-        console.error('  - AWB:', label.awb);
+        logger.error('❌ SHIPMENT CANCEL FAILED:');
+        logger.error('  - Error message:', cancelError.message);
+        logger.error('  - Account Code:', accountCode);
+        logger.error('  - AWB:', label.awb);
         return res.status(500).json({
           success: false,
           message: cancelError.message || 'Failed to cancel shipment. Please try after sometime.',
@@ -2459,9 +2409,9 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
         'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL, is_manifest = 0, manifest_id = NULL, current_shipment_status = NULL WHERE order_id = ? AND account_code = ?',
         [order.order_id, accountCode]
       );
-      console.log('✅ LABEL DATA CLEARED (including manifest_id)');
+      logger.info('✅ LABEL DATA CLEARED (including manifest_id)');
     } else {
-      console.log('🔄 CASE 1: No label downloaded - simple reverse');
+      logger.info('🔄 CASE 1: No label downloaded - simple reverse');
       // Even without label download, reset manifest fields if they exist (for Handover tab orders)
       // Use account_code filter if available for store isolation
       const accountCode = order.account_code;
@@ -2476,11 +2426,11 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
           [order.order_id]
         );
       }
-      console.log('✅ MANIFEST FIELDS RESET (including manifest_id)');
+      logger.info('✅ MANIFEST FIELDS RESET (including manifest_id)');
     }
 
     // Clear claim information (both cases)
-    console.log('🔄 CLEARING CLAIM INFORMATION...');
+    logger.info('🔄 CLEARING CLAIM INFORMATION...');
     await database.mysqlConnection.execute(
       `UPDATE claims SET 
         claimed_by = NULL, 
@@ -2494,14 +2444,14 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
       [unique_id]
     );
 
-    console.log('✅ CLAIM DATA CLEARED');
+    logger.info('✅ CLAIM DATA CLEARED');
 
     // Set is_in_new_order = 1 so unclaimed order appears in All Orders tab
     await database.mysqlConnection.execute(
       'UPDATE orders SET is_in_new_order = 1 WHERE unique_id = ?',
       [unique_id]
     );
-    console.log('✅ ORDER SET TO NEW ORDER STATUS');
+    logger.info('✅ ORDER SET TO NEW ORDER STATUS');
 
     // Get updated order for response
     const updatedOrder = await database.getOrderByUniqueId(unique_id);
@@ -2517,9 +2467,7 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
       ? 'Shipment cancelled and order unassigned successfully'
       : 'Order unassigned successfully';
 
-    console.log('✅ ORDER UNASSIGNED SUCCESSFULLY');
-    console.log(`  - Order ${order.order_id} unassigned from ${previousVendor}`);
-    console.log(`  - Label cancelled: ${isLabelDownloaded ? 'YES' : 'NO'}`);
+    logger.info('✅ ORDER UNASSIGNED SUCCESSFULLY');
 
     return res.json({
       success: true,
@@ -2534,8 +2482,8 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
     });
 
   } catch (error) {
-    console.error('💥 ADMIN UNASSIGN ERROR:', error.message);
-    console.error('  - Stack:', error.stack);
+    logger.error('💥 ADMIN UNASSIGN ERROR:', error.message);
+    logger.error('  - Stack:', error.stack);
     return res.status(500).json({
       success: false,
       message: 'Internal server error: ' + error.message
@@ -2549,7 +2497,7 @@ router.post('/admin/unassign', authenticateBasicAuth, requireAdminOrSuperadmin, 
  * @access  Admin/Superadmin only
  */
 router.get('/admin/vendors', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔵 ADMIN GET VENDORS REQUEST START');
+  logger.info('🔵 ADMIN GET VENDORS REQUEST START');
 
   try {
     // Load users from MySQL to get all vendors
@@ -2559,7 +2507,7 @@ router.get('/admin/vendors', authenticateBasicAuth, requireAdminOrSuperadmin, as
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -2574,7 +2522,7 @@ router.get('/admin/vendors', authenticateBasicAuth, requireAdminOrSuperadmin, as
         phone: vendor.phone
       }));
 
-    console.log('✅ VENDORS LOADED:', vendors.length);
+    logger.info('✅ VENDORS LOADED:', vendors.length);
 
     return res.status(200).json({
       success: true,
@@ -2582,7 +2530,7 @@ router.get('/admin/vendors', authenticateBasicAuth, requireAdminOrSuperadmin, as
     });
 
   } catch (error) {
-    console.log('💥 ADMIN GET VENDORS ERROR:', error.message);
+    logger.info('💥 ADMIN GET VENDORS ERROR:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch vendors',
@@ -2597,16 +2545,16 @@ router.get('/admin/vendors', authenticateBasicAuth, requireAdminOrSuperadmin, as
  * @access  Admin/Superadmin only
  */
 router.post('/assign-priority-carriers', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔵 PRIORITY CARRIER ASSIGNMENT REQUEST START');
+  logger.info('🔵 PRIORITY CARRIER ASSIGNMENT REQUEST START');
 
   try {
-    console.log('📡 Starting priority carrier assignment process for claimed orders...');
+    logger.info('📡 Starting priority carrier assignment process for claimed orders...');
 
     // Start the assignment process
     const result = await carrierServiceabilityService.assignPriorityCarriersToOrders();
 
-    console.log('✅ PRIORITY CARRIER ASSIGNMENT COMPLETED');
-    console.log('📊 Results:', result);
+    logger.info('✅ PRIORITY CARRIER ASSIGNMENT COMPLETED');
+    logger.info('📊 Results:', result);
 
     return res.status(200).json({
       success: true,
@@ -2615,7 +2563,7 @@ router.post('/assign-priority-carriers', authenticateBasicAuth, requireAdminOrSu
     });
 
   } catch (error) {
-    console.error('💥 PRIORITY CARRIER ASSIGNMENT ERROR:', error.message);
+    logger.error('💥 PRIORITY CARRIER ASSIGNMENT ERROR:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Failed to assign priority carriers',
@@ -2632,17 +2580,16 @@ router.post('/assign-priority-carriers', authenticateBasicAuth, requireAdminOrSu
 router.post('/assign-priority-carrier/:orderId', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
   const { orderId } = req.params;
 
-  console.log('🔵 SINGLE ORDER PRIORITY CARRIER ASSIGNMENT REQUEST START');
-  console.log('  - Order ID:', orderId);
+  logger.info('🔵 SINGLE ORDER PRIORITY CARRIER ASSIGNMENT REQUEST START');
 
   try {
-    console.log('📡 Starting priority carrier assignment for single order...');
+    logger.info('📡 Starting priority carrier assignment for single order...');
 
     // Start the assignment process for single order
     const result = await carrierServiceabilityService.assignPriorityCarrierToOrder(orderId);
 
-    console.log('✅ SINGLE ORDER PRIORITY CARRIER ASSIGNMENT COMPLETED');
-    console.log('📊 Results:', result);
+    logger.info('✅ SINGLE ORDER PRIORITY CARRIER ASSIGNMENT COMPLETED');
+    logger.info('📊 Results:', result);
 
     return res.status(200).json({
       success: true,
@@ -2651,7 +2598,7 @@ router.post('/assign-priority-carrier/:orderId', authenticateBasicAuth, requireA
     });
 
   } catch (error) {
-    console.error('💥 SINGLE ORDER PRIORITY CARRIER ASSIGNMENT ERROR:', error.message);
+    logger.error('💥 SINGLE ORDER PRIORITY CARRIER ASSIGNMENT ERROR:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Failed to assign priority carrier to order',
@@ -2666,12 +2613,12 @@ router.post('/assign-priority-carrier/:orderId', authenticateBasicAuth, requireA
  * @access  Admin/Superadmin only
  */
 router.get('/priority-carrier-stats', authenticateBasicAuth, requireAdminOrSuperadmin, (req, res) => {
-  console.log('🔵 PRIORITY CARRIER STATS REQUEST START');
+  logger.info('🔵 PRIORITY CARRIER STATS REQUEST START');
 
   try {
     const stats = carrierServiceabilityService.getAssignmentStatistics();
 
-    console.log('✅ PRIORITY CARRIER STATS RETRIEVED');
+    logger.info('✅ PRIORITY CARRIER STATS RETRIEVED');
 
     return res.status(200).json({
       success: true,
@@ -2679,7 +2626,7 @@ router.get('/priority-carrier-stats', authenticateBasicAuth, requireAdminOrSuper
     });
 
   } catch (error) {
-    console.error('💥 PRIORITY CARRIER STATS ERROR:', error.message);
+    logger.error('💥 PRIORITY CARRIER STATS ERROR:', error.message);
     return res.status(500).json({
       success: false,
       message: 'Failed to get priority carrier statistics',
@@ -2697,14 +2644,10 @@ router.post('/download-label', async (req, res) => {
   const { order_id, format = 'thermal', async: runAsync = false } = req.body;
   const token = req.headers['authorization'];
 
-  console.log('🔵 DOWNLOAD LABEL REQUEST START');
-  console.log('  - order_id:', order_id);
-  console.log('  - format:', format);
-  console.log('  - runAsync:', runAsync);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  logger.info('🔵 DOWNLOAD LABEL REQUEST START');
 
   if (!order_id || !token) {
-    console.log('❌ DOWNLOAD LABEL FAILED: Missing required fields');
+    logger.info('❌ DOWNLOAD LABEL FAILED: Missing required fields');
     return res.status(400).json({ success: false, message: 'order_id and Authorization token required' });
   }
 
@@ -2756,26 +2699,20 @@ router.post('/download-label', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
-    console.log('🔍 DOWNLOAD LABEL DEBUG:');
-    console.log('  - Token received:', token ? token.substring(0, 20) + '...' : 'null');
+    logger.info('🔍 DOWNLOAD LABEL DEBUG:');
 
     vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
-      console.log('  - Token comparison failed');
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
-    console.log('  - Role:', vendor.role);
-    console.log('  - Active session:', vendor.active_session);
+    logger.info('✅ VENDOR FOUND:');
 
     // 3.2 — Targeted query: fetch only rows for this order_id (was: getAllOrders() + filter)
     const orderProducts = await database.getOrdersByOrderId(order_id);
@@ -2784,23 +2721,16 @@ router.post('/download-label', async (req, res) => {
       (order.is_handover !== 1 && order.is_handover !== '1')  // Allow download until handed over
     );
 
-    console.log('📊 Order Analysis:');
-    console.log('  - Order ID requested:', order_id);
-    console.log('  - Vendor warehouse ID:', vendor.warehouseId);
-    console.log('  - Total products in order:', orderProducts.length);
-    console.log('  - Products claimed by vendor:', claimedProducts.length);
+    logger.info('📊 Order Analysis:');
 
     // Debug: Show all products for this order
-    console.log('🔍 All products for order:', order_id);
+    logger.info('🔍 All products for order:', order_id);
     orderProducts.forEach((product, index) => {
-      console.log(`  ${index + 1}. Product: ${product.product_name}`);
-      console.log(`     - Status: ${product.status}`);
-      console.log(`     - Claimed by: ${product.claimed_by}`);
-      console.log(`     - Match: ${product.claimed_by === vendor.warehouseId && product.status === 'claimed' ? 'YES' : 'NO'}`);
+      logger.info(`  ${index + 1}. Product: ${product.product_name}`);
     });
 
     // Check if label already downloaded for this order_id
-    console.log('🔍 Checking if label already downloaded...');
+    logger.info('🔍 Checking if label already downloaded...');
     const orderWithLabel = orderProducts.find(product =>
       product.claimed_by === vendor.warehouseId &&
       product.status === 'claimed' &&
@@ -2808,16 +2738,12 @@ router.post('/download-label', async (req, res) => {
     );
 
     if (orderWithLabel && claimedProducts.length > 0) {
-      console.log('✅ LABEL ALREADY DOWNLOADED: Found label_downloaded = 1 in orders table');
-      console.log(`  - Order ID: ${order_id}`);
-      console.log(`  - Checking labels table for cached URL...`);
+      logger.info('✅ LABEL ALREADY DOWNLOADED: Found label_downloaded = 1 in orders table');
 
       const cachedLabel = await database.getLabelByOrderId(order_id);
 
       if (cachedLabel) {
-        console.log('✅ CACHED LABEL FOUND: Returning cached label URL');
-        console.log(`  - Cached Label URL: ${cachedLabel.label_url}`);
-        console.log(`  - Cached AWB: ${cachedLabel.awb}`);
+        logger.info('✅ CACHED LABEL FOUND: Returning cached label URL');
 
         return res.json({
           success: true,
@@ -2831,18 +2757,14 @@ router.post('/download-label', async (req, res) => {
           }
         });
       } else {
-        console.log('⚠️ label_downloaded = 1 but no cached URL found, regenerating...');
+        logger.info('⚠️ label_downloaded = 1 but no cached URL found, regenerating...');
       }
     }
 
-    console.log('🔍 No downloaded label found, proceeding with label generation...');
+    logger.info('🔍 No downloaded label found, proceeding with label generation...');
 
     // Debug: Log product counts and details
-    console.log(`📊 Product Analysis for ${order_id}:`);
-    console.log(`  - Total products in order: ${orderProducts.length}`);
-    console.log(`  - Products claimed by vendor: ${claimedProducts.length}`);
-    console.log(`  - All products:`, orderProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
-    console.log(`  - Claimed products:`, claimedProducts.map(p => ({ unique_id: p.unique_id, product_code: p.product_code, claimed_by: p.claimed_by, status: p.status })));
+    logger.info(`📊 Product Analysis for ${order_id}:`);
 
     // Check shipping partner from store
     const accountCode = claimedProducts[0]?.account_code || orderProducts[0]?.account_code;
@@ -2856,19 +2778,21 @@ router.post('/download-label', async (req, res) => {
     }
 
     const isShiprocket = store.shipping_partner?.toLowerCase() === 'shiprocket';
-    console.log(`📦 Shipping Partner: ${store.shipping_partner} (${isShiprocket ? 'Shiprocket' : 'Shipway'})`);
+    logger.info(`📦 Shipping Partner: ${store.shipping_partner} (${isShiprocket ? 'Shiprocket' : 'Shipway'})`);
 
     // Updated logic: Only 2 conditions (removed underscore check)
     if (orderProducts.length === claimedProducts.length) {
       // Condition 1: Direct download - all products claimed by vendor
-      console.log('✅ CONDITION 1: Direct download - all products claimed by vendor');
+      logger.info('✅ CONDITION 1: Direct download - all products claimed by vendor');
 
       if (isShiprocket) {
         // Shiprocket direct download — AWB assign + label generation
-        console.log('🚀 Shiprocket direct download — assigning AWB + generating label...');
+        logger.info('🚀 Shiprocket direct download — assigning AWB + generating label...');
         const labelResponse = await generateLabelForShiprocketOrder(order_id, claimedProducts, vendor, format);
 
-        // Store label in cache after successful generation (same pattern as Shipway)
+        // 6.4 — Store label + mark products downloaded atomically in one transaction.
+        // Without a transaction, a mid-loop failure could store the label but leave
+        // some claims.label_downloaded = 0, causing duplicate downloads on retry.
         if (labelResponse.success && labelResponse.data.shipping_url) {
           try {
             const labelDataToStore = {
@@ -2880,16 +2804,21 @@ router.post('/download-label', async (req, res) => {
               carrier_name: labelResponse.data.carrier_name
             };
 
-            console.log(`📦 Storing label data for Shiprocket direct download:`, labelDataToStore);
-            await database.upsertLabel(labelDataToStore);
-
-            // Mark all claimed products as label_downloaded
-            for (const product of claimedProducts) {
-              await database.updateOrder(product.unique_id, { label_downloaded: 1 });
-            }
-            console.log(`✅ Label cached and products marked as downloaded`);
+            logger.info(`📦 Storing label data for Shiprocket direct download:`, labelDataToStore);
+            const txManager = new TransactionManager(database.pool);
+            await txManager.runInTransaction(async (conn) => {
+              await database.upsertLabel(labelDataToStore, conn);
+              // 7.4 — Single batch UPDATE instead of N individual updateOrder calls
+              const dlUniqueIds = claimedProducts.map(p => p.unique_id);
+              const dlPlaceholders = dlUniqueIds.map(() => '?').join(',');
+              await conn.execute(
+                `UPDATE claims SET label_downloaded = 1 WHERE order_unique_id IN (${dlPlaceholders})`,
+                dlUniqueIds
+              );
+            });
+            logger.info(`✅ Label cached and products marked as downloaded (transactional)`);
           } catch (cacheError) {
-            console.error('⚠️ Failed to cache Shiprocket label (continuing anyway):', cacheError.message);
+            logger.error('⚠️ Failed to cache Shiprocket label (continuing anyway):', cacheError.message);
           }
         }
 
@@ -2898,7 +2827,7 @@ router.post('/download-label', async (req, res) => {
         // Shipway direct download (existing flow)
       const labelResponse = await generateLabelForOrder(order_id, claimedProducts, vendor, format);
 
-      // Store label in cache after successful generation
+      // 6.4 — Store label + mark products downloaded atomically in one transaction.
       if (labelResponse.success && labelResponse.data.shipping_url) {
         try {
           const labelDataToStore = {
@@ -2910,23 +2839,22 @@ router.post('/download-label', async (req, res) => {
             carrier_name: labelResponse.data.carrier_name
           };
 
-          console.log(`📦 Storing label data for direct download:`, labelDataToStore);
-
-          await database.upsertLabel(labelDataToStore);
-          console.log(`✅ Stored label and carrier info for direct download order ${order_id}`);
-          console.log(`  - Carrier: ${labelResponse.data.carrier_id} (${labelResponse.data.carrier_name})`);
-
-          // ✅ Mark label as downloaded in claims table for all claimed products
-          for (const product of claimedProducts) {
-            await database.updateOrder(product.unique_id, {
-              label_downloaded: 1  // Mark as downloaded after successful label generation
-            });
-            console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
-          }
+          logger.info(`📦 Storing label data for Shipway direct download:`, labelDataToStore);
+          const txManager = new TransactionManager(database.pool);
+          await txManager.runInTransaction(async (conn) => {
+            await database.upsertLabel(labelDataToStore, conn);
+            // 7.4 — Single batch UPDATE instead of N individual updateOrder calls
+            const dlUniqueIds = claimedProducts.map(p => p.unique_id);
+            const dlPlaceholders = dlUniqueIds.map(() => '?').join(',');
+            await conn.execute(
+              `UPDATE claims SET label_downloaded = 1 WHERE order_unique_id IN (${dlPlaceholders})`,
+              dlUniqueIds
+            );
+          });
+          logger.info(`✅ Stored label and all products marked as downloaded (transactional) for order ${order_id}`);
 
         } catch (cacheError) {
-          console.log(`⚠️ Failed to cache label URL: ${cacheError.message}`);
-          console.log(`  - Error details:`, cacheError);
+          logger.info(`⚠️ Failed to cache label URL: ${cacheError.message}`);
         }
       }
 
@@ -2935,7 +2863,7 @@ router.post('/download-label', async (req, res) => {
 
     } else if (claimedProducts.length > 0) {
       // Condition 2: Clone required - some products claimed by vendor
-      console.log('🔄 CONDITION 2: Clone required - some products claimed by vendor');
+      logger.info('🔄 CONDITION 2: Clone required - some products claimed by vendor');
 
       if (isShiprocket) {
         // Shiprocket clone flow
@@ -2945,14 +2873,14 @@ router.post('/download-label', async (req, res) => {
         } catch (firstError) {
           // Check if error is due to clone conflict
           if (firstError.message && firstError.message.includes('already exists')) {
-            console.log('⚠️ CLONE CONFLICT DETECTED: Clone order already exists');
-            console.log('🔄 RETRYING: Using suffix _99 to avoid conflict...');
+            logger.info('⚠️ CLONE CONFLICT DETECTED: Clone order already exists');
+            logger.info('🔄 RETRYING: Using suffix _99 to avoid conflict...');
 
             try {
               cloneResponse = await handleShiprocketOrderCloning(order_id, claimedProducts, orderProducts, vendor, '99');
-              console.log('✅ RETRY SUCCESSFUL: Clone created with _99 suffix');
+              logger.info('✅ RETRY SUCCESSFUL: Clone created with _99 suffix');
             } catch (retryError) {
-              console.error('❌ RETRY FAILED: Could not create clone even with _99 suffix');
+              logger.error('❌ RETRY FAILED: Could not create clone even with _99 suffix');
               throw retryError;
             }
           } else {
@@ -2970,15 +2898,15 @@ router.post('/download-label', async (req, res) => {
       } catch (firstError) {
         // Check if error is due to clone conflict with external orders
         if (firstError.message && firstError.message.includes('not found in Shipway')) {
-          console.log('⚠️ CLONE CONFLICT DETECTED: Clone order already exists in Shipway (created externally)');
-          console.log('🔄 RETRYING: Using suffix _99 to avoid conflict with external clones...');
+          logger.info('⚠️ CLONE CONFLICT DETECTED: Clone order already exists in Shipway (created externally)');
+          logger.info('🔄 RETRYING: Using suffix _99 to avoid conflict with external clones...');
 
           try {
             // Retry with _99 suffix to avoid conflicts with external clones (_1, _2, etc.)
             cloneResponse = await handleOrderCloning(order_id, claimedProducts, orderProducts, vendor, '99');
-            console.log('✅ RETRY SUCCESSFUL: Clone created with _99 suffix');
+            logger.info('✅ RETRY SUCCESSFUL: Clone created with _99 suffix');
           } catch (retryError) {
-            console.error('❌ RETRY FAILED: Could not create clone even with _99 suffix');
+            logger.error('❌ RETRY FAILED: Could not create clone even with _99 suffix');
             throw retryError; // Re-throw to be caught by outer catch block
           }
         } else {
@@ -2992,7 +2920,7 @@ router.post('/download-label', async (req, res) => {
 
     } else {
       // No products claimed by this vendor
-      console.log('❌ No products claimed by this vendor for order:', order_id);
+      logger.info('❌ No products claimed by this vendor for order:', order_id);
       return res.status(400).json({
         success: false,
         message: 'No products claimed by this vendor for this order'
@@ -3000,19 +2928,19 @@ router.post('/download-label', async (req, res) => {
     }
 
   } catch (error) {
-    console.error('❌ DOWNLOAD LABEL ERROR:', error);
+    logger.error('❌ DOWNLOAD LABEL ERROR:', error);
 
     // Create notification for specific error patterns (only if vendor is defined)
     let notificationCreated = false;
     if (vendor) {
       try {
         notificationCreated = await createLabelGenerationNotification(error.message, order_id, vendor);
-        console.log('✅ Notification created for failed order:', order_id);
+        logger.info('✅ Notification created for failed order:', order_id);
       } catch (notificationError) {
-        console.error('⚠️ Failed to create notification (non-blocking):', notificationError.message);
+        logger.error('⚠️ Failed to create notification (non-blocking):', notificationError.message);
       }
     } else {
-      console.log('⚠️ Skipping notification creation - vendor not authenticated');
+      logger.info('⚠️ Skipping notification creation - vendor not authenticated');
     }
 
     // Return a user-friendly response with warning message
@@ -3161,7 +3089,7 @@ function categorizeError(errorMessage) {
  */
 async function generateLabelForOrder(orderId, products, vendor, format = 'thermal', dataMaps = null) {
   try {
-    console.log('🔄 Generating label for order:', orderId);
+    logger.info('🔄 Generating label for order:', orderId);
 
     // Get customer info from database (use pre-fetched data if available)
     const database = require('../config/database');
@@ -3173,10 +3101,6 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
     }
 
     // Log customer info for debugging (especially phone numbers)
-    console.log(`  - Customer info retrieved for order ${orderId}:`);
-    console.log(`    - Shipping phone: ${customerInfo.shipping_phone ? 'Present' : 'MISSING'}`);
-    console.log(`    - Billing phone: ${customerInfo.billing_phone ? 'Present' : 'MISSING'}`);
-    console.log(`    - Account code: ${customerInfo.account_code || 'MISSING'}`);
 
     // Get account_code from order (validate it exists in store_info)
     const accountCode = customerInfo.account_code || products[0]?.account_code;
@@ -3194,7 +3118,6 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
       throw new Error(`Store is not active for account_code: ${accountCode}. Cannot generate label for inactive store.`);
     }
 
-    console.log(`  - Using account_code: ${accountCode} (store: ${store.store_name}) for label generation`);
 
     // Validate and sanitize phone number (required by Shipway API)
     // Use shipping_phone if available, otherwise fallback to billing_phone
@@ -3212,7 +3135,6 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
     const maskedPhone = shippingPhone.length > 4
       ? shippingPhone.substring(0, 2) + '****' + shippingPhone.substring(shippingPhone.length - 2)
       : '****';
-    console.log(`  - Shipping phone: ${maskedPhone} (length: ${shippingPhone.length})`);
 
     // Convert customer_info to originalOrder format expected by prepareShipwayRequestBody
     const originalOrder = {
@@ -3244,11 +3166,10 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
     };
 
     // STEP 1: Get top 3 priority carriers from the first product
-    console.log(`🚚 RETRIEVING TOP 3 PRIORITY CARRIERS for order ${orderId}...`);
+    logger.info(`🚚 RETRIEVING TOP 3 PRIORITY CARRIERS for order ${orderId}...`);
     const firstProduct = products[0];
     const priorityCarrierStr = firstProduct.priority_carrier || '[]';
 
-    console.log(`  - Priority carrier string: ${priorityCarrierStr}`);
 
     let priorityCarriers = [];
     try {
@@ -3257,14 +3178,13 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
         priorityCarriers = [];
       }
     } catch (parseError) {
-      console.log(`⚠️ Failed to parse priority_carrier: ${parseError.message}`);
+      logger.info(`⚠️ Failed to parse priority_carrier: ${parseError.message}`);
       priorityCarriers = [];
     }
 
-    console.log(`  - Parsed carriers: ${JSON.stringify(priorityCarriers)}`);
 
     if (priorityCarriers.length === 0) {
-      console.log(`❌ No priority carriers available for order ${orderId}`);
+      logger.info(`❌ No priority carriers available for order ${orderId}`);
       throw new Error('No priority carriers assigned to this order. Please contact admin.');
     }
 
@@ -3275,14 +3195,14 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
         .map(c => [c.carrier_id, c]));
 
     // STEP 2: Try each carrier in sequence with smart fallback logic
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`🚀 LABEL GENERATION STARTED`);
-    console.log(`   Order ID: ${orderId}`);
-    console.log(`   Format: ${format}`);
-    console.log(`   Vendor: ${vendor.name} (ID: ${vendor.id})`);
-    console.log(`   Timestamp: ${new Date().toISOString()}`);
-    console.log(`   Available Carriers: ${priorityCarriers.length}`);
-    console.log(`${'='.repeat(80)}\n`);
+    logger.info(`\n${'='.repeat(80)}`);
+    logger.info(`🚀 LABEL GENERATION STARTED`);
+    logger.info(`   Order ID: ${orderId}`);
+    logger.info(`   Format: ${format}`);
+    logger.info(`   Vendor: ${vendor.name} (ID: ${vendor.id})`);
+    logger.info(`   Timestamp: ${new Date().toISOString()}`);
+    logger.info(`   Available Carriers: ${priorityCarriers.length}`);
+    logger.info(`${'='.repeat(80)}\n`);
 
     let assignedCarrier = null;
     let response = null;
@@ -3295,11 +3215,11 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
       const carrierName = carrierInfo ? carrierInfo.carrier_name : `Carrier ${carrierId}`;
       const attemptTimestamp = new Date().toISOString();
 
-      console.log(`\n🔹 CARRIER ATTEMPT ${i + 1}/${priorityCarriers.length}`);
-      console.log(`   Carrier ID: ${carrierId}`);
-      console.log(`   Carrier Name: ${carrierName}`);
-      console.log(`   Timestamp: ${attemptTimestamp}`);
-      console.log(`   ${'─'.repeat(70)}`);
+      logger.info(`\n🔹 CARRIER ATTEMPT ${i + 1}/${priorityCarriers.length}`);
+      logger.info(`   Carrier ID: ${carrierId}`);
+      logger.info(`   Carrier Name: ${carrierName}`);
+      logger.info(`   Timestamp: ${attemptTimestamp}`);
+      logger.info(`   ${'─'.repeat(70)}`);
 
       try {
         // Create a modified products array with this specific carrier
@@ -3311,7 +3231,7 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
         // Prepare request body with this carrier (pass dataMaps for warehouse mapping)
         const requestBody = await prepareShipwayRequestBody(orderId, modifiedProducts, originalOrder, vendor, true, accountCode, dataMaps);
 
-        console.log(`   📡 Calling Shipway API...`);
+        logger.info(`   📡 Calling Shipway API...`);
 
         // Call Shipway API with account_code for store-specific credentials
         response = await callShipwayPushOrderAPI(requestBody, true, accountCode);
@@ -3323,13 +3243,13 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
         };
 
         // Log success
-        console.log(`\n${'='.repeat(80)}`);
-        console.log(`✅ LABEL GENERATION SUCCESSFUL!`);
-        console.log(`   Order ID: ${orderId}`);
-        console.log(`   Carrier: ${carrierName} (ID: ${carrierId})`);
-        console.log(`   AWB: ${response.awb_response?.AWB || response.AWB || 'N/A'}`);
-        console.log(`   Timestamp: ${new Date().toISOString()}`);
-        console.log(`${'='.repeat(80)}\n`);
+        logger.info(`\n${'='.repeat(80)}`);
+        logger.info(`✅ LABEL GENERATION SUCCESSFUL!`);
+        logger.info(`   Order ID: ${orderId}`);
+        logger.info(`   Carrier: ${carrierName} (ID: ${carrierId})`);
+        logger.info(`   AWB: ${response.awb_response?.AWB || response.AWB || 'N/A'}`);
+        logger.info(`   Timestamp: ${new Date().toISOString()}`);
+        logger.info(`${'='.repeat(80)}\n`);
 
         break; // Exit loop on success
 
@@ -3351,19 +3271,19 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
           timestamp: errorTimestamp
         });
 
-        console.log(`   ❌ ATTEMPT FAILED`);
-        console.log(`   Error Type: ${errorCategory.type}`);
-        console.log(`   Error Category: ${errorCategory.category}`);
-        console.log(`   Error Message: ${errorMessage}`);
-        console.log(`   User Message: ${errorCategory.userMessage}`);
-        console.log(`   Should Try Next: ${errorCategory.shouldTryNextCarrier}`);
-        console.log(`   Timestamp: ${errorTimestamp}`);
+        logger.info(`   ❌ ATTEMPT FAILED`);
+        logger.info(`   Error Type: ${errorCategory.type}`);
+        logger.info(`   Error Category: ${errorCategory.category}`);
+        logger.info(`   Error Message: ${errorMessage}`);
+        logger.info(`   User Message: ${errorCategory.userMessage}`);
+        logger.info(`   Should Try Next: ${errorCategory.shouldTryNextCarrier}`);
+        logger.info(`   Timestamp: ${errorTimestamp}`);
 
         // Check if this is a CRITICAL error - stop immediately
         if (errorCategory.type === 'CRITICAL') {
-          console.log(`\n🛑 CRITICAL ERROR DETECTED - STOPPING ALL ATTEMPTS`);
-          console.log(`   Reason: ${errorCategory.category}`);
-          console.log(`   No further carriers will be tried`);
+          logger.info(`\n🛑 CRITICAL ERROR DETECTED - STOPPING ALL ATTEMPTS`);
+          logger.info(`   Reason: ${errorCategory.category}`);
+          logger.info(`   No further carriers will be tried`);
 
           // Create notification for admin
           try {
@@ -3374,9 +3294,9 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
               errorCategory.category,
               errorCategory.type
             );
-            console.log(`   ✅ Notification created for admin`);
+            logger.info(`   ✅ Notification created for admin`);
           } catch (notifError) {
-            console.log(`   ⚠️ Failed to create notification: ${notifError.message}`);
+            logger.info(`   ⚠️ Failed to create notification: ${notifError.message}`);
           }
 
           throw new Error('Unable to perform action. Kindly contact Admin');
@@ -3384,29 +3304,29 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
 
         // Check if we should try next carrier (RETRIABLE or UNKNOWN errors)
         if (errorCategory.shouldTryNextCarrier && i < priorityCarriers.length - 1) {
-          console.log(`   ⏭️  Trying next carrier...`);
+          logger.info(`   ⏭️  Trying next carrier...`);
           continue; // Try next carrier
         } else {
           // Last carrier or non-retriable error
           if (i < priorityCarriers.length - 1) {
-            console.log(`   🛑 Error not retriable, stopping attempts`);
+            logger.info(`   🛑 Error not retriable, stopping attempts`);
           } else {
-            console.log(`   🛑 All ${priorityCarriers.length} carriers exhausted`);
+            logger.info(`   🛑 All ${priorityCarriers.length} carriers exhausted`);
           }
 
           // Create error summary
-          console.log(`\n${'='.repeat(80)}`);
-          console.log(`❌ LABEL GENERATION FAILED - ALL CARRIERS EXHAUSTED`);
-          console.log(`   Order ID: ${orderId}`);
-          console.log(`   Total Attempts: ${carrierAttempts.length}`);
-          console.log(`\n   📋 CARRIER ATTEMPT SUMMARY:`);
+          logger.info(`\n${'='.repeat(80)}`);
+          logger.info(`❌ LABEL GENERATION FAILED - ALL CARRIERS EXHAUSTED`);
+          logger.info(`   Order ID: ${orderId}`);
+          logger.info(`   Total Attempts: ${carrierAttempts.length}`);
+          logger.info(`\n   📋 CARRIER ATTEMPT SUMMARY:`);
           carrierAttempts.forEach((attempt, idx) => {
-            console.log(`   ${idx + 1}. ${attempt.carrier_name} (ID: ${attempt.carrier_id})`);
-            console.log(`      Error Type: ${attempt.error_type}`);
-            console.log(`      Error Category: ${attempt.error_category}`);
-            console.log(`      Error: ${attempt.error.substring(0, 100)}${attempt.error.length > 100 ? '...' : ''}`);
+            logger.info(`   ${idx + 1}. ${attempt.carrier_name} (ID: ${attempt.carrier_id})`);
+            logger.info(`      Error Type: ${attempt.error_type}`);
+            logger.info(`      Error Category: ${attempt.error_category}`);
+            logger.info(`      Error: ${attempt.error.substring(0, 100)}${attempt.error.length > 100 ? '...' : ''}`);
           });
-          console.log(`${'='.repeat(80)}\n`);
+          logger.info(`${'='.repeat(80)}\n`);
 
           // Create notification for admin with summary
           const summarizedError = carrierAttempts.length === 1
@@ -3421,9 +3341,9 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
               errorCategory.category,
               errorCategory.type
             );
-            console.log(`✅ Notification created for admin`);
+            logger.info(`✅ Notification created for admin`);
           } catch (notifError) {
-            console.log(`⚠️ Failed to create notification: ${notifError.message}`);
+            logger.info(`⚠️ Failed to create notification: ${notifError.message}`);
           }
 
           throw new Error('Unable to perform action. Kindly contact Admin');
@@ -3433,20 +3353,18 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
 
     // If we exhausted all carriers without success
     if (!assignedCarrier || !response) {
-      console.log(`❌ All ${priorityCarriers.length} carriers failed for order ${orderId}`);
+      logger.info(`❌ All ${priorityCarriers.length} carriers failed for order ${orderId}`);
       throw new Error('Unable to perform action. Kindly contact Admin');
     }
 
-    console.log('🔍 Shipway API Response Structure:');
-    console.log('  - Full response:', JSON.stringify(response, null, 2));
-    console.log('  - Response keys:', Object.keys(response));
+    logger.info('🔍 Shipway API Response Structure:');
 
     // Check if response indicates AWB assignment is in progress
     if (response.status === false || response.success === false) {
       const message = response.message || '';
       if (message.toLowerCase().includes('awb assignment is in progress') ||
         message.toLowerCase().includes('have patience')) {
-        console.log('⏳ AWB assignment is in progress - throwing retriable error');
+        logger.info('⏳ AWB assignment is in progress - throwing retriable error');
         throw new Error(message);
       }
     }
@@ -3467,11 +3385,7 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
       shipping_url = response.data.shipping_url;
       awb = response.data.AWB || response.data.awb;
     } else {
-      console.log('❌ Could not find shipping_url in response structure');
-      console.log('  - Available keys:', Object.keys(response));
-      console.log('  - Response status:', response.status);
-      console.log('  - Response success:', response.success);
-      console.log('  - Response message:', response.message);
+      logger.info('❌ Could not find shipping_url in response structure');
 
       // If there's a message indicating AWB assignment in progress, throw that instead
       if (response.message && (response.message.toLowerCase().includes('awb assignment is in progress') ||
@@ -3482,9 +3396,7 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
       throw new Error('Invalid response structure from Shipway API - missing shipping_url');
     }
 
-    console.log('✅ Label generated successfully');
-    console.log('  - Shipping URL:', shipping_url);
-    console.log('  - AWB:', awb);
+    logger.info('✅ Label generated successfully');
 
     // Handle different formats
     if (format === 'thermal') {
@@ -3502,7 +3414,7 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
       };
     } else {
       // For A4 and four-in-one formats, generate a PDF with appropriate layout
-      console.log(`🔄 Generating ${format} format PDF...`);
+      logger.info(`🔄 Generating ${format} format PDF...`);
 
       try {
         const formattedPdfBuffer = await generateFormattedLabelPDF(shipping_url, format);
@@ -3523,7 +3435,7 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
           }
         };
       } catch (pdfError) {
-        console.error('❌ PDF formatting failed:', pdfError);
+        logger.error('❌ PDF formatting failed:', pdfError);
         // Fallback to original thermal label
         return {
           success: true,
@@ -3541,17 +3453,17 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
 
   } catch (error) {
     // Outer catch for unexpected errors that weren't handled by carrier loop
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`💥💥💥 UNEXPECTED ERROR IN LABEL GENERATION 💥💥💥`);
-    console.log(`   Order ID: ${orderId}`);
-    console.log(`   Vendor: ${vendor ? vendor.name : 'N/A'} (ID: ${vendor ? vendor.id : 'N/A'})`);
-    console.log(`   Error Type: ${error.constructor.name}`);
-    console.log(`   Error Message: ${error.message}`);
-    console.log(`   Timestamp: ${new Date().toISOString()}`);
-    console.log(`${'─'.repeat(80)}`);
-    console.log(`   📋 STACK TRACE:`);
-    console.log(error.stack || '   (No stack trace available)');
-    console.log(`${'='.repeat(80)}\n`);
+    logger.info(`\n${'='.repeat(80)}`);
+    logger.info(`💥💥💥 UNEXPECTED ERROR IN LABEL GENERATION 💥💥💥`);
+    logger.info(`   Order ID: ${orderId}`);
+    logger.info(`   Vendor: ${vendor ? vendor.name : 'N/A'} (ID: ${vendor ? vendor.id : 'N/A'})`);
+    logger.info(`   Error Type: ${error.constructor.name}`);
+    logger.info(`   Error Message: ${error.message}`);
+    logger.info(`   Timestamp: ${new Date().toISOString()}`);
+    logger.info(`${'─'.repeat(80)}`);
+    logger.info(`   📋 STACK TRACE:`);
+    logger.info(error.stack || '   (No stack trace available)');
+    logger.info(`${'='.repeat(80)}\n`);
 
     // Try to create notification even for unexpected errors
     if (vendor) {
@@ -3563,9 +3475,9 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
           'UNEXPECTED_ERROR',
           'CRITICAL'
         );
-        console.log(`✅ Notification created for unexpected error`);
+        logger.info(`✅ Notification created for unexpected error`);
       } catch (notifError) {
-        console.log(`⚠️ Failed to create notification for unexpected error: ${notifError.message}`);
+        logger.info(`⚠️ Failed to create notification for unexpected error: ${notifError.message}`);
       }
     }
 
@@ -3578,7 +3490,7 @@ async function generateLabelForOrder(orderId, products, vendor, format = 'therma
  */
 async function generateFormattedLabelPDF(shippingUrl, format) {
   try {
-    console.log(`🔄 Generating ${format} format PDF from URL: ${shippingUrl}`);
+    logger.info(`🔄 Generating ${format} format PDF from URL: ${shippingUrl}`);
 
     // Import PDF-lib for PDF manipulation
     const { PDFDocument } = require('pdf-lib');
@@ -3597,7 +3509,7 @@ async function generateFormattedLabelPDF(shippingUrl, format) {
 
     if (format === 'a4') {
       // A4 format: One label per A4 page
-      console.log('📄 Creating A4 format (one label per page)');
+      logger.info('📄 Creating A4 format (one label per page)');
 
       const a4Page = formattedPdf.addPage([595, 842]); // A4 size in points
       const [originalPage] = await formattedPdf.embedPages([originalPdf.getPage(0)]);
@@ -3617,7 +3529,7 @@ async function generateFormattedLabelPDF(shippingUrl, format) {
 
     } else if (format === 'four-in-one') {
       // Four-in-one format: 4 labels per A4 page
-      console.log('📄 Creating four-in-one format (4 labels per A4 page)');
+      logger.info('📄 Creating four-in-one format (4 labels per A4 page)');
 
       const a4Page = formattedPdf.addPage([595, 842]); // A4 size in points
       const [originalPage] = await formattedPdf.embedPages([originalPdf.getPage(0)]);
@@ -3661,12 +3573,12 @@ async function generateFormattedLabelPDF(shippingUrl, format) {
 
     // Save the formatted PDF
     const formattedPdfBytes = await formattedPdf.save();
-    console.log(`✅ ${format} format PDF generated successfully`);
+    logger.info(`✅ ${format} format PDF generated successfully`);
 
     return Buffer.from(formattedPdfBytes);
 
   } catch (error) {
-    console.error(`❌ ${format} format PDF generation failed:`, error);
+    logger.error(`❌ ${format} format PDF generation failed:`, error);
     throw error;
   }
 }
@@ -3679,14 +3591,9 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
   const MAX_ATTEMPTS = 5;
   const accountCode = claimedProducts[0]?.account_code;
 
-  console.log('🚀 Starting Shipway clone process (transaction-aware)...');
-  console.log(`📊 Input Analysis:`);
-  console.log(`  - Original Order ID: ${originalOrderId}`);
-  console.log(`  - Total products in order: ${allOrderProducts.length}`);
-  console.log(`  - Products claimed by vendor: ${claimedProducts.length}`);
-  console.log(`  - Vendor warehouse ID: ${vendor.warehouseId}`);
+  logger.info('🚀 Starting Shipway clone process (transaction-aware)...');
+  logger.info(`📊 Input Analysis:`);
   if (forceCloneSuffix) {
-    console.log(`  - Forced Clone Suffix: ${forceCloneSuffix} (Retry attempt to avoid conflict)`);
   }
 
   // ============================================================================
@@ -3702,8 +3609,7 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
 
   if (tx) {
     // RESUME PATH — use the stored clone_order_id
-    console.log(`\n🔄 RESUME PATH: Found existing transaction #${tx.id} (last status: ${tx.status})`);
-    console.log(`  - Stored clone_order_id: ${tx.clone_order_id}`);
+    logger.info(`\n🔄 RESUME PATH: Found existing transaction #${tx.id} (last status: ${tx.status})`);
 
     inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor);
     inputData.cloneOrderId = tx.clone_order_id; // CRITICAL: use stored clone ID, don't generate new
@@ -3716,7 +3622,6 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
       case 'db_updated':       skipToStep = 6; break; // Skip to label generation
       default:                 skipToStep = 1; break; // Fallback
     }
-    console.log(`  - Resuming from step ${skipToStep}`);
   } else {
     // NEW PATH — generate fresh clone ID and record transaction
     inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix);
@@ -3734,9 +3639,6 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
   }
 
   const cloneOrderId = inputData.cloneOrderId;
-  console.log(`  - Clone Order ID: ${cloneOrderId}`);
-  console.log(`  - Claimed products: ${inputData.claimedProducts.length}`);
-  console.log(`  - Remaining products: ${inputData.remainingProducts.length}`);
 
   // ============================================================================
   // PHASE 2: EXECUTE STEPS (skipping already-completed ones)
@@ -3744,71 +3646,67 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
   try {
     // STEP 1: CREATE CLONE ORDER (NO LABEL)
     if (skipToStep <= 1) {
-      console.log('\n🔧 STEP 1: Creating clone order (without label)...');
+      logger.info('\n🔧 STEP 1: Creating clone order (without label)...');
       await retryOperation((data) => createCloneOrderOnly(data), MAX_ATTEMPTS, 'Create clone order', inputData);
       await updateCloneTransactionStatus(tx.id, 'clone_created');
-      console.log('✅ STEP 1 COMPLETED: Clone order created');
+      logger.info('✅ STEP 1 COMPLETED: Clone order created');
     } else {
-      console.log('\n⏩ STEP 1: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 1: SKIPPED (already completed)');
     }
 
     // STEP 2: VERIFY CLONE CREATION
     if (skipToStep <= 2) {
-      console.log('\n🔍 STEP 2: Verifying clone creation...');
+      logger.info('\n🔍 STEP 2: Verifying clone creation...');
       await retryOperation((data) => verifyCloneExists(data), MAX_ATTEMPTS, 'Verify clone creation', inputData);
-      console.log('✅ STEP 2 COMPLETED: Clone verified');
+      logger.info('✅ STEP 2 COMPLETED: Clone verified');
     } else {
-      console.log('\n⏩ STEP 2: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 2: SKIPPED (already completed)');
     }
 
     // STEP 3: UPDATE ORIGINAL ORDER
     if (skipToStep <= 3) {
-      console.log('\n📝 STEP 3: Updating original order (removing claimed products)...');
+      logger.info('\n📝 STEP 3: Updating original order (removing claimed products)...');
       await retryOperation((data) => updateOriginalOrder(data), MAX_ATTEMPTS, 'Update original order', inputData);
-      console.log('✅ STEP 3 COMPLETED: Original order updated');
+      logger.info('✅ STEP 3 COMPLETED: Original order updated');
     } else {
-      console.log('\n⏩ STEP 3: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 3: SKIPPED (already completed)');
     }
 
     // STEP 4: VERIFY ORIGINAL ORDER UPDATE
     if (skipToStep <= 4) {
-      console.log('\n🔍 STEP 4: Verifying original order update...');
+      logger.info('\n🔍 STEP 4: Verifying original order update...');
       await retryOperation((data) => verifyOriginalOrderUpdate(data), MAX_ATTEMPTS, 'Verify original order update', inputData);
       await updateCloneTransactionStatus(tx.id, 'original_updated');
-      console.log('✅ STEP 4 COMPLETED: Original order update verified');
+      logger.info('✅ STEP 4 COMPLETED: Original order update verified');
     } else {
-      console.log('\n⏩ STEP 4: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 4: SKIPPED (already completed)');
     }
 
     // STEP 5: UPDATE LOCAL DATABASE
     if (skipToStep <= 5) {
-      console.log('\n💾 STEP 5: Updating local database after clone creation...');
+      logger.info('\n💾 STEP 5: Updating local database after clone creation...');
       await retryOperation((data) => updateLocalDatabaseAfterClone(data), MAX_ATTEMPTS, 'Update local database', inputData);
       await updateCloneTransactionStatus(tx.id, 'db_updated');
-      console.log('✅ STEP 5 COMPLETED: Local database updated');
+      logger.info('✅ STEP 5 COMPLETED: Local database updated');
     } else {
-      console.log('\n⏩ STEP 5: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 5: SKIPPED (already completed)');
     }
 
     // STEP 6: GENERATE LABEL FOR CLONE
-    console.log('\n🏷️ STEP 6: Generating label for clone order...');
+    logger.info('\n🏷️ STEP 6: Generating label for clone order...');
     const labelResponse = await retryOperation((data) => generateLabelForClone(data), MAX_ATTEMPTS, 'Generate clone label', inputData);
-    console.log('✅ STEP 6 COMPLETED: Label generated');
+    logger.info('✅ STEP 6 COMPLETED: Label generated');
 
     // STEP 7: MARK LABEL AS DOWNLOADED
-    console.log('\n✅ STEP 7: Marking label as downloaded and caching URL...');
+    logger.info('\n✅ STEP 7: Marking label as downloaded and caching URL...');
     await retryOperation((data) => markLabelAsDownloaded(data, labelResponse), MAX_ATTEMPTS, 'Mark label downloaded', inputData);
     await updateCloneTransactionStatus(tx.id, 'completed', {
       awb_code: labelResponse.data?.awb || null
     });
-    console.log('✅ STEP 7 COMPLETED: Label marked as downloaded');
+    logger.info('✅ STEP 7 COMPLETED: Label marked as downloaded');
 
     // STEP 8: RETURN SUCCESS
-    console.log('\n🎉 Clone process completed successfully!');
-    console.log(`  - Original Order ID: ${inputData.originalOrderId}`);
-    console.log(`  - Clone Order ID: ${cloneOrderId}`);
-    console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
-    console.log(`  - AWB: ${labelResponse.data.awb}`);
+    logger.info('\n🎉 Clone process completed successfully!');
 
     return {
       success: true,
@@ -3824,7 +3722,7 @@ async function handleOrderCloning(originalOrderId, claimedProducts, allOrderProd
   } catch (error) {
     // Record error in transaction but preserve last successful status for resume
     await updateCloneTransactionStatus(tx.id, tx.status || 'initiated', { error_message: error.message });
-    console.error(`❌ Shipway clone failed (tx #${tx.id}):`, error.message);
+    logger.error(`❌ Shipway clone failed (tx #${tx.id}):`, error.message);
     throw new Error(`Order cloning failed: ${error.message}`);
   }
 }
@@ -3839,26 +3737,26 @@ async function retryOperation(operation, maxAttempts, stepName, inputData) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      console.log(`🔄 ${stepName} - Attempt ${attempt}/${maxAttempts}`);
-      console.log(`🔒 Using consistent input data (captured at: ${inputData.timestamp})`);
+      logger.info(`🔄 ${stepName} - Attempt ${attempt}/${maxAttempts}`);
+      logger.info(`🔒 Using consistent input data (captured at: ${inputData.timestamp})`);
 
       // Pass the same inputData to every attempt
       const result = await operation(inputData);
-      console.log(`✅ ${stepName} - Success on attempt ${attempt}`);
+      logger.info(`✅ ${stepName} - Success on attempt ${attempt}`);
       return result;
 
     } catch (error) {
       lastError = error;
-      console.log(`❌ ${stepName} - Failed on attempt ${attempt}: ${error.message}`);
+      logger.info(`❌ ${stepName} - Failed on attempt ${attempt}: ${error.message}`);
 
       if (attempt === maxAttempts) {
-        console.log(`💥 ${stepName} - All ${maxAttempts} attempts failed with same data`);
+        logger.info(`💥 ${stepName} - All ${maxAttempts} attempts failed with same data`);
         break;
       }
 
       // Wait before retry (exponential backoff)
       const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // 1s, 2s, 4s, 8s, 10s max
-      console.log(`⏳ ${stepName} - Waiting ${waitTime}ms before retry with SAME data...`);
+      logger.info(`⏳ ${stepName} - Waiting ${waitTime}ms before retry with SAME data...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
@@ -3890,11 +3788,11 @@ async function findExistingCloneTransaction(originalOrderId, vendorWarehouseId, 
       [originalOrderId, vendorWarehouseId, accountCode]
     );
     if (rows.length > 0) {
-      console.log(`🔍 Found existing clone transaction #${rows[0].id} (status: ${rows[0].status}, clone_id: ${rows[0].clone_order_id})`);
+      logger.info(`🔍 Found existing clone transaction #${rows[0].id} (status: ${rows[0].status}, clone_id: ${rows[0].clone_order_id})`);
     }
     return rows.length > 0 ? rows[0] : null;
   } catch (error) {
-    console.error(`❌ Error finding clone transaction: ${error.message}`);
+    logger.error(`❌ Error finding clone transaction: ${error.message}`);
     return null;
   }
 }
@@ -3914,7 +3812,7 @@ async function createCloneTransaction(data) {
      data.vendor_warehouse_id, data.shipping_partner,
      data.claimed_product_unique_ids, data.claimed_product_codes]
   );
-  console.log(`📝 Clone transaction #${result.insertId} created (${data.shipping_partner}: ${data.original_order_id} → ${data.clone_order_id})`);
+  logger.info(`📝 Clone transaction #${result.insertId} created (${data.shipping_partner}: ${data.original_order_id} → ${data.clone_order_id})`);
   return { id: result.insertId, ...data, status: 'initiated' };
 }
 
@@ -3952,7 +3850,7 @@ async function updateCloneTransactionStatus(txId, status, extras = {}) {
     `UPDATE clone_transactions SET ${setClauses.join(', ')} WHERE id = ?`,
     params
   );
-  console.log(`📝 Clone transaction #${txId}: status → '${status}'${extras.clone_shipment_id ? ` (shipment: ${extras.clone_shipment_id})` : ''}${extras.awb_code ? ` (awb: ${extras.awb_code})` : ''}`);
+  logger.info(`📝 Clone transaction #${txId}: status → '${status}'${extras.clone_shipment_id ? ` (shipment: ${extras.clone_shipment_id})` : ''}${extras.awb_code ? ` (awb: ${extras.awb_code})` : ''}`);
 }
 
 /**
@@ -3964,14 +3862,9 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
   const MAX_ATTEMPTS = 5;
   const accountCode = claimedProducts[0]?.account_code;
 
-  console.log('🚀 Starting Shiprocket clone process (transaction-aware)...');
-  console.log(`📊 Input Analysis:`);
-  console.log(`  - Original Order ID: ${originalOrderId}`);
-  console.log(`  - Total products in order: ${allOrderProducts.length}`);
-  console.log(`  - Products claimed by vendor: ${claimedProducts.length}`);
-  console.log(`  - Vendor warehouse ID: ${vendor.warehouseId}`);
+  logger.info('🚀 Starting Shiprocket clone process (transaction-aware)...');
+  logger.info(`📊 Input Analysis:`);
   if (forceCloneSuffix) {
-    console.log(`  - Forced Clone Suffix: ${forceCloneSuffix} (Retry attempt to avoid conflict)`);
   }
 
   // ============================================================================
@@ -3987,8 +3880,7 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
 
   if (tx) {
     // RESUME PATH — use the stored clone_order_id and any partial data
-    console.log(`\n🔄 RESUME PATH: Found existing SR transaction #${tx.id} (last status: ${tx.status})`);
-    console.log(`  - Stored clone_order_id: ${tx.clone_order_id}`);
+    logger.info(`\n🔄 RESUME PATH: Found existing SR transaction #${tx.id} (last status: ${tx.status})`);
 
     inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor);
     inputData.cloneOrderId = tx.clone_order_id; // CRITICAL: use stored clone ID
@@ -3996,15 +3888,12 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
     // Restore partial data from transaction
     if (tx.clone_shipment_id) {
       inputData.cloneShipmentIdForShipment = tx.clone_shipment_id;
-      console.log(`  - Restored shipment_id: ${tx.clone_shipment_id}`);
     }
     if (tx.awb_code) {
       inputData.awbCode = tx.awb_code;
-      console.log(`  - Restored awb_code: ${tx.awb_code}`);
     }
     if (tx.assigned_carrier_id) {
       inputData.assignedCarrierId = tx.assigned_carrier_id;
-      console.log(`  - Restored carrier_id: ${tx.assigned_carrier_id}`);
     }
 
     // Determine which step to resume from
@@ -4016,7 +3905,6 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
       case 'db_updated':       skipToStep = 5; break;
       default:                 skipToStep = 1; break;
     }
-    console.log(`  - Resuming from step ${skipToStep}`);
   } else {
     // NEW PATH
     inputData = await prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix);
@@ -4042,8 +3930,6 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
   inputData.pickupLocation = whMapping.pickup_location;
 
   const cloneOrderId = inputData.cloneOrderId;
-  console.log(`  - Clone Order ID: ${cloneOrderId}`);
-  console.log(`  - Pickup Location: ${whMapping.pickup_location}`);
 
   // ============================================================================
   // PHASE 2: EXECUTE STEPS
@@ -4051,66 +3937,62 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
   try {
     // STEP 1: CREATE CLONE ORDER
     if (skipToStep <= 1) {
-      console.log('\n🔧 STEP 1: Creating Shiprocket clone order...');
+      logger.info('\n🔧 STEP 1: Creating Shiprocket clone order...');
       await retryOperation((data) => createShiprocketCloneOrderOnly(data), MAX_ATTEMPTS, 'Create SR clone', inputData);
       await updateCloneTransactionStatus(tx.id, 'clone_created', {
         clone_shipment_id: inputData.cloneShipmentIdForShipment || null
       });
-      console.log('✅ STEP 1 COMPLETED: Clone order created');
+      logger.info('✅ STEP 1 COMPLETED: Clone order created');
     } else {
-      console.log('\n⏩ STEP 1: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 1: SKIPPED (already completed)');
     }
 
     // STEP 2: ASSIGN AWB (Shiprocket-specific)
     if (skipToStep <= 2) {
-      console.log('\n🔗 STEP 2: Assigning AWB for Shiprocket clone...');
+      logger.info('\n🔗 STEP 2: Assigning AWB for Shiprocket clone...');
       await retryOperation((data) => assignAWBForShiprocketClone(data), MAX_ATTEMPTS, 'Assign AWB', inputData);
       await updateCloneTransactionStatus(tx.id, 'awb_assigned', {
         awb_code: inputData.awbCode || null,
         assigned_carrier_id: inputData.assignedCarrierId || null
       });
-      console.log('✅ STEP 2 COMPLETED: AWB assigned');
+      logger.info('✅ STEP 2 COMPLETED: AWB assigned');
     } else {
-      console.log('\n⏩ STEP 2: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 2: SKIPPED (already completed)');
     }
 
     // STEP 3: UPDATE ORIGINAL ORDER
     if (skipToStep <= 3) {
-      console.log('\n📝 STEP 3: Updating original Shiprocket order...');
+      logger.info('\n📝 STEP 3: Updating original Shiprocket order...');
       await retryOperation((data) => updateShiprocketOriginalOrder(data), MAX_ATTEMPTS, 'Update SR original', inputData);
       await updateCloneTransactionStatus(tx.id, 'original_updated');
-      console.log('✅ STEP 3 COMPLETED: Original order updated');
+      logger.info('✅ STEP 3 COMPLETED: Original order updated');
     } else {
-      console.log('\n⏩ STEP 3: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 3: SKIPPED (already completed)');
     }
 
     // STEP 4: UPDATE LOCAL DATABASE
     if (skipToStep <= 4) {
-      console.log('\n💾 STEP 4: Updating local database after clone...');
+      logger.info('\n💾 STEP 4: Updating local database after clone...');
       await retryOperation((data) => updateLocalDatabaseAfterClone(data), MAX_ATTEMPTS, 'Update local DB', inputData);
       await updateCloneTransactionStatus(tx.id, 'db_updated');
-      console.log('✅ STEP 4 COMPLETED: Local database updated');
+      logger.info('✅ STEP 4 COMPLETED: Local database updated');
     } else {
-      console.log('\n⏩ STEP 4: SKIPPED (already completed)');
+      logger.info('\n⏩ STEP 4: SKIPPED (already completed)');
     }
 
     // STEP 5: GENERATE LABEL
-    console.log('\n🏷️ STEP 5: Generating label for Shiprocket clone...');
+    logger.info('\n🏷️ STEP 5: Generating label for Shiprocket clone...');
     const labelResponse = await retryOperation((data) => generateLabelForShiprocketClone(data), MAX_ATTEMPTS, 'Generate SR label', inputData);
-    console.log('✅ STEP 5 COMPLETED: Label generated');
+    logger.info('✅ STEP 5 COMPLETED: Label generated');
 
     // STEP 6: MARK LABEL AS DOWNLOADED
-    console.log('\n✅ STEP 6: Marking label as downloaded...');
+    logger.info('\n✅ STEP 6: Marking label as downloaded...');
     await retryOperation((data) => markLabelAsDownloaded(data, labelResponse), MAX_ATTEMPTS, 'Mark downloaded', inputData);
     await updateCloneTransactionStatus(tx.id, 'completed');
-    console.log('✅ STEP 6 COMPLETED: Label marked as downloaded');
+    logger.info('✅ STEP 6 COMPLETED: Label marked as downloaded');
 
     // RETURN SUCCESS
-    console.log('\n🎉 Shiprocket clone process completed successfully!');
-    console.log(`  - Original Order ID: ${inputData.originalOrderId}`);
-    console.log(`  - Clone Order ID: ${cloneOrderId}`);
-    console.log(`  - Label URL: ${labelResponse?.data?.shipping_url || 'N/A'}`);
-    console.log(`  - AWB: ${inputData.awbCode || 'N/A'}`);
+    logger.info('\n🎉 Shiprocket clone process completed successfully!');
 
     return {
       success: true,
@@ -4129,7 +4011,7 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
   } catch (error) {
     // Record error but preserve last successful status for resume
     await updateCloneTransactionStatus(tx.id, tx.status || 'initiated', { error_message: error.message });
-    console.error(`❌ Shiprocket clone failed (tx #${tx.id}):`, error.message);
+    logger.error(`❌ Shiprocket clone failed (tx #${tx.id}):`, error.message);
     throw error;
   }
 }
@@ -4138,12 +4020,7 @@ async function handleShiprocketOrderCloning(originalOrderId, claimedProducts, al
 async function createShiprocketCloneOrderOnly(inputData) {
   const { cloneOrderId, claimedProducts, accountCode, pickupLocation, originalOrder } = inputData;
 
-  console.log(`🔒 Creating Shiprocket clone with consistent data:`);
-  console.log(`  - Clone ID: ${cloneOrderId}`);
-  console.log(`  - Products count: ${claimedProducts.length}`);
-  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
-  console.log(`  - Pickup Location: ${pickupLocation}`);
-  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  logger.info(`🔒 Creating Shiprocket clone with consistent data:`);
 
   if (!accountCode) {
     throw new Error(`account_code not found in inputData for clone order ${cloneOrderId}. Cannot create clone without store information.`);
@@ -4173,7 +4050,7 @@ async function createShiprocketCloneOrderOnly(inputData) {
     pickupLocation
   );
 
-  console.log('📤 Shiprocket Create Adhoc Order Request Body:', JSON.stringify(requestBody, null, 2));
+  logger.info('📤 Shiprocket Create Adhoc Order Request Body:', JSON.stringify(requestBody, null, 2));
 
   // Call Shiprocket Create Adhoc Order API
   const response = await shiprocketService.createOrder(requestBody);
@@ -4187,9 +4064,8 @@ async function createShiprocketCloneOrderOnly(inputData) {
   const shiprocketOrderId = response.data?.order_id;
   if (shiprocketOrderId) {
     inputData.cloneShipmentId = String(shiprocketOrderId);
-    console.log(`  - Received Shiprocket order_id: ${shiprocketOrderId} (will be saved to orders.partner_order_id in Step 5)`);
   } else {
-    console.warn(`⚠️ No order_id returned from Shiprocket for clone order: ${cloneOrderId}`);
+    logger.warn(`⚠️ No order_id returned from Shiprocket for clone order: ${cloneOrderId}`);
   }
 
   // Extract shipment_id from response (if available)
@@ -4203,12 +4079,10 @@ async function createShiprocketCloneOrderOnly(inputData) {
   
   if (shipmentId) {
     inputData.cloneShipmentIdForShipment = shipmentId;
-    console.log(`  - Received Shiprocket shipment_id: ${shipmentId} (will be saved to orders.shipment_id in Step 5)`);
   } else {
-    console.log(`  - No shipment_id returned from Shiprocket for clone order: ${cloneOrderId} (will be populated on next sync)`);
   }
 
-  console.log('✅ Shiprocket clone order created successfully');
+  logger.info('✅ Shiprocket clone order created successfully');
   return response;
 }
 
@@ -4216,12 +4090,7 @@ async function createShiprocketCloneOrderOnly(inputData) {
 async function updateShiprocketOriginalOrder(inputData) {
   const { originalOrderId, remainingProducts, accountCode, pickupLocation } = inputData;
 
-  console.log(`🔒 Updating Shiprocket original with consistent data:`);
-  console.log(`  - Original ID: ${originalOrderId}`);
-  console.log(`  - Remaining products: ${remainingProducts.length}`);
-  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
-  console.log(`  - Pickup Location: ${pickupLocation}`);
-  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  logger.info(`🔒 Updating Shiprocket original with consistent data:`);
 
   if (remainingProducts.length > 0) {
     if (!accountCode) {
@@ -4252,7 +4121,7 @@ async function updateShiprocketOriginalOrder(inputData) {
       pickupLocation
     );
 
-    console.log('📤 Shiprocket Update Order Request Body:', JSON.stringify(requestBody, null, 2));
+    logger.info('📤 Shiprocket Update Order Request Body:', JSON.stringify(requestBody, null, 2));
 
     // Call Shiprocket Update Order API
     const response = await shiprocketService.updateOrder(requestBody);
@@ -4261,10 +4130,10 @@ async function updateShiprocketOriginalOrder(inputData) {
       throw new Error(`Failed to update Shiprocket original order: ${response.message || 'Unknown error'}`);
     }
 
-    console.log('✅ Shiprocket original order updated successfully');
+    logger.info('✅ Shiprocket original order updated successfully');
     return response;
   } else {
-    console.log('ℹ️ No remaining products - original order will be empty');
+    logger.info('ℹ️ No remaining products - original order will be empty');
     return { success: true, message: 'No remaining products to update' };
   }
 }
@@ -4283,9 +4152,7 @@ async function assignAWBForShiprocketClone(inputData) {
     throw new Error(`shipment_id not available for clone ${cloneOrderId}. Cannot assign AWB. Please retry — it may be populated on next attempt.`);
   }
 
-  console.log(`🔗 Assigning AWB for Shiprocket clone...`);
-  console.log(`  - Clone Order ID: ${cloneOrderId}`);
-  console.log(`  - Shipment ID: ${shipmentId}`);
+  logger.info(`🔗 Assigning AWB for Shiprocket clone...`);
 
   // Get priority carriers (already assigned during claim)
   const priorityCarrierStr = claimedProducts[0]?.priority_carrier || '[]';
@@ -4299,7 +4166,6 @@ async function assignAWBForShiprocketClone(inputData) {
     throw new Error(`No priority carriers assigned for clone ${cloneOrderId}. Please contact admin to assign carriers.`);
   }
 
-  console.log(`  - Priority carriers to try: ${JSON.stringify(priorityCarriers)}`);
 
   // Initialize Shiprocket service
   const ShiprocketService = require('../services/shiprocketService');
@@ -4311,20 +4177,19 @@ async function assignAWBForShiprocketClone(inputData) {
 
   for (const carrierId of priorityCarriers) {
     try {
-      console.log(`  - Attempting AWB assign with carrier ${carrierId}...`);
       awbResult = await shiprocketService.assignAWB(shipmentId, carrierId);
       if (awbResult.success) {
         inputData.assignedCarrierId = String(carrierId);
         inputData.assignedCarrierName = awbResult.courier_name || '';
         inputData.awbCode = awbResult.awb_code;
-        console.log(`  ✅ AWB assigned: ${awbResult.awb_code} (carrier: ${awbResult.courier_name})`);
+        logger.info(`  ✅ AWB assigned: ${awbResult.awb_code} (carrier: ${awbResult.courier_name})`);
         break;
       } else {
-        console.log(`  ❌ Carrier ${carrierId} rejected: ${awbResult.message}`);
+        logger.info(`  ❌ Carrier ${carrierId} rejected: ${awbResult.message}`);
         lastError = new Error(awbResult.message || `AWB assign failed for carrier ${carrierId}`);
       }
     } catch (error) {
-      console.log(`  ❌ Carrier ${carrierId} error: ${error.message}`);
+      logger.info(`  ❌ Carrier ${carrierId} error: ${error.message}`);
       lastError = error;
       continue;
     }
@@ -4349,9 +4214,7 @@ async function generateLabelForShiprocketClone(inputData) {
     throw new Error(`shipment_id not available for clone ${cloneOrderId}. Cannot generate label.`);
   }
 
-  console.log(`🏷️ Generating label for Shiprocket clone...`);
-  console.log(`  - Clone Order ID: ${cloneOrderId}`);
-  console.log(`  - Shipment ID: ${shipmentId}`);
+  logger.info(`🏷️ Generating label for Shiprocket clone...`);
 
   const ShiprocketService = require('../services/shiprocketService');
   const shiprocketService = new ShiprocketService(accountCode);
@@ -4365,7 +4228,7 @@ async function generateLabelForShiprocketClone(inputData) {
     throw new Error(`Label generation failed for clone ${cloneOrderId}: ${labelResult.message}`);
   }
 
-  console.log(`  ✅ Label generated: ${labelResult.label_url}`);
+  logger.info(`  ✅ Label generated: ${labelResult.label_url}`);
 
   return {
     success: true,
@@ -4387,7 +4250,7 @@ async function generateLabelForShiprocketOrder(orderId, products, vendor, format
   const database = require('../config/database');
   const accountCode = products[0]?.account_code;
 
-  console.log(`🚀 Shiprocket direct download (Condition 1) for order ${orderId}...`);
+  logger.info(`🚀 Shiprocket direct download (Condition 1) for order ${orderId}...`);
 
   // Get shipment_id from orders table (already stored from sync)
   const shipmentId = products[0]?.shipment_id;
@@ -4407,8 +4270,6 @@ async function generateLabelForShiprocketOrder(orderId, products, vendor, format
     throw new Error(`No priority carriers assigned for order ${orderId}. Please contact admin.`);
   }
 
-  console.log(`  - Shipment ID: ${shipmentId}`);
-  console.log(`  - Priority carriers: ${JSON.stringify(priorityCarriers)}`);
 
   // Initialize Shiprocket service
   const ShiprocketService = require('../services/shiprocketService');
@@ -4421,18 +4282,17 @@ async function generateLabelForShiprocketOrder(orderId, products, vendor, format
 
   for (const carrierId of priorityCarriers) {
     try {
-      console.log(`  - Attempting AWB assign with carrier ${carrierId}...`);
       awbResult = await shiprocketService.assignAWB(shipmentId, carrierId);
       if (awbResult.success) {
         assignedCarrier = { carrier_id: carrierId, carrier_name: awbResult.courier_name };
-        console.log(`  ✅ AWB assigned: ${awbResult.awb_code} (carrier: ${awbResult.courier_name})`);
+        logger.info(`  ✅ AWB assigned: ${awbResult.awb_code} (carrier: ${awbResult.courier_name})`);
         break;
       } else {
-        console.log(`  ❌ Carrier ${carrierId} rejected: ${awbResult.message}`);
+        logger.info(`  ❌ Carrier ${carrierId} rejected: ${awbResult.message}`);
         lastError = new Error(awbResult.message || `AWB assign failed for carrier ${carrierId}`);
       }
     } catch (error) {
-      console.log(`  ❌ Carrier ${carrierId} error: ${error.message}`);
+      logger.info(`  ❌ Carrier ${carrierId} error: ${error.message}`);
       lastError = error;
       continue;
     }
@@ -4443,13 +4303,12 @@ async function generateLabelForShiprocketOrder(orderId, products, vendor, format
   }
 
   // Generate label
-  console.log(`  - Generating label (format: ${format})...`);
   const labelResult = await shiprocketService.generateLabel([parseInt(shipmentId)], format);
   if (!labelResult.success) {
     throw new Error(`Label generation failed for order ${orderId}: ${labelResult.message}`);
   }
 
-  console.log(`  ✅ Label generated: ${labelResult.label_url}`);
+  logger.info(`  ✅ Label generated: ${labelResult.label_url}`);
 
   return {
     success: true,
@@ -4466,7 +4325,7 @@ async function generateLabelForShiprocketOrder(orderId, products, vendor, format
 
 // Step 0: Prepare and freeze input data
 async function prepareInputData(originalOrderId, claimedProducts, allOrderProducts, vendor, forceCloneSuffix = null) {
-  console.log('📋 Capturing input data for clone process...');
+  logger.info('📋 Capturing input data for clone process...');
 
   // Extract account_code from claimed products FIRST (CRITICAL: Must match the store)
   const accountCode = claimedProducts[0]?.account_code;
@@ -4474,7 +4333,6 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
     throw new Error(`account_code not found for order ${originalOrderId}. Cannot create clone without store information.`);
   }
 
-  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
 
   // Get database reference early (needed for both store lookup and customer info)
   const database = require('../config/database');
@@ -4482,7 +4340,6 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
   // Detect shipping partner for this store (needed for partner-aware clone ID generation)
   const store = await database.getStoreByAccountCode(accountCode);
   const shippingPartner = (store?.shipping_partner || 'Shipway').toLowerCase();
-  console.log(`  - Shipping Partner: ${shippingPartner}`);
 
   // Generate unique clone ID (partner-aware: skips Shipway API check for Shiprocket)
   const cloneOrderId = await generateUniqueCloneId(originalOrderId, forceCloneSuffix, accountCode, shippingPartner);
@@ -4510,7 +4367,6 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
   const maskedPhone = shippingPhone.length > 4
     ? shippingPhone.substring(0, 2) + '****' + shippingPhone.substring(shippingPhone.length - 2)
     : '****';
-  console.log(`  - Shipping phone: ${maskedPhone} (length: ${shippingPhone.length})`);
 
   // Convert customer_info to originalOrder format expected by prepareShipwayRequestBody
   // Get order_date from products (orders table) since customer_info may not have it
@@ -4559,7 +4415,7 @@ async function prepareInputData(originalOrderId, claimedProducts, allOrderProduc
     timestamp: new Date().toISOString() // Fixed timestamp for consistency
   };
 
-  console.log('✅ Input data captured and frozen');
+  logger.info('✅ Input data captured and frozen');
   return inputData;
 }
 
@@ -4570,7 +4426,6 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, a
   // If forceCloneSuffix is provided, use it directly (for retry scenarios)
   if (forceCloneSuffix) {
     const forcedCloneOrderId = `${originalOrderId}_${forceCloneSuffix}`;
-    console.log(`  - Using forced Clone Order ID: ${forcedCloneOrderId}`);
     return forcedCloneOrderId;
   }
 
@@ -4582,7 +4437,7 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, a
     );
     allOrders = rows;
   } catch (dbError) {
-    console.log('⚠️ Direct query failed, skipping MySQL clone-ID check');
+    logger.info('⚠️ Direct query failed, skipping MySQL clone-ID check');
     allOrders = [];
   }
 
@@ -4607,21 +4462,14 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, a
       while (shipwayOrders.some(order => order.order_id === cloneOrderId)) {
         counter++;
         cloneOrderId = `${originalOrderId}_${counter}`;
-        console.log(`  - Clone ID exists in Shipway (store: ${accountCode}), incrementing to ${cloneOrderId}`);
       }
     } catch (shipwayError) {
-      console.log(`  - Warning: Could not verify clone ID with Shipway (store: ${accountCode}):`, shipwayError.message);
-      console.log('  - Proceeding with MySQL-only check');
     }
   } else if (shippingPartner === 'shiprocket') {
-    console.log('  - Shiprocket: skipping external API check (conflict detected at createOrder time)');
   } else {
-    console.log('  - Warning: No account_code provided, skipping external verification');
   }
 
-  console.log(`  - ✅ Generated unique Clone Order ID: ${cloneOrderId} (counter: ${counter})`);
   if (counter > 10) {
-    console.log(`  - ⚠️ Warning: Clone ID counter is ${counter}, which suggests many existing clones`);
   }
   return cloneOrderId;
 }
@@ -4630,11 +4478,7 @@ async function generateUniqueCloneId(originalOrderId, forceCloneSuffix = null, a
 async function createCloneOrderOnly(inputData) {
   const { cloneOrderId, claimedProducts, originalOrder, vendor, accountCode } = inputData;
 
-  console.log(`🔒 Creating clone with consistent data:`);
-  console.log(`  - Clone ID: ${cloneOrderId}`);
-  console.log(`  - Products count: ${claimedProducts.length}`);
-  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
-  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  logger.info(`🔒 Creating clone with consistent data:`);
 
   // CRITICAL: Use account_code from inputData (already validated in prepareInputData)
   if (!accountCode) {
@@ -4656,7 +4500,7 @@ async function createCloneOrderOnly(inputData) {
     throw new Error(`Failed to create clone order: ${response.message || 'Unknown error'}`);
   }
 
-  console.log('✅ Clone order created successfully in Shipway');
+  logger.info('✅ Clone order created successfully in Shipway');
   return response;
 }
 
@@ -4664,10 +4508,7 @@ async function createCloneOrderOnly(inputData) {
 async function verifyCloneExists(inputData) {
   const { cloneOrderId, accountCode } = inputData;
 
-  console.log(`🔒 Verifying clone exists with consistent data:`);
-  console.log(`  - Clone ID: ${cloneOrderId}`);
-  console.log(`  - Account Code: ${accountCode} (for store-specific verification)`);
-  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  logger.info(`🔒 Verifying clone exists with consistent data:`);
 
   // CRITICAL: Use account_code to fetch order from the correct store
   if (!accountCode) {
@@ -4686,7 +4527,7 @@ async function verifyCloneExists(inputData) {
     throw new Error(`Clone order ${cloneOrderId} not found in Shipway for store ${accountCode}`);
   }
 
-  console.log(`✅ Clone order verified in Shipway (store: ${accountCode})`);
+  logger.info(`✅ Clone order verified in Shipway (store: ${accountCode})`);
   return { success: true, verified: true };
 }
 
@@ -4694,11 +4535,7 @@ async function verifyCloneExists(inputData) {
 async function updateOriginalOrder(inputData) {
   const { originalOrderId, remainingProducts, originalOrder, vendor, accountCode } = inputData;
 
-  console.log(`🔒 Updating original with consistent data:`);
-  console.log(`  - Original ID: ${originalOrderId}`);
-  console.log(`  - Remaining products: ${remainingProducts.length}`);
-  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
-  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  logger.info(`🔒 Updating original with consistent data:`);
 
   if (remainingProducts.length > 0) {
     // CRITICAL: Use account_code from inputData (already validated in prepareInputData)
@@ -4722,10 +4559,10 @@ async function updateOriginalOrder(inputData) {
       throw new Error(`Failed to update original order: ${response.message || 'Unknown error'}`);
     }
 
-    console.log('✅ Original order updated successfully in Shipway');
+    logger.info('✅ Original order updated successfully in Shipway');
     return response;
   } else {
-    console.log('ℹ️ No remaining products - original order will be empty');
+    logger.info('ℹ️ No remaining products - original order will be empty');
     return { success: true, message: 'No remaining products to update' };
   }
 }
@@ -4734,11 +4571,7 @@ async function updateOriginalOrder(inputData) {
 async function verifyOriginalOrderUpdate(inputData) {
   const { originalOrderId, remainingProducts, accountCode } = inputData;
 
-  console.log(`🔒 Verifying original order update with consistent data:`);
-  console.log(`  - Original ID: ${originalOrderId}`);
-  console.log(`  - Expected remaining products: ${remainingProducts.length}`);
-  console.log(`  - Account Code: ${accountCode} (for store-specific verification)`);
-  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  logger.info(`🔒 Verifying original order update with consistent data:`);
 
   // CRITICAL: Use account_code to fetch order from the correct store
   if (!accountCode) {
@@ -4757,7 +4590,7 @@ async function verifyOriginalOrderUpdate(inputData) {
     throw new Error(`Original order ${originalOrderId} not found in Shipway for store ${accountCode} after update`);
   }
 
-  console.log(`✅ Original order update verified in Shipway (store: ${accountCode})`);
+  logger.info(`✅ Original order update verified in Shipway (store: ${accountCode})`);
   return { success: true, verified: true };
 }
 
@@ -4766,19 +4599,15 @@ async function updateLocalDatabaseAfterClone(inputData) {
   const { claimedProducts, cloneOrderId, originalOrderId } = inputData;
   const database = require('../config/database');
 
-  console.log(`🔒 Updating local database with consistent data:`);
-  console.log(`  - Claimed products: ${claimedProducts.length}`);
-  console.log(`  - Clone Order ID: ${cloneOrderId}`);
-  console.log(`  - Original Order ID: ${originalOrderId}`);
-  console.log(`  - Setting label_downloaded = 0 (not downloaded yet)`);
+  logger.info(`🔒 Updating local database with consistent data:`);
 
   // Copy customer info from original order to clone order
-  console.log(`📋 Copying customer info from ${originalOrderId} to ${cloneOrderId}...`);
+  logger.info(`📋 Copying customer info from ${originalOrderId} to ${cloneOrderId}...`);
   try {
     await database.copyCustomerInfo(originalOrderId, cloneOrderId);
-    console.log(`✅ Customer info copied successfully`);
+    logger.info(`✅ Customer info copied successfully`);
   } catch (error) {
-    console.error(`⚠️ Failed to copy customer info: ${error.message}`);
+    logger.error(`⚠️ Failed to copy customer info: ${error.message}`);
     throw error;
   }
 
@@ -4789,12 +4618,9 @@ async function updateLocalDatabaseAfterClone(inputData) {
   const cloneShipmentId = inputData.cloneShipmentId || null;
   const cloneShipmentIdForShipment = inputData.cloneShipmentIdForShipment || null;
   if (cloneShipmentId) {
-    console.log(`  - Shiprocket Order ID: ${cloneShipmentId} (from create response, will be stored in orders.partner_order_id)`);
   }
   if (cloneShipmentIdForShipment) {
-    console.log(`  - Shiprocket Shipment ID: ${cloneShipmentIdForShipment} (from create response, will be stored in orders.shipment_id)`);
   } else {
-    console.log(`  - Note: shipment_id not in create response, will be populated on next sync when order is fetched from API`);
   }
 
   for (const product of claimedProducts) {
@@ -4817,23 +4643,15 @@ async function updateLocalDatabaseAfterClone(inputData) {
     // Update both orders and claims tables in a single call
     await database.updateOrder(product.unique_id, updateData);
 
-    console.log(`  ✅ Updated product ${product.unique_id} after clone creation:`);
-    console.log(`     - orders.order_id: ${cloneOrderId}`);
-    console.log(`     - claims.order_id: ${cloneOrderId}`);
-    console.log(`     - clone_status: cloned`);
-    console.log(`     - cloned_order_id: ${originalOrderId}`);
-    console.log(`     - label_downloaded: 0`);
+    logger.info(`  ✅ Updated product ${product.unique_id} after clone creation:`);
     if (cloneShipmentId) {
-      console.log(`     - partner_order_id: ${cloneShipmentId}`);
     }
     if (cloneShipmentIdForShipment) {
-      console.log(`     - shipment_id: ${cloneShipmentIdForShipment}`);
     } else {
-      console.log(`     - shipment_id: NULL (will be populated on next sync)`);
     }
   }
 
-  console.log('✅ Local database updated after clone creation');
+  logger.info('✅ Local database updated after clone creation');
   return { success: true, updatedProducts: claimedProducts.length };
 }
 
@@ -4841,11 +4659,7 @@ async function updateLocalDatabaseAfterClone(inputData) {
 async function generateLabelForClone(inputData) {
   const { cloneOrderId, claimedProducts, vendor, accountCode } = inputData;
 
-  console.log(`🔒 Generating label with consistent data:`);
-  console.log(`  - Clone ID: ${cloneOrderId}`);
-  console.log(`  - Products for label: ${claimedProducts.length}`);
-  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
-  console.log(`  - Timestamp: ${inputData.timestamp}`);
+  logger.info(`🔒 Generating label with consistent data:`);
 
   // Generate label for the clone order
   const labelResponse = await generateLabelForOrder(cloneOrderId, claimedProducts, vendor);
@@ -4854,7 +4668,7 @@ async function generateLabelForClone(inputData) {
     throw new Error(`Failed to generate label for clone: ${labelResponse.message || 'Unknown error'}`);
   }
 
-  console.log('✅ Label generated successfully for clone order');
+  logger.info('✅ Label generated successfully for clone order');
   return labelResponse;
 }
 
@@ -4863,12 +4677,7 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
   const { claimedProducts, cloneOrderId, accountCode } = inputData;
   const database = require('../config/database');
 
-  console.log(`🔒 Marking label as downloaded and storing in labels table:`);
-  console.log(`  - Clone Order ID: ${cloneOrderId}`);
-  console.log(`  - Products count: ${claimedProducts.length}`);
-  console.log(`  - Account Code: ${accountCode} (for store-specific operations)`);
-  console.log(`  - Label URL: ${labelResponse.data.shipping_url}`);
-  console.log(`  - AWB: ${labelResponse.data.awb}`);
+  logger.info(`🔒 Marking label as downloaded and storing in labels table:`);
 
   // ⚠️ IMPORTANT: Only mark as downloaded and store if we have a valid shipping URL
   if (labelResponse.data.shipping_url) {
@@ -4878,7 +4687,7 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
         label_downloaded: 1  // ✅ Mark as downloaded only after successful label generation
       });
 
-      console.log(`  ✅ Marked product ${product.unique_id} label as downloaded`);
+      logger.info(`  ✅ Marked product ${product.unique_id} label as downloaded`);
     }
 
     // Store label URL and carrier info in labels table (one entry per order_id, no duplicates)
@@ -4896,16 +4705,15 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
       carrier_name: labelResponse.data.carrier_name
     };
 
-    console.log(`📦 Storing label data for clone order:`, labelDataToStore);
+    logger.info(`📦 Storing label data for clone order:`, labelDataToStore);
 
     await database.upsertLabel(labelDataToStore);
 
-    console.log(`  ✅ Stored label and carrier info in labels table for order ${cloneOrderId}`);
-    console.log(`  - Carrier: ${labelResponse.data.carrier_id} (${labelResponse.data.carrier_name})`);
-    console.log('✅ All product labels marked as downloaded and cached');
+    logger.info(`  ✅ Stored label and carrier info in labels table for order ${cloneOrderId}`);
+    logger.info('✅ All product labels marked as downloaded and cached');
   } else {
-    console.log(`  ⚠️ No shipping URL found in label response - NOT marking as downloaded`);
-    console.log(`  ⚠️ Products will remain available for retry on next download attempt`);
+    logger.info(`  ⚠️ No shipping URL found in label response - NOT marking as downloaded`);
+    logger.info(`  ⚠️ Products will remain available for retry on next download attempt`);
   }
 
   return { success: true, markedProducts: labelResponse.data.shipping_url ? claimedProducts.length : 0 };
@@ -4924,7 +4732,7 @@ async function markLabelAsDownloaded(inputData, labelResponse) {
 async function prepareShipwayRequestBody(orderId, products, originalOrder, vendor, generateLabel = false, accountCode = null, dataMaps = null) {
   // Get payment type from the first product (all products in an order should have same payment_type)
   const paymentType = products[0]?.payment_type || 'P';
-  console.log('🔍 Payment type from order data:', paymentType);
+  logger.info('🔍 Payment type from order data:', paymentType);
 
   const orderTotal = products.reduce((sum, product) => {
     if (paymentType === 'C') {
@@ -4997,7 +4805,7 @@ async function prepareShipwayRequestBody(orderId, products, originalOrder, vendo
 
   // Add label generation specific parameters only for new orders
   if (generateLabel) {
-    console.log('🔄 Adding label generation parameters (carrier_id, warehouse_id, return_warehouse_id)');
+    logger.info('🔄 Adding label generation parameters (carrier_id, warehouse_id, return_warehouse_id)');
     baseRequestBody.carrier_id = parseInt(products[0].priority_carrier) || 80165;
 
     // Get vendor_wh_id and return_warehouse_id from wh_mapping using claimio_wh_id and account_code
@@ -5022,17 +4830,14 @@ async function prepareShipwayRequestBody(orderId, products, originalOrder, vendo
       throw new Error(`Return warehouse ID not configured for vendor (claimio_wh_id: ${vendor.warehouseId}) and store (account_code: ${accountCode}). Please contact admin to set up return warehouse ID in warehouse mapping.`);
     }
 
-    console.log(`  - Using vendor_wh_id from mapping: ${whMapping.vendor_wh_id} (claimio_wh_id: ${vendor.warehouseId}, account_code: ${accountCode})`);
     if (whMapping.return_warehouse_id) {
-      console.log(`  - Using return_warehouse_id from mapping: ${whMapping.return_warehouse_id} (claimio_wh_id: ${vendor.warehouseId}, account_code: ${accountCode})`);
     } else {
-      console.log(`  - Using vendor_wh_id as return_warehouse_id (fallback): ${whMapping.vendor_wh_id} (claimio_wh_id: ${vendor.warehouseId}, account_code: ${accountCode})`);
     }
     baseRequestBody.warehouse_id = whMapping.vendor_wh_id;
     baseRequestBody.return_warehouse_id = returnWarehouseId;
     baseRequestBody.generate_label = true;
   } else {
-    console.log('🔄 Using PUSH Order API (no carrier/warehouse parameters)');
+    logger.info('🔄 Using PUSH Order API (no carrier/warehouse parameters)');
   }
 
   return baseRequestBody;
@@ -5049,15 +4854,13 @@ async function callShipwayCreateManifestAPI(orderIds, accountCode) {
       throw new Error('account_code is required for creating manifest. Cannot proceed without store information.');
     }
 
-    console.log('🔄 Calling Shipway Create Manifest API');
-    console.log('  - Order IDs:', Array.isArray(orderIds) ? orderIds : [orderIds]);
-    console.log('  - Account Code:', accountCode);
+    logger.info('🔄 Calling Shipway Create Manifest API');
 
     // Get store-specific credentials using account_code
     const database = require('../config/database');
     const encryptionService = require('../services/encryptionService');
 
-    console.log(`🔍 Fetching store credentials for account_code: ${accountCode}`);
+    logger.info(`🔍 Fetching store credentials for account_code: ${accountCode}`);
     const store = await database.getStoreByAccountCode(accountCode);
 
     if (!store) {
@@ -5074,14 +4877,14 @@ async function callShipwayCreateManifestAPI(orderIds, accountCode) {
 
     // Generate Basic Auth header from store credentials
     const authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-    console.log(`✅ Using store-specific credentials for ${accountCode} (${store.store_name})`);
+    logger.info(`✅ Using store-specific credentials for ${accountCode} (${store.store_name})`);
 
     const requestBody = {
       order_ids: Array.isArray(orderIds) ? orderIds : [orderIds]
     };
 
-    console.log('📤 Request body:', JSON.stringify(requestBody, null, 2));
-    console.log('⏱️ Timeout: 30 seconds');
+    logger.info('📤 Request body:', JSON.stringify(requestBody, null, 2));
+    logger.info('⏱️ Timeout: 30 seconds');
 
     // OPTIMIZATION #4: Add 30-second timeout to prevent hanging
     const controller = new AbortController();
@@ -5103,7 +4906,7 @@ async function callShipwayCreateManifestAPI(orderIds, accountCode) {
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError.name === 'AbortError') {
-        console.error('❌ Shipway Create Manifest API request timed out after 30 seconds');
+        logger.error('❌ Shipway Create Manifest API request timed out after 30 seconds');
         throw new Error('Shipway Create Manifest API request timed out. The request took longer than 30 seconds. Please try again.');
       }
       throw fetchError; // Re-throw other errors
@@ -5111,8 +4914,8 @@ async function callShipwayCreateManifestAPI(orderIds, accountCode) {
 
     const data = await response.json();
 
-    console.log('📥 Response status:', response.status);
-    console.log('📥 Response data:', JSON.stringify(data, null, 2));
+    logger.info('📥 Response status:', response.status);
+    logger.info('📥 Response data:', JSON.stringify(data, null, 2));
 
     if (!response.ok) {
       throw new Error(`Shipway Create Manifest API error: ${data.message || response.statusText}`);
@@ -5124,8 +4927,7 @@ async function callShipwayCreateManifestAPI(orderIds, accountCode) {
     // For single payment type, it returns single ID, so we just use it
     const manifestId = manifestIds;
 
-    console.log('✅ Shipway Create Manifest API call successful');
-    console.log('  - Manifest ID(s):', manifestId);
+    logger.info('✅ Shipway Create Manifest API call successful');
 
     return {
       success: true,
@@ -5134,7 +4936,7 @@ async function callShipwayCreateManifestAPI(orderIds, accountCode) {
     };
 
   } catch (error) {
-    console.error('❌ Shipway Create Manifest API call failed:', error);
+    logger.error('❌ Shipway Create Manifest API call failed:', error);
     return {
       success: false,
       message: error.message
@@ -5147,11 +4949,7 @@ async function callShipwayCreateManifestAPI(orderIds, accountCode) {
  */
 async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accountCode = null) {
   try {
-    console.log('🔄 Calling Shipway PUSH Order API');
-    console.log('  - Generate label:', generateLabel);
-    console.log('  - Order ID:', requestBody.order_id);
-    console.log('  - Account Code:', accountCode || 'NOT PROVIDED (using default)');
-    console.log('  - API Type:', generateLabel ? 'PUSH Order with Label Generation' : 'PUSH Order (Edit Only)');
+    logger.info('🔄 Calling Shipway PUSH Order API');
 
     // Get store-specific credentials if account_code is provided
     let authHeader;
@@ -5159,7 +4957,7 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accou
     const encryptionService = require('../services/encryptionService');
 
     if (accountCode) {
-      console.log(`🔍 Fetching store credentials for account_code: ${accountCode}`);
+      logger.info(`🔍 Fetching store credentials for account_code: ${accountCode}`);
       const store = await database.getStoreByAccountCode(accountCode);
 
       if (!store) {
@@ -5176,26 +4974,23 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accou
 
       // Generate Basic Auth header from store credentials
       authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-      console.log(`✅ Using store-specific credentials for ${accountCode} (${store.store_name})`);
+      logger.info(`✅ Using store-specific credentials for ${accountCode} (${store.store_name})`);
     } else {
       // Fallback to environment variables (for backward compatibility)
       const username = process.env.SHIPWAY_USERNAME;
       const password = process.env.SHIPWAY_PASSWORD;
       const basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
 
-      console.log('🔍 Debug: Environment variables check');
-      console.log('  - SHIPWAY_USERNAME:', username ? 'SET' : 'NOT SET');
-      console.log('  - SHIPWAY_PASSWORD:', password ? 'SET' : 'NOT SET');
-      console.log('  - SHIPWAY_BASIC_AUTH_HEADER:', basicAuthHeader ? 'SET' : 'NOT SET');
+      logger.info('🔍 Debug: Environment variables check');
 
       if (basicAuthHeader) {
         authHeader = basicAuthHeader;
-        console.log('✅ Using SHIPWAY_BASIC_AUTH_HEADER (fallback)');
+        logger.info('✅ Using SHIPWAY_BASIC_AUTH_HEADER (fallback)');
       } else if (username && password) {
         authHeader = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
-        console.log('✅ Using SHIPWAY_USERNAME and SHIPWAY_PASSWORD (fallback)');
+        logger.info('✅ Using SHIPWAY_USERNAME and SHIPWAY_PASSWORD (fallback)');
       } else {
-        console.log('❌ No Shipway credentials found');
+        logger.info('❌ No Shipway credentials found');
         throw new Error('Shipway credentials not configured');
       }
     }
@@ -5203,17 +4998,17 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accou
     // For original order editing (no label generation), remove generate_label parameter
     let apiRequestBody = { ...requestBody };
     if (!generateLabel) {
-      console.log('🔄 Removing generate_label parameter for order edit');
+      logger.info('🔄 Removing generate_label parameter for order edit');
       delete apiRequestBody.generate_label;
     }
 
     // Print the request being sent to Shipway
-    console.log('📤 ========== SHIPWAY API REQUEST ==========');
-    console.log('🌐 Endpoint: https://app.shipway.com/api/v2orders');
-    console.log('📝 Method: POST');
-    console.log('📝 Request Body:', JSON.stringify(apiRequestBody, null, 2));
-    console.log('⏱️ Timeout: 30 seconds');
-    console.log('📤 ==========================================');
+    logger.info('📤 ========== SHIPWAY API REQUEST ==========');
+    logger.info('🌐 Endpoint: https://app.shipway.com/api/v2orders');
+    logger.info('📝 Method: POST');
+    logger.info('📝 Request Body:', JSON.stringify(apiRequestBody, null, 2));
+    logger.info('⏱️ Timeout: 30 seconds');
+    logger.info('📤 ==========================================');
 
     // OPTIMIZATION #4: Add 30-second timeout to prevent hanging
     const controller = new AbortController();
@@ -5235,7 +5030,7 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accou
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError.name === 'AbortError') {
-        console.error('❌ Shipway API request timed out after 30 seconds');
+        logger.error('❌ Shipway API request timed out after 30 seconds');
         throw new Error('Shipway API request timed out. The request took longer than 30 seconds. Please try again.');
       }
       throw fetchError; // Re-throw other errors
@@ -5244,27 +5039,23 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accou
     const data = await response.json();
 
     // Print the complete Shipway API response
-    console.log('📦 ========== SHIPWAY API RESPONSE ==========');
-    console.log('📊 Response Status:', response.status, response.statusText);
-    console.log('📊 Response OK:', response.ok);
-    console.log('📊 Full Response Data:', JSON.stringify(data, null, 2));
-    console.log('📦 ==========================================');
+    logger.info('📦 ========== SHIPWAY API RESPONSE ==========');
+    logger.info('📊 Response Status:', response.status, response.statusText);
+    logger.info('📊 Response OK:', response.ok);
+    logger.info('📊 Full Response Data:', JSON.stringify(data, null, 2));
+    logger.info('📦 ==========================================');
 
     // Check if Shipway returned an error
     // Handle both 'success' and 'status' fields (Shipway uses different response formats)
     if (!response.ok || data.success === false || data.status === false) {
-      console.log('❌ Shipway API returned an error');
-      console.log('  - Success flag:', data.success);
-      console.log('  - Status flag:', data.status);
-      console.log('  - Error message:', data.message);
-      console.log('  - Full error data:', JSON.stringify(data, null, 2));
+      logger.info('❌ Shipway API returned an error');
 
       const errorMessage = data.message || response.statusText || 'Unknown Shipway API error';
 
       // Check if this is "AWB assignment in progress" - this is a retriable error
       if (errorMessage.toLowerCase().includes('awb assignment is in progress') ||
         errorMessage.toLowerCase().includes('have patience')) {
-        console.log('⏳ AWB assignment is in progress - this is a retriable error');
+        logger.info('⏳ AWB assignment is in progress - this is a retriable error');
         throw new Error(errorMessage); // Will be caught and retried by carrier loop
       }
 
@@ -5274,8 +5065,7 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accou
     // If label generation was requested, check if AWB response is successful
     if (generateLabel && data.awb_response) {
       if (data.awb_response.success === false) {
-        console.log('❌ Label generation failed (AWB response unsuccessful)');
-        console.log('  - AWB Response:', JSON.stringify(data.awb_response, null, 2));
+        logger.info('❌ Label generation failed (AWB response unsuccessful)');
 
         // Extract error message from awb_response
         let errorMessage = 'Label generation failed';
@@ -5289,19 +5079,15 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accou
           errorMessage = data.awb_response.message;
         }
 
-        console.log('  - Error message:', errorMessage);
         throw new Error(errorMessage);
       }
     }
 
-    console.log('✅ Shipway API call successful');
-    console.log('  - Label URL:', data.awb_response?.shipping_url || data.data?.label_url || 'N/A');
-    console.log('  - AWB:', data.awb_response?.AWB || 'N/A');
-    console.log('  - Shipway Order ID:', data.data?.shipway_order_id || 'N/A');
+    logger.info('✅ Shipway API call successful');
     return data;
 
   } catch (error) {
-    console.error('❌ Shipway API call failed:', error);
+    logger.error('❌ Shipway API call failed:', error);
     throw error;
   }
 }
@@ -5311,7 +5097,7 @@ async function callShipwayPushOrderAPI(requestBody, generateLabel = false, accou
  */
 async function syncOrdersFromShipway() {
   try {
-    console.log('🔄 Syncing orders from Shipway');
+    logger.info('🔄 Syncing orders from Shipway');
 
     // Import the shipway service (it's already an instance)
     const shipwayService = require('../services/shipwayService');
@@ -5319,10 +5105,10 @@ async function syncOrdersFromShipway() {
     // Call the sync method
     await shipwayService.syncOrdersToMySQL();
 
-    console.log('✅ Orders synced successfully');
+    logger.info('✅ Orders synced successfully');
 
   } catch (error) {
-    console.error('❌ Order sync failed:', error);
+    logger.error('❌ Order sync failed:', error);
     throw error;
   }
 }
@@ -5340,8 +5126,7 @@ router.post('/bulk-download-labels', async (req, res) => {
   // Generate unique batch ID for this parallel processing operation
   const batchId = `BATCH_${Date.now()}_${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
-  console.log(`🔵 [${batchId}] BULK DOWNLOAD LABELS REQUEST: order_ids=${order_ids?.length}, format: ${format}, generate_only: ${generate_only}, runAsync: ${runAsync}`);
-  console.log(`  - [${batchId}] Start time: ${new Date().toISOString()}`);
+  logger.info(`🔵 [${batchId}] BULK DOWNLOAD LABELS REQUEST: order_ids=${order_ids?.length}, format: ${format}, generate_only: ${generate_only}, runAsync: ${runAsync}`);
 
   // 5.1 + 5.2 — Batch size limit + type validation
   const arrayCheck = validateBulkArray(order_ids, 'order_ids');
@@ -5398,42 +5183,40 @@ router.post('/bulk-download-labels', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log(`❌ [${batchId}] MySQL connection not available`);
+      logger.info(`❌ [${batchId}] MySQL connection not available`);
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log(`❌ [${batchId}] VENDOR NOT FOUND OR INACTIVE`, vendor);
+      logger.info(`❌ [${batchId}] VENDOR NOT FOUND OR INACTIVE`, vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log(`✅ [${batchId}] VENDOR FOUND:`);
-    console.log(`  - [${batchId}] Email:`, vendor.email);
-    console.log(`  - [${batchId}] Warehouse ID:`, vendor.warehouseId);
+    logger.info(`✅ [${batchId}] VENDOR FOUND:`);
 
     // OPTIMIZATION #1: Fetch only the orders we need instead of all orders
     // This reduces query time from 1-5 seconds to 0.2-1 second for 100 orders
-    console.log(`📦 [${batchId}] Fetching products for ${order_ids.length} orders...`);
+    logger.info(`📦 [${batchId}] Fetching products for ${order_ids.length} orders...`);
     const orders = await database.getOrdersByOrderIds(order_ids);
-    console.log(`✅ [${batchId}] Fetched ${orders.length} products from ${order_ids.length} orders`);
+    logger.info(`✅ [${batchId}] Fetched ${orders.length} products from ${order_ids.length} orders`);
 
     // OPTIMIZATION: Bulk fetch all labels upfront to avoid 100 sequential queries
     // This reduces cache check time from 10-50 seconds to 0.1-0.5 seconds
-    console.log(`📦 [${batchId}] Fetching cached labels for ${order_ids.length} orders...`);
+    logger.info(`📦 [${batchId}] Fetching cached labels for ${order_ids.length} orders...`);
     const allLabels = await database.getLabelsByOrderIds(order_ids);
     const labelsMap = new Map(allLabels.map(l => [l.order_id, l]));
-    console.log(`✅ [${batchId}] Found ${allLabels.length} cached labels (out of ${order_ids.length} orders)`);
+    logger.info(`✅ [${batchId}] Found ${allLabels.length} cached labels (out of ${order_ids.length} orders)`);
 
     // OPTIMIZATION: Pre-fetch all data needed for label generation
     // This reduces queries from 400 (100 orders × 4 queries) to ~3-4 bulk queries
-    console.log(`📦 [${batchId}] Pre-fetching data for label generation...`);
+    logger.info(`📦 [${batchId}] Pre-fetching data for label generation...`);
 
     // 1. Bulk fetch all customer info
     const allCustomerInfo = await database.getCustomerInfoByOrderIds(order_ids);
     const customerInfoMap = new Map(allCustomerInfo.map(c => [c.order_id, c]));
-    console.log(`✅ [${batchId}] Fetched ${allCustomerInfo.length} customer info records`);
+    logger.info(`✅ [${batchId}] Fetched ${allCustomerInfo.length} customer info records`);
 
     // 2. Extract unique account codes from orders and customer info
     const accountCodesSet = new Set();
@@ -5444,18 +5227,18 @@ router.post('/bulk-download-labels', async (req, res) => {
       if (c.account_code) accountCodesSet.add(c.account_code);
     });
     const uniqueAccountCodes = Array.from(accountCodesSet);
-    console.log(`✅ [${batchId}] Found ${uniqueAccountCodes.length} unique account codes`);
+    logger.info(`✅ [${batchId}] Found ${uniqueAccountCodes.length} unique account codes`);
 
     // 3. Bulk fetch all stores
     const allStores = await database.getStoresByAccountCodes(uniqueAccountCodes);
     const storesMap = new Map(allStores.map(s => [s.account_code, s]));
-    console.log(`✅ [${batchId}] Fetched ${allStores.length} stores`);
+    logger.info(`✅ [${batchId}] Fetched ${allStores.length} stores`);
 
     // 4. Read carriers once (cache in memory)
     const carrierServiceabilityService = require('../services/carrierServiceabilityService');
     const allCarriers = await carrierServiceabilityService.readCarriersFromDatabase();
     const carrierMap = new Map(allCarriers.map(c => [c.carrier_id, c]));
-    console.log(`✅ [${batchId}] Loaded ${allCarriers.length} carriers (cached in memory)`);
+    logger.info(`✅ [${batchId}] Loaded ${allCarriers.length} carriers (cached in memory)`);
 
     // 5. Bulk fetch all warehouse mappings
     const allWhMappings = await database.getWhMappingsByClaimioWhIdAndAccountCodes(
@@ -5466,7 +5249,7 @@ router.post('/bulk-download-labels', async (req, res) => {
     const whMappingsMap = new Map(
       allWhMappings.map(m => [`${vendor.warehouseId}_${m.account_code}`, m])
     );
-    console.log(`✅ [${batchId}] Fetched ${allWhMappings.length} warehouse mappings`);
+    logger.info(`✅ [${batchId}] Fetched ${allWhMappings.length} warehouse mappings`);
 
     // Build data maps object for passing to generateLabelForOrder
     const dataMaps = {
@@ -5484,14 +5267,14 @@ router.post('/bulk-download-labels', async (req, res) => {
     // Increased from 6 to 10 for better performance (40% more throughput)
     const CONCURRENCY_LIMIT = 10;
 
-    console.log(`⚡ [${batchId}] Processing ${order_ids.length} orders with concurrency limit of ${CONCURRENCY_LIMIT}`);
+    logger.info(`⚡ [${batchId}] Processing ${order_ids.length} orders with concurrency limit of ${CONCURRENCY_LIMIT}`);
 
     // Helper function to process a single order
     // For Shipway: generates label fully (returns shipping_url)
     // For Shiprocket: does clone + AWB assign (label generated in bulk later)
     const processSingleOrder = async (orderId) => {
       try {
-        console.log(`🔄 [${batchId}] Processing order: ${orderId}`);
+        logger.info(`🔄 [${batchId}] Processing order: ${orderId}`);
 
         // Get all products for this order_id
         const orderProducts = orders.filter(order => order.order_id === orderId);
@@ -5515,11 +5298,11 @@ router.post('/bulk-download-labels', async (req, res) => {
         // ✅ OPTIMIZATION: Check if label already downloaded
         const firstClaimedProduct = claimedProducts[0];
         if (firstClaimedProduct.label_downloaded === 1) {
-          console.log(`⚡ BULK: Label already downloaded for ${orderId}, fetching from cache...`);
+          logger.info(`⚡ BULK: Label already downloaded for ${orderId}, fetching from cache...`);
 
           const existingLabel = labelsMap.get(orderId);
           if (existingLabel && existingLabel.label_url) {
-            console.log(`✅ BULK: Found cached label for ${orderId}`);
+            logger.info(`✅ BULK: Found cached label for ${orderId}`);
             return {
               success: true,
               order_id: orderId,
@@ -5529,7 +5312,7 @@ router.post('/bulk-download-labels', async (req, res) => {
               already_cached: true
             };
           } else {
-            console.log(`⚠️ BULK: label_downloaded=1 but no cached label found for ${orderId}, generating new one...`);
+            logger.info(`⚠️ BULK: label_downloaded=1 but no cached label found for ${orderId}, generating new one...`);
           }
         }
 
@@ -5537,7 +5320,7 @@ router.post('/bulk-download-labels', async (req, res) => {
         // SHIPROCKET FLOW: Clone + AWB Assign (label gen happens later in bulk)
         // ============================================================
         if (isShiprocket) {
-          console.log(`🚀 [${batchId}] Shiprocket order detected: ${orderId}`);
+          logger.info(`🚀 [${batchId}] Shiprocket order detected: ${orderId}`);
 
           const isPartialClaim = orderProducts.length !== claimedProducts.length && claimedProducts.length > 0;
 
@@ -5545,14 +5328,14 @@ router.post('/bulk-download-labels', async (req, res) => {
           // PARTIAL CLAIM: Clone path (clone already handled everything)
           // ============================================================
           if (isPartialClaim) {
-            console.log(`🔄 [${batchId}] Clone required for Shiprocket order ${orderId}`);
+            logger.info(`🔄 [${batchId}] Clone required for Shiprocket order ${orderId}`);
 
             let cloneResponse;
             try {
               cloneResponse = await handleShiprocketOrderCloning(orderId, claimedProducts, orderProducts, vendor);
             } catch (firstError) {
               if (firstError.message && firstError.message.includes('already exists')) {
-                console.log(`⚠️ [${batchId}] Clone conflict, retrying with _99 suffix...`);
+                logger.info(`⚠️ [${batchId}] Clone conflict, retrying with _99 suffix...`);
                 try {
                   cloneResponse = await handleShiprocketOrderCloning(orderId, claimedProducts, orderProducts, vendor, '99');
                 } catch (retryError) {
@@ -5570,7 +5353,7 @@ router.post('/bulk-download-labels', async (req, res) => {
               throw new Error(`Clone order_id not found in clone response for order ${orderId}`);
             }
 
-            console.log(`✅ [${batchId}] Clone completed successfully. Fetching label for clone order: ${cloneOrderId}`);
+            logger.info(`✅ [${batchId}] Clone completed successfully. Fetching label for clone order: ${cloneOrderId}`);
 
             // Fetch label from DB (clone process already stored it)
             const cloneLabel = await database.getLabelByOrderId(cloneOrderId, accountCode);
@@ -5584,7 +5367,7 @@ router.post('/bulk-download-labels', async (req, res) => {
                 throw new Error(`Label not found in DB for clone order ${cloneOrderId} and not in clone response`);
               }
 
-              console.log(`⚠️ [${batchId}] Label not in DB yet, using clone response data for ${cloneOrderId}`);
+              logger.info(`⚠️ [${batchId}] Label not in DB yet, using clone response data for ${cloneOrderId}`);
               
               return {
                 success: true,
@@ -5602,7 +5385,7 @@ router.post('/bulk-download-labels', async (req, res) => {
             }
 
             // Label found in DB - return success with clone order_id
-            console.log(`✅ [${batchId}] Found label in DB for clone order ${cloneOrderId}`);
+            logger.info(`✅ [${batchId}] Found label in DB for clone order ${cloneOrderId}`);
             return {
               success: true,
               order_id: cloneOrderId,
@@ -5646,14 +5429,13 @@ router.post('/bulk-download-labels', async (req, res) => {
 
           let awbResult = null;
           for (let i = 0; i < carrierIds.length; i++) {
-            console.log(`  - [${batchId}] Trying carrier ${i + 1}/${carrierIds.length}: ${carrierIds[i]}`);
             const result = await shiprocketService.assignAWB(shipmentId, carrierIds[i]);
             if (result.success) {
               awbResult = result;
-              console.log(`  ✅ [${batchId}] AWB assigned: ${result.awb_code} (carrier: ${result.courier_name})`);
+              logger.info(`  ✅ [${batchId}] AWB assigned: ${result.awb_code} (carrier: ${result.courier_name})`);
               break;
             } else {
-              console.log(`  ❌ [${batchId}] Carrier ${carrierIds[i]} failed: ${result.message}`);
+              logger.info(`  ❌ [${batchId}] Carrier ${carrierIds[i]} failed: ${result.message}`);
             }
           }
 
@@ -5712,13 +5494,13 @@ router.post('/bulk-download-labels', async (req, res) => {
             labelResponse = await handleOrderCloning(orderId, claimedProducts, orderProducts, vendor);
           } catch (cloneError) {
             if (cloneError.message && cloneError.message.includes('not found in Shipway')) {
-              console.log(`⚠️ [${batchId}] CLONE CONFLICT DETECTED for ${orderId}`);
-              console.log(`🔄 [${batchId}] RETRYING: Using suffix _99...`);
+              logger.info(`⚠️ [${batchId}] CLONE CONFLICT DETECTED for ${orderId}`);
+              logger.info(`🔄 [${batchId}] RETRYING: Using suffix _99...`);
               try {
                 labelResponse = await handleOrderCloning(orderId, claimedProducts, orderProducts, vendor, '99');
-                console.log(`✅ [${batchId}] RETRY SUCCESSFUL with _99 suffix`);
+                logger.info(`✅ [${batchId}] RETRY SUCCESSFUL with _99 suffix`);
               } catch (retryError) {
-                console.error(`❌ [${batchId}] RETRY FAILED for ${orderId}`);
+                logger.error(`❌ [${batchId}] RETRY FAILED for ${orderId}`);
                 throw retryError;
               }
             } else {
@@ -5753,12 +5535,12 @@ router.post('/bulk-download-labels', async (req, res) => {
         }
 
       } catch (error) {
-        console.error(`❌ Error processing order ${orderId}:`, error);
+        logger.error(`❌ Error processing order ${orderId}:`, error);
 
         try {
           await createLabelGenerationNotification(error.message, orderId, vendor);
         } catch (notificationError) {
-          console.error(`⚠️ Failed to create notification for ${orderId}:`, notificationError.message);
+          logger.error(`⚠️ Failed to create notification for ${orderId}:`, notificationError.message);
         }
 
         return {
@@ -5778,7 +5560,7 @@ router.post('/bulk-download-labels', async (req, res) => {
 
     for (let i = 0; i < order_ids.length; i += CONCURRENCY_LIMIT) {
       const batch = order_ids.slice(i, i + CONCURRENCY_LIMIT);
-      console.log(`⚡ Processing batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1}: ${batch.length} orders (${i + 1}-${i + batch.length} of ${order_ids.length})`);
+      logger.info(`⚡ Processing batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1}: ${batch.length} orders (${i + 1}-${i + batch.length} of ${order_ids.length})`);
 
       const batchResults = await Promise.allSettled(
         batch.map(orderId => processSingleOrder(orderId))
@@ -5790,7 +5572,7 @@ router.post('/bulk-download-labels', async (req, res) => {
           if (orderResult.success) {
             // Skip if this order_id was already processed (prevent duplicates)
             if (processedOrderIds.has(orderResult.order_id)) {
-              console.log(`⚠️ [${batchId}] Skipping duplicate order_id: ${orderResult.order_id}`);
+              logger.info(`⚠️ [${batchId}] Skipping duplicate order_id: ${orderResult.order_id}`);
               return;
             }
             processedOrderIds.add(orderResult.order_id);
@@ -5823,14 +5605,14 @@ router.post('/bulk-download-labels', async (req, res) => {
         }
       });
 
-      console.log(`✅ Batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} complete: ${results.length} shipway done, ${shiprocketPending.length} shiprocket pending, ${errors.length} failed`);
+      logger.info(`✅ Batch ${Math.floor(i / CONCURRENCY_LIMIT) + 1} complete: ${results.length} shipway done, ${shiprocketPending.length} shiprocket pending, ${errors.length} failed`);
     }
 
     // ============================================================
     // SHIPROCKET POST-PROCESSING: Bulk label generation
     // ============================================================
     if (shiprocketPending.length > 0) {
-      console.log(`\n🏷️ [${batchId}] SHIPROCKET BULK LABEL GENERATION: ${shiprocketPending.length} orders`);
+      logger.info(`\n🏷️ [${batchId}] SHIPROCKET BULK LABEL GENERATION: ${shiprocketPending.length} orders`);
 
       // Group by account_code (different stores may need separate API calls)
       const groupedByAccount = {};
@@ -5855,10 +5637,8 @@ router.post('/bulk-download-labels', async (req, res) => {
           });
           const uniqueShipments = Array.from(uniqueShipmentsMap.values());
           
-          console.log(`  - Account ${accountCode}: ${shipments.length} shipments, ${uniqueShipments.length} unique orders`);
 
           const shipmentIds = uniqueShipments.map(s => s.shipment_id);
-          console.log(`  - Account ${accountCode}: generating labels for ${shipmentIds.length} shipments`);
 
           const labelResponse = await shiprocketService.generateLabel(shipmentIds, format);
 
@@ -5902,9 +5682,9 @@ router.post('/bulk-download-labels', async (req, res) => {
                   awb: shipment.awb
                 });
 
-                console.log(`  ✅ Label stored for ${shipment.order_id}`);
+                logger.info(`  ✅ Label stored for ${shipment.order_id}`);
               } catch (dbError) {
-                console.error(`  ⚠️ DB update failed for ${shipment.order_id}:`, dbError.message);
+                logger.error(`  ⚠️ DB update failed for ${shipment.order_id}:`, dbError.message);
                 errors.push({
                   order_id: shipment.order_id,
                   error: `DB update failed: ${dbError.message}`,
@@ -5923,7 +5703,7 @@ router.post('/bulk-download-labels', async (req, res) => {
             }
           }
         } catch (labelError) {
-          console.error(`❌ Shiprocket label generation failed for account ${accountCode}:`, labelError.message);
+          logger.error(`❌ Shiprocket label generation failed for account ${accountCode}:`, labelError.message);
           for (const shipment of shipments) {
             errors.push({
               order_id: shipment.order_id,
@@ -5934,24 +5714,18 @@ router.post('/bulk-download-labels', async (req, res) => {
         }
       }
 
-      console.log(`✅ [${batchId}] Shiprocket post-processing complete: ${results.length} total successful, ${errors.length} total failed`);
+      logger.info(`✅ [${batchId}] Shiprocket post-processing complete: ${results.length} total successful, ${errors.length} total failed`);
     }
 
     const requestEndTime = Date.now();
     const totalDuration = ((requestEndTime - requestStartTime) / 1000).toFixed(2);
     const avgTimePerOrder = order_ids.length > 0 ? (totalDuration / order_ids.length).toFixed(2) : '0.00';
 
-    console.log('📊 BULK DOWNLOAD LABELS COMPLETE:');
-    console.log(`  - [${batchId}] Total time: ${totalDuration} seconds`);
-    console.log(`  - [${batchId}] Orders processed: ${order_ids.length}`);
-    console.log(`  - [${batchId}] Average time per order: ${avgTimePerOrder} seconds`);
-    console.log(`  - [${batchId}] Successful: ${results.length}`);
-    console.log(`  - [${batchId}] Failed: ${errors.length}`);
+    logger.info('📊 BULK DOWNLOAD LABELS COMPLETE:');
 
     // Performance breakdown
     if (results.length > 0) {
       const avgTimePerSuccessful = (totalDuration / results.length).toFixed(2);
-      console.log(`  - [${batchId}] Average time per successful order: ${avgTimePerSuccessful} seconds`);
     }
 
     if (results.length === 0) {
@@ -6001,7 +5775,7 @@ router.post('/bulk-download-labels', async (req, res) => {
 
       if (verifiedLabels.length < uniqueSuccessfulOrderIds.length) {
         const missingOrderIds = uniqueSuccessfulOrderIds.filter(id => !verifiedLabels.some(label => label.order_id === id));
-        console.warn(`⚠️ [${batchId}] Only ${verifiedLabels.length}/${uniqueSuccessfulOrderIds.length} labels verified. Missing:`, missingOrderIds);
+        logger.warn(`⚠️ [${batchId}] Only ${verifiedLabels.length}/${uniqueSuccessfulOrderIds.length} labels verified. Missing:`, missingOrderIds);
         // Filter out unverified order_ids from successful list
         const verifiedOrderIds = verifiedLabels.map(label => label.order_id);
         // Deduplicate results and filter by verified order_ids
@@ -6053,7 +5827,7 @@ router.post('/bulk-download-labels', async (req, res) => {
     // This endpoint only generates labels and stores them in the database (generate_only=true)
 
   } catch (error) {
-    console.error('❌ BULK DOWNLOAD LABELS ERROR:', error);
+    logger.error('❌ BULK DOWNLOAD LABELS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to process bulk label download',
@@ -6126,7 +5900,7 @@ router.post('/bulk-download-labels-merge', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
@@ -6134,18 +5908,16 @@ router.post('/bulk-download-labels-merge', async (req, res) => {
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE');
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE');
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // Deduplicate order_ids before querying database (prevent duplicate labels)
     const uniqueOrderIds = [...new Set(order_ids)];
     if (uniqueOrderIds.length !== order_ids.length) {
-      console.log(`⚠️ Deduplicated order_ids: ${order_ids.length} → ${uniqueOrderIds.length} unique`);
+      logger.info(`⚠️ Deduplicated order_ids: ${order_ids.length} → ${uniqueOrderIds.length} unique`);
     }
 
     // Fetch label URLs from database using unique order_ids
@@ -6168,10 +5940,10 @@ router.post('/bulk-download-labels-merge', async (req, res) => {
       }
     }
 
-    console.log(`📦 Fetched ${labels.length}/${uniqueOrderIds.length} labels from database`);
+    logger.info(`📦 Fetched ${labels.length}/${uniqueOrderIds.length} labels from database`);
 
     if (labels.length === 0) {
-      console.error(`❌ No labels found after ${maxRetries} attempts for order_ids:`, uniqueOrderIds);
+      logger.error(`❌ No labels found after ${maxRetries} attempts for order_ids:`, uniqueOrderIds);
       return res.status(400).json({
         success: false,
         message: 'No labels found for the specified order_ids. Please generate labels first and wait a moment before merging.'
@@ -6188,12 +5960,12 @@ router.post('/bulk-download-labels-merge', async (req, res) => {
     const uniqueLabels = Array.from(uniqueLabelsMap.values());
     
     if (uniqueLabels.length !== labels.length) {
-      console.log(`⚠️ Deduplicated labels: ${labels.length} → ${uniqueLabels.length} unique`);
+      logger.info(`⚠️ Deduplicated labels: ${labels.length} → ${uniqueLabels.length} unique`);
     }
 
     if (uniqueLabels.length < uniqueOrderIds.length) {
       const missingOrderIds = uniqueOrderIds.filter(id => !uniqueLabels.some(label => label.order_id === id));
-      console.warn(`⚠️ Only found ${uniqueLabels.length}/${uniqueOrderIds.length} labels. Missing order_ids:`, missingOrderIds);
+      logger.warn(`⚠️ Only found ${uniqueLabels.length}/${uniqueOrderIds.length} labels. Missing order_ids:`, missingOrderIds);
       // Continue with available labels, but log the missing ones
     }
 
@@ -6223,7 +5995,7 @@ router.post('/bulk-download-labels-merge', async (req, res) => {
     res.send(combinedPdfBuffer);
 
   } catch (error) {
-    console.error('❌ BULK DOWNLOAD LABELS MERGE ERROR:', error);
+    logger.error('❌ BULK DOWNLOAD LABELS MERGE ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to merge labels',
@@ -6241,12 +6013,10 @@ router.post('/download-pdf', async (req, res) => {
   const { pdfUrl } = req.body;
   const token = req.headers['authorization'];
 
-  console.log('🔵 DOWNLOAD PDF PROXY REQUEST START');
-  console.log('  - PDF URL:', pdfUrl);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  logger.info('🔵 DOWNLOAD PDF PROXY REQUEST START');
 
   if (!pdfUrl || !token) {
-    console.log('❌ DOWNLOAD PDF PROXY FAILED: Missing required fields');
+    logger.info('❌ DOWNLOAD PDF PROXY FAILED: Missing required fields');
     return res.status(400).json({
       success: false,
       message: 'pdfUrl and Authorization token required'
@@ -6261,24 +6031,22 @@ router.post('/download-pdf', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // Fetch PDF from Shipway
-    console.log('🔄 Fetching PDF from Shipway...');
-    console.log('⏱️ Timeout: 30 seconds');
+    logger.info('🔄 Fetching PDF from Shipway...');
+    logger.info('⏱️ Timeout: 30 seconds');
 
     // OPTIMIZATION #4: Add 30-second timeout to prevent hanging
     const controller = new AbortController();
@@ -6294,7 +6062,7 @@ router.post('/download-pdf', async (req, res) => {
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError.name === 'AbortError') {
-        console.error('❌ PDF fetch request timed out after 30 seconds');
+        logger.error('❌ PDF fetch request timed out after 30 seconds');
         throw new Error('PDF fetch request timed out. The request took longer than 30 seconds. Please try again.');
       }
       throw fetchError; // Re-throw other errors
@@ -6311,8 +6079,7 @@ router.post('/download-pdf', async (req, res) => {
       throw new Error('Received empty or invalid PDF buffer');
     }
 
-    console.log('✅ PDF fetched successfully');
-    console.log('  - Size:', pdfBuffer.byteLength, 'bytes');
+    logger.info('✅ PDF fetched successfully');
 
     // Set response headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
@@ -6330,7 +6097,7 @@ router.post('/download-pdf', async (req, res) => {
     res.send(Buffer.from(pdfBuffer));
 
   } catch (error) {
-    console.error('❌ DOWNLOAD PDF PROXY ERROR:', error);
+    logger.error('❌ DOWNLOAD PDF PROXY ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to download PDF',
@@ -6344,7 +6111,7 @@ router.post('/download-pdf', async (req, res) => {
  */
 async function generateCombinedLabelsPDF(labels, format = 'thermal') {
   try {
-    console.log(`🔄 Generating combined PDF for ${labels.length} labels in ${format} format`);
+    logger.info(`🔄 Generating combined PDF for ${labels.length} labels in ${format} format`);
 
     // Group labels by shipping_url to avoid downloading the same PDF multiple times
     // This is important for Shiprocket bulk labels where multiple orders share the same URL
@@ -6357,9 +6124,8 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
     });
 
     const uniqueUrls = Array.from(labelsByUrl.keys());
-    console.log(`📦 Grouped ${labels.length} labels into ${uniqueUrls.length} unique URLs`);
+    logger.info(`📦 Grouped ${labels.length} labels into ${uniqueUrls.length} unique URLs`);
     labelsByUrl.forEach((labelGroup, url) => {
-      console.log(`  - URL: ${url.substring(0, 80)}... (${labelGroup.length} order(s))`);
     });
 
     // Import PDF-lib for PDF manipulation
@@ -6370,41 +6136,39 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
 
     if (format === 'thermal') {
       // ⚡ PARALLEL OPTIMIZATION: Download each unique URL only once
-      console.log(`⚡ Downloading ${uniqueUrls.length} unique PDFs in parallel...`);
+      logger.info(`⚡ Downloading ${uniqueUrls.length} unique PDFs in parallel...`);
 
       // Download each unique URL only once
       const downloadPromises = uniqueUrls.map(async (url) => {
         try {
           const orderIds = labelsByUrl.get(url).map(l => l.order_id).join(', ');
-          console.log(`  - Downloading PDF for orders: ${orderIds}`);
 
           const response = await fetch(url);
           if (!response.ok) {
-            console.log(`    ⚠️ Failed to fetch PDF:`, response.status);
+            logger.info(`    ⚠️ Failed to fetch PDF:`, response.status);
             return { url, pdfBuffer: null, error: `HTTP ${response.status}`, orderIds };
           }
 
           const pdfBuffer = await response.arrayBuffer();
-          console.log(`    ✅ Downloaded PDF (${pdfBuffer.byteLength} bytes) for orders: ${orderIds}`);
+          logger.info(`    ✅ Downloaded PDF (${pdfBuffer.byteLength} bytes) for orders: ${orderIds}`);
 
           return { url, pdfBuffer, error: null, orderIds };
         } catch (error) {
           const orderIds = labelsByUrl.get(url).map(l => l.order_id).join(', ');
-          console.log(`    ❌ Error downloading PDF for orders ${orderIds}:`, error.message);
+          logger.info(`    ❌ Error downloading PDF for orders ${orderIds}:`, error.message);
           return { url, pdfBuffer: null, error: error.message, orderIds };
         }
       });
 
       // Wait for all downloads to complete
       const downloadResults = await Promise.allSettled(downloadPromises);
-      console.log(`✅ All unique PDFs downloaded, now merging...`);
+      logger.info(`✅ All unique PDFs downloaded, now merging...`);
 
       // Merge each unique PDF only once
       for (const result of downloadResults) {
         if (result.status === 'fulfilled' && result.value.pdfBuffer) {
           try {
             const { url, pdfBuffer, orderIds } = result.value;
-            console.log(`  - Merging PDF for orders: ${orderIds}`);
 
             // Load the PDF
             const pdf = await PDFDocument.load(pdfBuffer);
@@ -6413,49 +6177,48 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
             const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
             pages.forEach(page => mergedPdf.addPage(page));
 
-            console.log(`    ✅ Added PDF (${pages.length} page(s)) for orders: ${orderIds}`);
+            logger.info(`    ✅ Added PDF (${pages.length} page(s)) for orders: ${orderIds}`);
           } catch (labelError) {
             const orderIds = result.value?.orderIds || 'unknown';
-            console.log(`    ❌ Error processing PDF for orders ${orderIds}:`, labelError.message);
+            logger.info(`    ❌ Error processing PDF for orders ${orderIds}:`, labelError.message);
           }
         } else if (result.status === 'fulfilled') {
           const orderIds = result.value?.orderIds || 'unknown';
-          console.log(`    ⚠️ Skipping PDF for orders ${orderIds}: ${result.value?.error}`);
+          logger.info(`    ⚠️ Skipping PDF for orders ${orderIds}: ${result.value?.error}`);
         } else {
-          console.log(`    ❌ Promise rejected:`, result.reason?.message);
+          logger.info(`    ❌ Promise rejected:`, result.reason?.message);
         }
       }
     } else {
       // For A4 and four-in-one formats, process labels in batches
-      console.log(`📄 Processing labels in ${format} format batches`);
+      logger.info(`📄 Processing labels in ${format} format batches`);
 
       // ⚡ PARALLEL OPTIMIZATION: Download each unique URL only once
-      console.log(`⚡ Downloading ${uniqueUrls.length} unique PDFs in parallel for ${format} format...`);
+      logger.info(`⚡ Downloading ${uniqueUrls.length} unique PDFs in parallel for ${format} format...`);
 
       const downloadPromises = uniqueUrls.map(async (url) => {
         try {
           const orderIds = labelsByUrl.get(url).map(l => l.order_id).join(', ');
-          console.log(`  - Downloading PDF for orders: ${orderIds}`);
 
           const response = await fetch(url);
           if (!response.ok) {
-            console.log(`    ⚠️ Failed to fetch PDF:`, response.status);
+            logger.info(`    ⚠️ Failed to fetch PDF:`, response.status);
             return { url, pdfBuffer: null, error: `HTTP ${response.status}`, orderIds };
           }
 
           const pdfBuffer = await response.arrayBuffer();
-          console.log(`    ✅ Downloaded PDF (${pdfBuffer.byteLength} bytes) for orders: ${orderIds}`);
+          logger.info(`    ✅ Downloaded PDF (${pdfBuffer.byteLength} bytes) for orders: ${orderIds}`);
 
           return { url, pdfBuffer, error: null, orderIds, labels: labelsByUrl.get(url) };
         } catch (error) {
           const orderIds = labelsByUrl.get(url).map(l => l.order_id).join(', ');
-          console.log(`    ❌ Error downloading PDF for orders ${orderIds}:`, error.message);
+          logger.info(`    ❌ Error downloading PDF for orders ${orderIds}:`, error.message);
           return { url, pdfBuffer: null, error: error.message, orderIds, labels: labelsByUrl.get(url) };
         }
       });
 
       const downloadResults = await Promise.allSettled(downloadPromises);
-      console.log(`✅ All unique PDFs downloaded for ${format} format, now processing...`);
+      logger.info(`✅ All unique PDFs downloaded for ${format} format, now processing...`);
 
       // Extract successful downloads (each contains labels for that URL)
       const successfulDownloads = downloadResults
@@ -6467,7 +6230,6 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
         // Process each unique PDF and add all its pages
         for (const { url, pdfBuffer, labels: labelGroup, orderIds } of successfulDownloads) {
           try {
-            console.log(`  - Processing A4 PDF for orders: ${orderIds}`);
 
             const originalPdf = await PDFDocument.load(pdfBuffer);
             const pageCount = originalPdf.getPageCount();
@@ -6491,10 +6253,10 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
               });
             }
 
-            console.log(`    ✅ Added A4 PDF (${pageCount} page(s)) for orders: ${orderIds}`);
+            logger.info(`    ✅ Added A4 PDF (${pageCount} page(s)) for orders: ${orderIds}`);
 
           } catch (labelError) {
-            console.log(`    ❌ Error processing A4 PDF for orders ${orderIds}:`, labelError.message);
+            logger.info(`    ❌ Error processing A4 PDF for orders ${orderIds}:`, labelError.message);
           }
         }
       } else if (format === 'four-in-one') {
@@ -6512,9 +6274,8 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
               allPages.push(originalPage);
             }
             
-            console.log(`  - Extracted ${pageCount} page(s) from PDF for orders: ${orderIds}`);
           } catch (error) {
-            console.log(`    ❌ Error extracting pages from PDF for orders ${orderIds}:`, error.message);
+            logger.info(`    ❌ Error extracting pages from PDF for orders ${orderIds}:`, error.message);
           }
         }
 
@@ -6522,7 +6283,6 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
         const batchSize = 4;
         for (let i = 0; i < allPages.length; i += batchSize) {
           const batch = allPages.slice(i, i + batchSize);
-          console.log(`  - Processing four-in-one batch ${Math.floor(i / batchSize) + 1} (${batch.length} pages)`);
 
           const a4Page = mergedPdf.addPage([595, 842]); // A4 size in points
 
@@ -6565,10 +6325,10 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
                 height: scaledLabelHeight
               });
 
-              console.log(`    ✅ Added page at position ${j + 1}`);
+              logger.info(`    ✅ Added page at position ${j + 1}`);
 
             } catch (labelError) {
-              console.log(`    ❌ Error processing page at position ${j + 1}:`, labelError.message);
+              logger.info(`    ❌ Error processing page at position ${j + 1}:`, labelError.message);
             }
           }
         }
@@ -6577,12 +6337,12 @@ async function generateCombinedLabelsPDF(labels, format = 'thermal') {
 
     // Save the merged PDF
     const mergedPdfBytes = await mergedPdf.save();
-    console.log(`✅ Combined PDF generated successfully in ${format} format`);
+    logger.info(`✅ Combined PDF generated successfully in ${format} format`);
 
     return Buffer.from(mergedPdfBytes);
 
   } catch (error) {
-    console.error('❌ Combined PDF generation failed:', error);
+    logger.error('❌ Combined PDF generation failed:', error);
     throw error;
   }
 }
@@ -6596,12 +6356,10 @@ router.post('/mark-ready', async (req, res) => {
   const { order_id } = req.body;
   const token = req.headers['authorization'];
 
-  console.log('🔵 MARK READY REQUEST START');
-  console.log('  - order_id:', order_id);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  logger.info('🔵 MARK READY REQUEST START');
 
   if (!order_id || !token) {
-    console.log('❌ MARK READY FAILED: Missing required fields');
+    logger.info('❌ MARK READY FAILED: Missing required fields');
     return res.status(400).json({
       success: false,
       message: 'order_id and Authorization token required'
@@ -6616,20 +6374,18 @@ router.post('/mark-ready', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // 3.3 — Targeted query: fetch only rows for this order_id (was: getAllOrders() + filter)
     const orderProducts = await database.getOrdersByOrderId(order_id);
@@ -6638,7 +6394,7 @@ router.post('/mark-ready', async (req, res) => {
     );
 
     if (claimedProducts.length === 0) {
-      console.log('❌ No products claimed by this vendor for order:', order_id);
+      logger.info('❌ No products claimed by this vendor for order:', order_id);
       return res.status(400).json({
         success: false,
         message: 'No products claimed by this vendor for this order'
@@ -6648,45 +6404,43 @@ router.post('/mark-ready', async (req, res) => {
     // Check if label is downloaded for all claimed products
     const productsWithoutLabel = claimedProducts.filter(product => product.label_downloaded !== 1);
     if (productsWithoutLabel.length > 0) {
-      console.log(`❌ Label not downloaded for order: ${order_id}`);
+      logger.info(`❌ Label not downloaded for order: ${order_id}`);
       return res.status(400).json({
         success: false,
         message: `Label is not yet downloaded for order id - ${order_id}`
       });
     }
 
-    console.log('✅ Order verification passed');
-    console.log('  - Total products in order:', orderProducts.length);
-    console.log('  - Products claimed by vendor:', claimedProducts.length);
+    logger.info('✅ Order verification passed');
 
     // Get account_code from the first claimed product (REQUIRED)
     const accountCode = claimedProducts[0]?.account_code;
     if (!accountCode) {
-      console.log('❌ ACCOUNT_CODE NOT FOUND for order:', order_id);
+      logger.info('❌ ACCOUNT_CODE NOT FOUND for order:', order_id);
       return res.status(400).json({
         success: false,
         message: 'Store information not found for this order. Cannot mark as ready.'
       });
     }
 
-    console.log('✅ Account code found:', accountCode);
+    logger.info('✅ Account code found:', accountCode);
 
     // Call Shipway Create Manifest API with account_code
-    console.log('🔄 Calling Shipway Create Manifest API...');
+    logger.info('🔄 Calling Shipway Create Manifest API...');
     const manifestResponse = await callShipwayCreateManifestAPI(order_id, accountCode);
 
     if (!manifestResponse.success) {
-      console.log('❌ Shipway manifest API failed:', manifestResponse.message);
+      logger.info('❌ Shipway manifest API failed:', manifestResponse.message);
       return res.status(500).json({
         success: false,
         message: 'Failed to create manifest: ' + manifestResponse.message
       });
     }
 
-    console.log('✅ Shipway manifest API successful');
-
-    // Set is_manifest = 1 and manifest_id in labels table
-    console.log('🔄 Setting is_manifest = 1 and manifest_id in labels table...');
+    // 6.5 — Wrap upsertLabel (is_manifest=1) + all status updates in one transaction.
+    // Without a transaction, a crash after upsertLabel but before all updateOrder
+    // calls could leave some products stuck in 'claimed' while the manifest is already set.
+    logger.info('🔄 Setting is_manifest = 1, manifest_id, and status = ready_for_handover (transactional)...');
     const labelData = {
       order_id: order_id,
       account_code: accountCode,
@@ -6694,26 +6448,18 @@ router.post('/mark-ready', async (req, res) => {
       manifest_id: manifestResponse.manifest_id
     };
 
-    await database.upsertLabel(labelData);
-    console.log(`  ✅ Set is_manifest = 1 for order ${order_id}`);
-    console.log(`  ✅ Set manifest_id = ${manifestResponse.manifest_id} for order ${order_id}`);
+    const txManager = new TransactionManager(database.pool);
+    await txManager.runInTransaction(async (conn) => {
+      await database.upsertLabel(labelData, conn);
+      for (const product of claimedProducts) {
+        await database.updateOrder(product.unique_id, { status: 'ready_for_handover' }, conn);
+      }
+    });
 
-    // Update order status to ready_for_handover after setting is_manifest
-    console.log('🔄 Updating order status to ready_for_handover...');
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-
-    for (const product of claimedProducts) {
-      await database.updateOrder(product.unique_id, {
-        status: 'ready_for_handover'
-      });
-      console.log(`  ✅ Updated product ${product.unique_id} status to ready_for_handover`);
-    }
-
-    console.log('🟢 MARK READY SUCCESS');
-    console.log(`  - Order ${order_id} marked as ready for handover`);
-    console.log(`  - Manifest created successfully`);
-    console.log(`  - is_manifest flag set to 1`);
-    console.log(`  - manifest_id: ${manifestResponse.manifest_id}`);
+    logger.info(`  ✅ Set is_manifest = 1 for order ${order_id}`);
+    logger.info(`  ✅ Set manifest_id = ${manifestResponse.manifest_id} for order ${order_id}`);
+    logger.info(`  ✅ All ${claimedProducts.length} products set to ready_for_handover (transactional)`);
+    logger.info('🟢 MARK READY SUCCESS');
 
     return res.json({
       success: true,
@@ -6728,7 +6474,7 @@ router.post('/mark-ready', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ MARK READY ERROR:', error);
+    logger.error('❌ MARK READY ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to mark order as ready',
@@ -6746,14 +6492,12 @@ router.post('/bulk-mark-ready', async (req, res) => {
   const { order_ids } = req.body;
   const token = req.headers['authorization'];
 
-  console.log('🔵 BULK MARK READY REQUEST START');
-  console.log('  - order_ids:', order_ids);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  logger.info('🔵 BULK MARK READY REQUEST START');
 
   // 5.1 + 5.2 — Batch size limit + type validation
   const arrayCheck = validateBulkArray(order_ids, 'order_ids');
   if (!arrayCheck.ok || !token) {
-    console.log('❌ BULK MARK READY FAILED: Missing or invalid required fields');
+    logger.info('❌ BULK MARK READY FAILED: Missing or invalid required fields');
     return res.status(400).json({
       success: false,
       message: arrayCheck.ok ? 'order_ids array and Authorization token required' : arrayCheck.message
@@ -6769,26 +6513,24 @@ router.post('/bulk-mark-ready', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // OPTIMIZATION: Fetch only selected orders instead of all orders
     // This reduces query time from 5-10 seconds to 0.1-0.5 seconds
-    console.log(`📦 Fetching only selected orders (${order_ids.length} orders)...`);
+    logger.info(`📦 Fetching only selected orders (${order_ids.length} orders)...`);
     const orders = await database.getOrdersByOrderIds(order_ids);
-    console.log(`✅ Fetched ${orders.length} products from ${order_ids.length} orders`);
+    logger.info(`✅ Fetched ${orders.length} products from ${order_ids.length} orders`);
     const successfulOrders = [];
     const failedOrders = [];
     const validOrderIds = [];
@@ -6797,7 +6539,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
     // First, validate all orders
     for (const order_id of order_ids) {
       try {
-        console.log(`🔍 Validating order: ${order_id}`);
+        logger.info(`🔍 Validating order: ${order_id}`);
 
         const orderProducts = orders.filter(order => order.order_id === order_id);
         const claimedProducts = orderProducts.filter(order =>
@@ -6805,7 +6547,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
         );
 
         if (claimedProducts.length === 0) {
-          console.log(`❌ No products claimed by this vendor for order: ${order_id}`);
+          logger.info(`❌ No products claimed by this vendor for order: ${order_id}`);
           failedOrders.push({
             order_id: order_id,
             reason: 'No products claimed by this vendor for this order'
@@ -6816,7 +6558,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
         // Check if label is downloaded for all claimed products
         const productsWithoutLabel = claimedProducts.filter(product => product.label_downloaded !== 1);
         if (productsWithoutLabel.length > 0) {
-          console.log(`❌ Label not downloaded for order: ${order_id}`);
+          logger.info(`❌ Label not downloaded for order: ${order_id}`);
           failedOrders.push({
             order_id: order_id,
             reason: `Label is not yet downloaded for order id - ${order_id}`
@@ -6824,11 +6566,11 @@ router.post('/bulk-mark-ready', async (req, res) => {
           continue;
         }
 
-        console.log(`✅ Order validation passed for ${order_id}`);
+        logger.info(`✅ Order validation passed for ${order_id}`);
         validOrderIds.push(order_id);
 
       } catch (error) {
-        console.error(`❌ Error validating order ${order_id}:`, error);
+        logger.error(`❌ Error validating order ${order_id}:`, error);
         failedOrders.push({
           order_id: order_id,
           reason: error.message
@@ -6838,7 +6580,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
 
     // If we have valid orders, split by payment_type AND account_code and call manifest API separately
     if (validOrderIds.length > 0) {
-      console.log(`🔄 Processing ${validOrderIds.length} valid orders...`);
+      logger.info(`🔄 Processing ${validOrderIds.length} valid orders...`);
 
       // Step 1: Group orders by payment_type AND account_code (to ensure store isolation)
       // Structure: { 'C-STRI': [order_ids], 'C-JERS': [order_ids], 'P-STRI': [order_ids], 'P-JERS': [order_ids] }
@@ -6855,7 +6597,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
         const accountCode = claimedProducts[0]?.account_code;
 
         if (!accountCode) {
-          console.error(`❌ ACCOUNT_CODE NOT FOUND for order ${order_id}`);
+          logger.error(`❌ ACCOUNT_CODE NOT FOUND for order ${order_id}`);
           failedOrders.push({
             order_id: order_id,
             reason: 'Store information not found for this order'
@@ -6875,22 +6617,21 @@ router.post('/bulk-mark-ready', async (req, res) => {
         orderGroups[groupKey].orderIds.push(order_id);
       }
 
-      console.log(`📊 Orders grouped by payment type and account_code:`);
+      logger.info(`📊 Orders grouped by payment type and account_code:`);
       for (const [groupKey, group] of Object.entries(orderGroups)) {
-        console.log(`  - ${groupKey}: ${group.orderIds.length} orders (${group.orderIds.join(', ')})`);
       }
 
       // Step 2: Check shipping partner and route accordingly
       // Separate Shiprocket and Shipway orders
       // OPTIMIZATION: Fetch all stores in parallel instead of sequentially
       const uniqueAccountCodes = [...new Set(Object.values(orderGroups).map(g => g.accountCode))];
-      console.log(`📦 Fetching store info for ${uniqueAccountCodes.length} unique account code(s) in parallel...`);
+      logger.info(`📦 Fetching store info for ${uniqueAccountCodes.length} unique account code(s) in parallel...`);
       const storePromises = uniqueAccountCodes.map(accountCode => 
         database.getStoreByAccountCode(accountCode).then(store => ({ accountCode, store }))
       );
       const storeResults = await Promise.all(storePromises);
       const storeMap = new Map(storeResults.map(({ accountCode, store }) => [accountCode, store]));
-      console.log(`✅ Fetched store info for ${storeMap.size} stores`);
+      logger.info(`✅ Fetched store info for ${storeMap.size} stores`);
 
       const shiprocketGroups = [];
       const shipwayGroups = [];
@@ -6910,11 +6651,11 @@ router.post('/bulk-mark-ready', async (req, res) => {
         const { paymentType, accountCode, orderIds } = group;
         const paymentTypeName = paymentType === 'C' ? 'COD' : 'Prepaid';
 
-        console.log(`🔄 Calling Shipway Create Manifest API for ${paymentTypeName} orders (${accountCode})...`);
+        logger.info(`🔄 Calling Shipway Create Manifest API for ${paymentTypeName} orders (${accountCode})...`);
         const manifestResponse = await callShipwayCreateManifestAPI(orderIds, accountCode);
 
         if (!manifestResponse.success) {
-          console.log(`❌ ${paymentTypeName} manifest creation failed for ${accountCode}:`, manifestResponse.message);
+          logger.info(`❌ ${paymentTypeName} manifest creation failed for ${accountCode}:`, manifestResponse.message);
           orderIds.forEach(order_id => {
             failedOrders.push({
               order_id: order_id,
@@ -6922,8 +6663,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
             });
           });
         } else {
-          console.log(`✅ ${paymentTypeName} Manifest created successfully for ${accountCode}`);
-          console.log(`  - Manifest ID: ${manifestResponse.manifest_id}`);
+          logger.info(`✅ ${paymentTypeName} Manifest created successfully for ${accountCode}`);
           manifestIds.push(manifestResponse.manifest_id);
 
           // Process each order in this group
@@ -6935,7 +6675,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
               );
 
               // Set is_manifest = 1 and manifest_id in labels table
-              console.log(`🔄 Setting manifest data for ${paymentTypeName} order ${order_id} (${accountCode})...`);
+              logger.info(`🔄 Setting manifest data for ${paymentTypeName} order ${order_id} (${accountCode})...`);
               const labelData = {
                 order_id: order_id,
                 account_code: accountCode,
@@ -6944,7 +6684,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
               };
 
               await database.upsertLabel(labelData);
-              console.log(`  ✅ Set manifest_id = ${manifestResponse.manifest_id} for order ${order_id}`);
+              logger.info(`  ✅ Set manifest_id = ${manifestResponse.manifest_id} for order ${order_id}`);
 
               // Update order status to ready_for_handover
               for (const product of claimedProducts) {
@@ -6964,7 +6704,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
               });
 
             } catch (error) {
-              console.error(`❌ Error updating ${paymentTypeName} order ${order_id}:`, error);
+              logger.error(`❌ Error updating ${paymentTypeName} order ${order_id}:`, error);
               failedOrders.push({
                 order_id: order_id,
                 reason: error.message
@@ -6978,8 +6718,8 @@ router.post('/bulk-mark-ready', async (req, res) => {
       // Shipway orders are already processed above, so we only need format for Shiprocket
       if (shiprocketGroups.length > 0) {
         const shiprocketOrderIds = shiprocketGroups.flatMap(g => g.orderIds);
-        console.log(`🔵 Orders requiring format selection detected: ${shiprocketOrderIds.join(', ')}`);
-        console.log(`   → Shipway orders already processed. Returning response to trigger format popup.`);
+        logger.info(`🔵 Orders requiring format selection detected: ${shiprocketOrderIds.join(', ')}`);
+        logger.info(`   → Shipway orders already processed. Returning response to trigger format popup.`);
         
         // Return response indicating format is needed
         // Include Shipway results if any were processed
@@ -7005,10 +6745,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
       }
     }
 
-    console.log('🟢 BULK MARK READY COMPLETE');
-    console.log(`  - Successful orders: ${successfulOrders.length}`);
-    console.log(`  - Failed orders: ${failedOrders.length}`);
-    console.log(`  - Manifest IDs created: ${manifestIds.join(', ')}`);
+    logger.info('🟢 BULK MARK READY COMPLETE');
 
     if (successfulOrders.length === 0) {
       return res.status(400).json({
@@ -7039,7 +6776,7 @@ router.post('/bulk-mark-ready', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ BULK MARK READY ERROR:', error);
+    logger.error('❌ BULK MARK READY ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to mark orders as ready',
@@ -7057,9 +6794,7 @@ router.post('/shiprocket/start-pickup', async (req, res) => {
   const { order_ids } = req.body;
   const token = req.headers['authorization'];
 
-  console.log('🔵 SHIPROCKET START PICKUP REQUEST');
-  console.log('  - order_ids:', order_ids);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  logger.info('🔵 SHIPROCKET START PICKUP REQUEST');
 
   if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token) {
     return res.status(400).json({
@@ -7139,10 +6874,10 @@ router.post('/shiprocket/start-pickup', async (req, res) => {
           try {
             const result = await shiprocketService.generatePickup(orderDetail.shipmentId);
             if (result.success) {
-              console.log(`✅ Pickup requested for shipment ${orderDetail.shipmentId} (attempt ${attempt})`);
+              logger.info(`✅ Pickup requested for shipment ${orderDetail.shipmentId} (attempt ${attempt})`);
               return { success: true, shipmentId: orderDetail.shipmentId };
             } else {
-              console.log(`⚠️ Pickup failed for shipment ${orderDetail.shipmentId} (attempt ${attempt}): ${result.message}`);
+              logger.info(`⚠️ Pickup failed for shipment ${orderDetail.shipmentId} (attempt ${attempt}): ${result.message}`);
               shiprocketService.logApiActivity({
                 type: 'shiprocket-pickup-failure',
                 shipmentId: orderDetail.shipmentId,
@@ -7156,7 +6891,7 @@ router.post('/shiprocket/start-pickup', async (req, res) => {
               attempt++;
             }
           } catch (error) {
-            console.error(`❌ Pickup error for shipment ${orderDetail.shipmentId} (attempt ${attempt}):`, error.message);
+            logger.error(`❌ Pickup error for shipment ${orderDetail.shipmentId} (attempt ${attempt}):`, error.message);
             shiprocketService.logApiActivity({
               type: 'shiprocket-pickup-error',
               shipmentId: orderDetail.shipmentId,
@@ -7170,7 +6905,7 @@ router.post('/shiprocket/start-pickup', async (req, res) => {
             attempt++;
           }
         }
-        console.log(`❌ Pickup failed after 3 attempts for shipment ${orderDetail.shipmentId}`);
+        logger.info(`❌ Pickup failed after 3 attempts for shipment ${orderDetail.shipmentId}`);
         return { success: false, shipmentId: orderDetail.shipmentId };
       })();
       
@@ -7189,11 +6924,11 @@ router.post('/shiprocket/start-pickup', async (req, res) => {
     Promise.allSettled(pickupPromises).then(results => {
       const successCount = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
       const failCount = results.length - successCount;
-      console.log(`📊 Pickup API calls completed: ${successCount} success, ${failCount} failed`);
+      logger.info(`📊 Pickup API calls completed: ${successCount} success, ${failCount} failed`);
     });
 
   } catch (error) {
-    console.error('❌ SHIPROCKET START PICKUP ERROR:', error);
+    logger.error('❌ SHIPROCKET START PICKUP ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to start pickup requests',
@@ -7219,13 +6954,10 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
   const { order_ids, format } = req.body;
   const token = req.headers['authorization'];
 
-  console.log('🔵 SHIPROCKET MANIFEST REQUEST START');
-  console.log('  - order_ids:', order_ids);
-  console.log('  - format:', format);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  logger.info('🔵 SHIPROCKET MANIFEST REQUEST START');
 
   if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0 || !token || !format) {
-    console.log('❌ SHIPROCKET MANIFEST FAILED: Missing required fields');
+    logger.info('❌ SHIPROCKET MANIFEST FAILED: Missing required fields');
     return res.status(400).json({
       success: false,
       message: 'order_ids array, format, and Authorization token required'
@@ -7237,25 +6969,23 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE');
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE');
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // OPTIMIZATION: Fetch only selected orders instead of all orders
     // This reduces query time from 5-10 seconds to 0.1-0.5 seconds
-    console.log(`📦 Fetching only selected orders (${order_ids.length} orders)...`);
+    logger.info(`📦 Fetching only selected orders (${order_ids.length} orders)...`);
     const orders = await database.getOrdersByOrderIds(order_ids);
-    console.log(`✅ Fetched ${orders.length} products from ${order_ids.length} orders`);
+    logger.info(`✅ Fetched ${orders.length} products from ${order_ids.length} orders`);
 
     // Get orders and validate
     const validOrderIds = [];
@@ -7268,13 +6998,13 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
       );
 
       if (claimedProducts.length === 0) {
-        console.log(`❌ No products claimed by this vendor for order: ${order_id}`);
+        logger.info(`❌ No products claimed by this vendor for order: ${order_id}`);
         continue;
       }
 
       const productsWithoutLabel = claimedProducts.filter(product => product.label_downloaded !== 1);
       if (productsWithoutLabel.length > 0) {
-        console.log(`❌ Label not downloaded for order: ${order_id}`);
+        logger.info(`❌ Label not downloaded for order: ${order_id}`);
         continue;
       }
 
@@ -7284,7 +7014,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
         .filter(id => id && id !== '' && id !== null);
 
       if (shipmentIds.length === 0) {
-        console.log(`❌ No shipment_id found for order: ${order_id}`);
+        logger.info(`❌ No shipment_id found for order: ${order_id}`);
         continue;
       }
 
@@ -7310,19 +7040,19 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
 
     // OPTIMIZATION: Fetch all stores in parallel to check shipping partner
     const uniqueAccountCodes = [...new Set(orderDetails.map(od => od.account_code))];
-    console.log(`📦 Fetching store info for ${uniqueAccountCodes.length} unique account code(s) in parallel...`);
+    logger.info(`📦 Fetching store info for ${uniqueAccountCodes.length} unique account code(s) in parallel...`);
     const storePromises = uniqueAccountCodes.map(accountCode => 
       database.getStoreByAccountCode(accountCode).then(store => ({ accountCode, store }))
     );
     const storeResults = await Promise.all(storePromises);
     const storeMap = new Map(storeResults.map(({ accountCode, store }) => [accountCode, store]));
-    console.log(`✅ Fetched store info for ${storeMap.size} stores`);
+    logger.info(`✅ Fetched store info for ${storeMap.size} stores`);
 
     // Filter out non-Shiprocket orders
     const shiprocketOrderDetails = orderDetails.filter(orderDetail => {
       const store = storeMap.get(orderDetail.account_code);
       if (!store || store.shipping_partner?.toLowerCase() !== 'shiprocket') {
-        console.log(`❌ Order ${orderDetail.order_id} is not a Shiprocket order (${orderDetail.account_code})`);
+        logger.info(`❌ Order ${orderDetail.order_id} is not a Shiprocket order (${orderDetail.account_code})`);
         return false;
       }
       return true;
@@ -7336,7 +7066,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
     }
 
     // Step 1: Call pickup API for all shipments (with retries)
-    console.log('📋 Step 1: Calling pickup API for all shipments...');
+    logger.info('📋 Step 1: Calling pickup API for all shipments...');
 
     // Collect all shipment_ids
     const allShipmentIds = [];
@@ -7355,7 +7085,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
     }
 
     // Call pickup API for all shipments in parallel (with retries)
-    console.log(`🔄 Calling pickup API for ${allShipmentIds.length} shipments (parallel processing)...`);
+    logger.info(`🔄 Calling pickup API for ${allShipmentIds.length} shipments (parallel processing)...`);
     const ShiprocketService = require('../services/shiprocketService');
     const processedShipmentIds = new Set();
     const pickupPromises = [];
@@ -7378,10 +7108,10 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
           try {
             const result = await shiprocketService.generatePickup(shipmentId);
             if (result.success) {
-              console.log(`✅ Pickup requested for shipment ${shipmentId} (attempt ${attempt})`);
+              logger.info(`✅ Pickup requested for shipment ${shipmentId} (attempt ${attempt})`);
               return { success: true, shipmentId, attempt };
             } else {
-              console.log(`⚠️ Pickup failed for shipment ${shipmentId} (attempt ${attempt}): ${result.message}`);
+              logger.info(`⚠️ Pickup failed for shipment ${shipmentId} (attempt ${attempt}): ${result.message}`);
               shiprocketService.logApiActivity({
                 type: 'shiprocket-pickup-failure',
                 shipmentId,
@@ -7395,7 +7125,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
               attempt++;
             }
           } catch (error) {
-            console.error(`❌ Pickup error for shipment ${shipmentId} (attempt ${attempt}):`, error.message);
+            logger.error(`❌ Pickup error for shipment ${shipmentId} (attempt ${attempt}):`, error.message);
             shiprocketService.logApiActivity({
               type: 'shiprocket-pickup-error',
               shipmentId,
@@ -7409,7 +7139,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
             attempt++;
           }
         }
-        console.log(`❌ Pickup failed after 3 attempts for shipment ${shipmentId}, continuing anyway`);
+        logger.info(`❌ Pickup failed after 3 attempts for shipment ${shipmentId}, continuing anyway`);
         return { success: false, shipmentId, attempt: 3 };
       })();
 
@@ -7420,7 +7150,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
     const pickupResults = await Promise.allSettled(pickupPromises);
     const successfulPickups = pickupResults.filter(r => r.status === 'fulfilled' && r.value.success).length;
     const failedPickups = pickupResults.length - successfulPickups;
-    console.log(`📊 Pickup API calls completed: ${successfulPickups} success, ${failedPickups} failed`);
+    logger.info(`📊 Pickup API calls completed: ${successfulPickups} success, ${failedPickups} failed`);
 
     // Group orders by payment_type and account_code
     const orderGroups = {};
@@ -7438,13 +7168,13 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
 
     // OPTIMIZATION #1: Pre-generate all manifest IDs upfront (in parallel)
     const groupKeys = Object.keys(orderGroups);
-    console.log(`📋 Pre-generating ${groupKeys.length} manifest ID(s) in parallel...`);
+    logger.info(`📋 Pre-generating ${groupKeys.length} manifest ID(s) in parallel...`);
     const manifestIdPromises = groupKeys.map(() => database.getNextShiprocketManifestId());
     const preGeneratedManifestIds = await Promise.all(manifestIdPromises);
-    console.log(`✅ Pre-generated manifest IDs: ${preGeneratedManifestIds.join(', ')}`);
+    logger.info(`✅ Pre-generated manifest IDs: ${preGeneratedManifestIds.join(', ')}`);
 
     // OPTIMIZATION #2: Process all groups in parallel
-    console.log(`🚀 Processing ${groupKeys.length} manifest group(s) in parallel...`);
+    logger.info(`🚀 Processing ${groupKeys.length} manifest group(s) in parallel...`);
     const groupPromises = groupKeys.map(async (groupKey, index) => {
       const group = orderGroups[groupKey];
       const { paymentType, accountCode, orders } = group;
@@ -7463,9 +7193,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
       // Remove duplicates
       const uniqueShipmentIds = [...new Set(groupShipmentIds)];
 
-      console.log(`🔄 [${groupKey}] Generating manifest for ${paymentTypeName} orders (${accountCode})...`);
-      console.log(`  - Shipment IDs: ${uniqueShipmentIds.length}`);
-      console.log(`  - Pre-assigned Manifest ID: ${manifestId}`);
+      logger.info(`🔄 [${groupKey}] Generating manifest for ${paymentTypeName} orders (${accountCode})...`);
 
       try {
         const shiprocketService = new ShiprocketService(accountCode);
@@ -7479,8 +7207,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
           if (isAlreadyManifested) {
             // Shiprocket has already manifested these orders on their side
             // We need to mark them as manifested in our database using our pre-generated manifest_id
-            console.log(`✅ [${groupKey}] Manifest already generated by Shiprocket. Marking orders as manifested in our database...`);
-            console.log(`  - Using pre-generated manifest_id: ${manifestId}`);
+            logger.info(`✅ [${groupKey}] Manifest already generated by Shiprocket. Marking orders as manifested in our database...`);
             
             // Prepare batch updates with the pre-generated manifest_id
             const labelUpdates = [];
@@ -7520,7 +7247,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
             };
           } else {
             // Real failure - not "already manifested"
-            console.log(`❌ [${groupKey}] ${paymentTypeName} manifest generation failed: ${manifestResponse.message}`);
+            logger.info(`❌ [${groupKey}] ${paymentTypeName} manifest generation failed: ${manifestResponse.message}`);
             return {
               success: false,
               manifestId: null,
@@ -7534,8 +7261,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
           }
         }
 
-        console.log(`✅ [${groupKey}] ${paymentTypeName} Manifest generated successfully`);
-        console.log(`  - Custom Manifest ID: ${manifestId}`);
+        logger.info(`✅ [${groupKey}] ${paymentTypeName} Manifest generated successfully`);
 
         // OPTIMIZATION #3: Prepare batch updates
         const labelUpdates = [];
@@ -7581,8 +7307,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
         if (isAlreadyManifested) {
           // Shiprocket has already manifested these orders on their side
           // We need to mark them as manifested in our database using our pre-generated manifest_id
-          console.log(`✅ [${groupKey}] Manifest already generated by Shiprocket (caught in error). Marking orders as manifested in our database...`);
-          console.log(`  - Using pre-generated manifest_id: ${manifestId}`);
+          logger.info(`✅ [${groupKey}] Manifest already generated by Shiprocket (caught in error). Marking orders as manifested in our database...`);
           
           // Prepare batch updates with the pre-generated manifest_id
           const labelUpdates = [];
@@ -7622,7 +7347,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
           };
         } else {
           // Real error - not "already manifested"
-          console.error(`❌ [${groupKey}] Error generating ${paymentTypeName} manifest:`, error);
+          logger.error(`❌ [${groupKey}] Error generating ${paymentTypeName} manifest:`, error);
           return {
             success: false,
             manifestId: null,
@@ -7661,7 +7386,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
       } else {
         // Handle rejected promise
         const groupKey = groupKeys[i];
-        console.error(`❌ [${groupKey}] Promise rejected:`, result.reason);
+        logger.error(`❌ [${groupKey}] Promise rejected:`, result.reason);
         const group = orderGroups[groupKey];
         group.orders.forEach(orderDetail => {
           failedOrders.push({
@@ -7674,12 +7399,12 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
 
     // OPTIMIZATION #3: Batch update database (all labels and orders at once)
     if (allLabelUpdates.length > 0) {
-      console.log(`💾 Batch updating ${allLabelUpdates.length} label(s)...`);
+      logger.info(`💾 Batch updating ${allLabelUpdates.length} label(s)...`);
       try {
         await database.batchUpsertLabels(allLabelUpdates);
-        console.log(`✅ Batch label updates completed`);
+        logger.info(`✅ Batch label updates completed`);
       } catch (error) {
-        console.error(`❌ Batch label update failed:`, error);
+        logger.error(`❌ Batch label update failed:`, error);
         // Mark affected orders as failed
         allLabelUpdates.forEach(labelUpdate => {
           failedOrders.push({
@@ -7691,20 +7416,17 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
     }
 
     if (allOrderUpdates.length > 0) {
-      console.log(`💾 Batch updating ${allOrderUpdates.length} order status(es)...`);
+      logger.info(`💾 Batch updating ${allOrderUpdates.length} order status(es)...`);
       try {
         await database.bulkUpdateOrders(allOrderUpdates);
-        console.log(`✅ Batch order updates completed`);
+        logger.info(`✅ Batch order updates completed`);
       } catch (error) {
-        console.error(`❌ Batch order update failed:`, error);
+        logger.error(`❌ Batch order update failed:`, error);
         // Note: Order status updates are less critical, so we don't mark as failed
       }
     }
 
-    console.log('🟢 SHIPROCKET MANIFEST COMPLETE');
-    console.log(`  - Successful orders: ${successfulOrders.length}`);
-    console.log(`  - Failed orders: ${failedOrders.length}`);
-    console.log(`  - Manifest IDs created: ${manifestIds.join(', ')}`);
+    logger.info('🟢 SHIPROCKET MANIFEST COMPLETE');
 
     if (successfulOrders.length === 0) {
       return res.status(400).json({
@@ -7732,7 +7454,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ SHIPROCKET MANIFEST ERROR:', error);
+    logger.error('❌ SHIPROCKET MANIFEST ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to generate manifest',
@@ -7747,7 +7469,7 @@ router.post('/shiprocket/generate-manifest', async (req, res) => {
  * @access  Admin/Superadmin only
  */
 router.post('/admin/refresh', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔵 ADMIN REFRESH ORDERS REQUEST START');
+  logger.info('🔵 ADMIN REFRESH ORDERS REQUEST START');
   const { async: runAsync = false } = req.body || {};
   const token = req.headers['authorization'];
 
@@ -7779,18 +7501,17 @@ router.post('/admin/refresh', authenticateBasicAuth, requireAdminOrSuperadmin, a
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     // Use multiStoreSyncService to sync orders for all active stores
     const multiStoreSyncService = require('../services/multiStoreSyncService');
 
-    console.log('🔄 Starting orders sync from Shipway for all stores...');
+    logger.info('🔄 Starting orders sync from Shipway for all stores...');
     const result = await multiStoreSyncService.syncAllStores();
 
-    console.log('✅ Orders synced successfully');
-    console.log('  - Result:', result);
+    logger.info('✅ Orders synced successfully');
 
     return res.json({
       success: true,
@@ -7802,7 +7523,7 @@ router.post('/admin/refresh', authenticateBasicAuth, requireAdminOrSuperadmin, a
     });
 
   } catch (error) {
-    console.error('❌ ADMIN REFRESH ORDERS ERROR:', error);
+    logger.error('❌ ADMIN REFRESH ORDERS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to refresh orders',
@@ -7820,12 +7541,9 @@ router.post('/refresh', async (req, res) => {
   const { async: runAsync = false } = req.body || {};
   const token = req.headers['authorization'];
 
-  console.log('🔵 REFRESH ORDERS REQUEST START');
-  console.log('  - token received:', token ? 'YES' : 'NO');
-  console.log('  - runAsync:', runAsync);
+  logger.info('🔵 REFRESH ORDERS REQUEST START');
 
   if (!token) {
-    console.log('❌ REFRESH ORDERS FAILED: Missing token');
     return res.status(400).json({ success: false, message: 'Authorization token required' });
   }
 
@@ -7865,29 +7583,26 @@ router.post('/refresh', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // Use multiStoreSyncService to sync orders for all active stores
     const multiStoreSyncService = require('../services/multiStoreSyncService');
 
-    console.log('🔄 Starting orders sync from Shipway for all stores...');
+    logger.info('🔄 Starting orders sync from Shipway for all stores...');
     const result = await multiStoreSyncService.syncAllStores();
 
-    console.log('✅ Orders synced successfully');
-    console.log('  - Result:', result);
+    logger.info('✅ Orders synced successfully');
 
     return res.json({
       success: true,
@@ -7899,7 +7614,7 @@ router.post('/refresh', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ REFRESH ORDERS ERROR:', error);
+    logger.error('❌ REFRESH ORDERS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to refresh orders',
@@ -7919,9 +7634,6 @@ router.post('/reverse', async (req, res) => {
 
   // Handle case where token might be an object
   if (typeof token === 'object' && token !== null) {
-    console.log('⚠️  Token received as object, attempting to extract string value');
-    console.log('  - Object keys:', Object.keys(token));
-    console.log('  - Object values:', Object.values(token));
 
     // Try to extract the actual token string
     if (token.token) {
@@ -7931,23 +7643,18 @@ router.post('/reverse', async (req, res) => {
     } else if (Object.values(token).length === 1) {
       token = Object.values(token)[0];
     } else {
-      console.log('❌ Cannot extract token from object');
       token = null;
     }
   }
 
-  console.log('🔵 REVERSE REQUEST START');
-  console.log('  - unique_id:', unique_id);
-  console.log('  - token received:', token ? 'YES' : 'NO');
-  console.log('  - token value:', token ? token.substring(0, 8) + '...' : 'null');
+  logger.info('🔵 REVERSE REQUEST START');
 
   if (!unique_id) {
-    console.log('❌ REVERSE FAILED: Missing unique_id');
+    logger.info('❌ REVERSE FAILED: Missing unique_id');
     return res.status(400).json({ success: false, message: 'unique_id is required' });
   }
 
   if (!token) {
-    console.log('❌ REVERSE FAILED: Missing token');
     return res.status(400).json({ success: false, message: 'Authorization token required' });
   }
 
@@ -7959,52 +7666,45 @@ router.post('/reverse', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // Get the order details
     const order = await database.getOrderByUniqueId(unique_id);
 
     if (!order) {
-      console.log('❌ ORDER NOT FOUND:', unique_id);
+      logger.info('❌ ORDER NOT FOUND:', unique_id);
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
     // Check if the order is claimed by this vendor
     if (order.claimed_by !== vendor.warehouseId) {
-      console.log('❌ ORDER NOT CLAIMED BY THIS VENDOR');
-      console.log('  - Order claimed by:', order.claimed_by);
-      console.log('  - Current vendor:', vendor.warehouseId);
+      logger.info('❌ ORDER NOT CLAIMED BY THIS VENDOR');
       return res.status(403).json({ success: false, message: 'You can only reverse orders claimed by you' });
     }
 
-    console.log('✅ ORDER FOUND AND CLAIMED BY VENDOR');
-    console.log('  - Order ID:', order.order_id);
-    console.log('  - Status:', order.status);
-    console.log('  - Label Downloaded:', order.label_downloaded);
+    logger.info('✅ ORDER FOUND AND CLAIMED BY VENDOR');
 
     // Check label_downloaded status
     const isLabelDownloaded = order.label_downloaded === 1 || order.label_downloaded === true || order.label_downloaded === '1';
 
     if (isLabelDownloaded) {
-      console.log('🔄 CASE 2: Label downloaded - cancelling shipment before reverse');
+      logger.info('🔄 CASE 2: Label downloaded - cancelling shipment before reverse');
 
       // Get account_code from order to use correct store credentials
       const accountCode = order.account_code;
       if (!accountCode) {
-        console.log('❌ ACCOUNT_CODE NOT FOUND for order:', order.order_id);
+        logger.info('❌ ACCOUNT_CODE NOT FOUND for order:', order.order_id);
         return res.status(400).json({
           success: false,
           message: 'Store information not found for this order. Cannot cancel shipment.'
@@ -8015,7 +7715,7 @@ router.post('/reverse', async (req, res) => {
       const label = await database.getLabelByOrderId(order.order_id, accountCode);
 
       if (!label || !label.awb) {
-        console.log('❌ AWB NOT FOUND for order:', order.order_id);
+        logger.info('❌ AWB NOT FOUND for order:', order.order_id);
         return res.status(400).json({
           success: false,
           message: 'AWB number not found for this order. Cannot cancel shipment.'
@@ -8025,46 +7725,41 @@ router.post('/reverse', async (req, res) => {
       // Validate AWB is not empty or null
       const awbValue = String(label.awb || '').trim();
       if (!awbValue || awbValue === '') {
-        console.log('❌ AWB IS EMPTY OR NULL for order:', order.order_id);
+        logger.info('❌ AWB IS EMPTY OR NULL for order:', order.order_id);
         return res.status(400).json({
           success: false,
           message: 'AWB number is empty or invalid. Cannot cancel shipment.'
         });
       }
 
-      console.log('✅ AWB FOUND:', awbValue);
-      console.log('  - AWB type:', typeof label.awb);
-      console.log('  - AWB length:', awbValue.length);
+      logger.info('✅ AWB FOUND:', awbValue);
 
       // Determine shipping partner for this store
       const storeInfo = await database.getStoreByAccountCode(accountCode);
       const shippingPartner = (storeInfo?.shipping_partner || '').toLowerCase();
-      console.log('  - Shipping Partner:', shippingPartner);
-      console.log('  - Store Info:', storeInfo ? 'Found' : 'Not found');
 
       try {
         if (shippingPartner === 'shiprocket') {
-          console.log('🔄 Using Shiprocket cancel API for order:', order.order_id);
-          console.log('  - AWB to cancel:', awbValue);
+          logger.info('🔄 Using Shiprocket cancel API for order:', order.order_id);
           const ShiprocketService = require('../services/shiprocketService');
           const shiprocketService = new ShiprocketService(accountCode);
           const cancelResult = await shiprocketService.cancelShipmentsByAwbs([awbValue]);
-          console.log('✅ SHIPROCKET CANCEL SUCCESS:', JSON.stringify(cancelResult, null, 2));
+          logger.info('✅ SHIPROCKET CANCEL SUCCESS:', JSON.stringify(cancelResult, null, 2));
         } else {
-          console.log('🔄 Using Shipway cancel API for order:', order.order_id);
+          logger.info('🔄 Using Shipway cancel API for order:', order.order_id);
           const ShipwayService = require('../services/shipwayService');
           const shipwayService = new ShipwayService(accountCode);
           await shipwayService.initialize();
           const cancelResult = await shipwayService.cancelShipment([awbValue]);
-          console.log('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
+          logger.info('✅ SHIPWAY CANCEL SUCCESS:', cancelResult);
         }
       } catch (cancelError) {
-        console.error('❌ SHIPMENT CANCEL FAILED:');
-        console.error('  - Error message:', cancelError.message);
-        console.error('  - Error stack:', cancelError.stack);
-        console.error('  - Account Code:', accountCode);
-        console.error('  - AWB:', awbValue);
-        console.error('  - Shipping Partner:', shippingPartner);
+        logger.error('❌ SHIPMENT CANCEL FAILED:');
+        logger.error('  - Error message:', cancelError.message);
+        logger.error('  - Error stack:', cancelError.stack);
+        logger.error('  - Account Code:', accountCode);
+        logger.error('  - AWB:', awbValue);
+        logger.error('  - Shipping Partner:', shippingPartner);
         return res.status(500).json({
           success: false,
           message: cancelError.message || 'Failed to cancel shipment. Please try after sometime.',
@@ -8078,9 +7773,9 @@ router.post('/reverse', async (req, res) => {
         'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL, is_manifest = 0, manifest_id = NULL, current_shipment_status = NULL WHERE order_id = ? AND account_code = ?',
         [order.order_id, accountCode]
       );
-      console.log('✅ LABEL DATA CLEARED (including manifest_id)');
+      logger.info('✅ LABEL DATA CLEARED (including manifest_id)');
     } else {
-      console.log('🔄 CASE 1: No label downloaded - simple reverse');
+      logger.info('🔄 CASE 1: No label downloaded - simple reverse');
       // Even without label download, reset manifest fields if they exist (for Handover tab orders)
       // Use account_code filter if available for store isolation
       const accountCode = order.account_code;
@@ -8095,24 +7790,24 @@ router.post('/reverse', async (req, res) => {
           [order.order_id]
         );
       }
-      console.log('✅ MANIFEST FIELDS RESET (including manifest_id)');
+      logger.info('✅ MANIFEST FIELDS RESET (including manifest_id)');
     }
 
     // 4.4 — Atomic unclaim: WHERE claimed_by=? prevents overwriting a concurrent re-claim
     const unclaimed = await database.atomicUnclaimOrder(unique_id, vendor.warehouseId);
     if (!unclaimed) {
-      console.log('⚠️ atomicUnclaimOrder: affectedRows=0 — row concurrently modified');
+      logger.info('⚠️ atomicUnclaimOrder: affectedRows=0 — row concurrently modified');
       return res.status(409).json({ success: false, message: 'Order state changed concurrently — please refresh and try again' });
     }
 
-    console.log('✅ CLAIM DATA CLEARED');
+    logger.info('✅ CLAIM DATA CLEARED');
 
     // Set is_in_new_order = 1 so unclaimed order appears in All Orders tab
     await database.mysqlConnection.execute(
       'UPDATE orders SET is_in_new_order = 1 WHERE unique_id = ?',
       [unique_id]
     );
-    console.log('✅ ORDER SET TO NEW ORDER STATUS');
+    logger.info('✅ ORDER SET TO NEW ORDER STATUS');
 
     // Get updated order for response
     const updatedOrder = await database.getOrderByUniqueId(unique_id);
@@ -8121,7 +7816,7 @@ router.post('/reverse', async (req, res) => {
       ? 'Shipment cancelled and order reversed successfully'
       : 'Order reversed successfully';
 
-    console.log('✅ REVERSE SUCCESS:', successMessage);
+    logger.info('✅ REVERSE SUCCESS:', successMessage);
 
     return res.json({
       success: true,
@@ -8137,7 +7832,7 @@ router.post('/reverse', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ REVERSE ERROR:', error);
+    logger.error('❌ REVERSE ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to reverse order',
@@ -8157,9 +7852,6 @@ router.post('/reverse-grouped', async (req, res) => {
 
   // Handle case where token might be an object
   if (typeof token === 'object' && token !== null) {
-    console.log('⚠️  Token received as object, attempting to extract string value');
-    console.log('  - Object keys:', Object.keys(token));
-    console.log('  - Object values:', Object.values(token));
 
     // Try to extract the actual token string
     if (token.token) {
@@ -8169,19 +7861,14 @@ router.post('/reverse-grouped', async (req, res) => {
     } else if (Object.values(token).length === 1) {
       token = Object.values(token)[0];
     } else {
-      console.log('❌ Cannot extract token from object');
       token = null;
     }
   }
 
-  console.log('🔵 REVERSE GROUPED REQUEST START');
-  console.log('  - order_id:', order_id);
-  console.log('  - unique_ids:', unique_ids);
-  console.log('  - token received:', token ? 'YES' : 'NO');
-  console.log('  - token value:', token ? token.substring(0, 8) + '...' : 'null');
+  logger.info('🔵 REVERSE GROUPED REQUEST START');
 
   if (!order_id) {
-    console.log('❌ REVERSE GROUPED FAILED: Missing order_id');
+    logger.info('❌ REVERSE GROUPED FAILED: Missing order_id');
     return res.status(400).json({ success: false, message: 'order_id is required' });
   }
 
@@ -8193,7 +7880,6 @@ router.post('/reverse-grouped', async (req, res) => {
   const sanitizedUniqueIds = arrayCheck.items;
 
   if (!token) {
-    console.log('❌ REVERSE GROUPED FAILED: Missing token');
     return res.status(400).json({ success: false, message: 'Authorization token required' });
   }
 
@@ -8205,20 +7891,18 @@ router.post('/reverse-grouped', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE ', vendor);
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // Verify all unique_ids belong to the same order_id and filter only those claimed by this vendor
     const orderChecks = await Promise.all(
@@ -8243,7 +7927,7 @@ router.post('/reverse-grouped', async (req, res) => {
 
     // Check if we have any valid orders to process
     if (validOrders.length === 0) {
-      console.log('❌ NO VALID ORDERS FOUND FOR THIS VENDOR');
+      logger.info('❌ NO VALID ORDERS FOUND FOR THIS VENDOR');
       return res.status(400).json({
         success: false,
         message: 'No orders found that are claimed by you',
@@ -8254,29 +7938,25 @@ router.post('/reverse-grouped', async (req, res) => {
     // Log any orders that belong to other vendors (for transparency)
     const otherVendorOrders = invalidOrders.filter(check => check.claimed_by && check.claimed_by !== vendor.warehouseId);
     if (otherVendorOrders.length > 0) {
-      console.log('ℹ️ ORDERS CLAIMED BY OTHER VENDORS (will be skipped):', otherVendorOrders.map(o => ({ unique_id: o.unique_id, claimed_by: o.claimed_by })));
+      logger.info('ℹ️ ORDERS CLAIMED BY OTHER VENDORS (will be skipped):', otherVendorOrders.map(o => ({ unique_id: o.unique_id, claimed_by: o.claimed_by })));
     }
 
     // Get the first valid order to check label_downloaded status
     const firstValidOrder = validOrders[0]?.order;
     const validUniqueIds = validOrders.map(check => check.unique_id);
 
-    console.log('✅ VALID ORDERS IDENTIFIED');
-    console.log('  - Order ID:', firstValidOrder.order_id);
-    console.log('  - Valid unique_ids:', validUniqueIds);
-    console.log('  - Label Downloaded:', firstValidOrder.label_downloaded);
-    console.log('  - Total products to process:', validUniqueIds.length);
+    logger.info('✅ VALID ORDERS IDENTIFIED');
 
     // Check label_downloaded status (all products in the group should have the same status)
     const isLabelDownloaded = firstValidOrder.label_downloaded === 1 || firstValidOrder.label_downloaded === true || firstValidOrder.label_downloaded === '1';
 
     if (isLabelDownloaded) {
-      console.log('🔄 CASE 2: Label downloaded - cancelling shipment before reverse (grouped)');
+      logger.info('🔄 CASE 2: Label downloaded - cancelling shipment before reverse (grouped)');
 
       // Get account_code from order to use correct store credentials
       const accountCode = firstValidOrder.account_code;
       if (!accountCode) {
-        console.log('❌ ACCOUNT_CODE NOT FOUND for order:', order_id);
+        logger.info('❌ ACCOUNT_CODE NOT FOUND for order:', order_id);
         return res.status(400).json({
           success: false,
           message: 'Store information not found for this order. Cannot cancel shipment.'
@@ -8287,7 +7967,7 @@ router.post('/reverse-grouped', async (req, res) => {
       const label = await database.getLabelByOrderId(order_id, accountCode);
 
       if (!label || !label.awb) {
-        console.log('❌ AWB NOT FOUND for order:', order_id);
+        logger.info('❌ AWB NOT FOUND for order:', order_id);
         return res.status(400).json({
           success: false,
           message: 'AWB number not found for this order. Cannot cancel shipment.'
@@ -8296,43 +7976,41 @@ router.post('/reverse-grouped', async (req, res) => {
 
       const awbValue = String(label.awb || '').trim();
       if (!awbValue) {
-        console.log('❌ AWB IS EMPTY OR NULL for order:', order_id);
+        logger.info('❌ AWB IS EMPTY OR NULL for order:', order_id);
         return res.status(400).json({
           success: false,
           message: 'AWB number is empty or invalid. Cannot cancel shipment.'
         });
       }
 
-      console.log('✅ AWB FOUND FOR GROUPED REVERSE:', awbValue);
+      logger.info('✅ AWB FOUND FOR GROUPED REVERSE:', awbValue);
 
       // Determine shipping partner for this store
       const storeInfo = await database.getStoreByAccountCode(accountCode);
       const shippingPartner = (storeInfo?.shipping_partner || '').toLowerCase();
-      console.log('  - Shipping Partner (grouped):', shippingPartner);
-      console.log('  - Store Info:', storeInfo ? 'Found' : 'Not found');
 
       try {
         if (shippingPartner === 'shiprocket') {
-          console.log('🔄 Using Shiprocket cancel API for grouped order:', order_id);
+          logger.info('🔄 Using Shiprocket cancel API for grouped order:', order_id);
           const ShiprocketService = require('../services/shiprocketService');
           const shiprocketService = new ShiprocketService(accountCode);
           const cancelResult = await shiprocketService.cancelShipmentsByAwbs([awbValue]);
-          console.log('✅ SHIPROCKET CANCEL SUCCESS (grouped):', JSON.stringify(cancelResult, null, 2));
+          logger.info('✅ SHIPROCKET CANCEL SUCCESS (grouped):', JSON.stringify(cancelResult, null, 2));
         } else {
-          console.log('🔄 Using Shipway cancel API for grouped order:', order_id);
+          logger.info('🔄 Using Shipway cancel API for grouped order:', order_id);
           const ShipwayService = require('../services/shipwayService');
           const shipwayService = new ShipwayService(accountCode);
           await shipwayService.initialize();
           const cancelResult = await shipwayService.cancelShipment([awbValue]);
-          console.log('✅ SHIPWAY CANCEL SUCCESS (grouped):', cancelResult);
+          logger.info('✅ SHIPWAY CANCEL SUCCESS (grouped):', cancelResult);
         }
       } catch (cancelError) {
-        console.error('❌ SHIPMENT CANCEL FAILED (grouped):');
-        console.error('  - Error message:', cancelError.message);
-        console.error('  - Error stack:', cancelError.stack);
-        console.error('  - Account Code:', accountCode);
-        console.error('  - AWB:', awbValue);
-        console.error('  - Shipping Partner:', shippingPartner);
+        logger.error('❌ SHIPMENT CANCEL FAILED (grouped):');
+        logger.error('  - Error message:', cancelError.message);
+        logger.error('  - Error stack:', cancelError.stack);
+        logger.error('  - Account Code:', accountCode);
+        logger.error('  - AWB:', awbValue);
+        logger.error('  - Shipping Partner:', shippingPartner);
         return res.status(500).json({
           success: false,
           message: cancelError.message || 'Failed to cancel shipment. Please try after sometime.',
@@ -8346,9 +8024,9 @@ router.post('/reverse-grouped', async (req, res) => {
         'UPDATE labels SET awb = NULL, label_url = NULL, carrier_id = NULL, carrier_name = NULL, priority_carrier = NULL, is_manifest = 0, manifest_id = NULL, current_shipment_status = NULL WHERE order_id = ? AND account_code = ?',
         [order_id, accountCode]
       );
-      console.log('✅ LABEL DATA CLEARED (including manifest_id) for grouped reverse');
+      logger.info('✅ LABEL DATA CLEARED (including manifest_id) for grouped reverse');
     } else {
-      console.log('🔄 CASE 1: No label downloaded - simple reverse');
+      logger.info('🔄 CASE 1: No label downloaded - simple reverse');
       // Even without label download, reset manifest fields if they exist (for Handover tab orders)
       // Use account_code filter if available for store isolation
       const accountCode = firstValidOrder.account_code;
@@ -8363,11 +8041,11 @@ router.post('/reverse-grouped', async (req, res) => {
           [order_id]
         );
       }
-      console.log('✅ MANIFEST FIELDS RESET (including manifest_id)');
+      logger.info('✅ MANIFEST FIELDS RESET (including manifest_id)');
     }
 
     // Clear claim information for ONLY the vendor's products
-    console.log('🔄 CLEARING CLAIM DATA FOR VENDOR\'S PRODUCTS');
+    logger.info('🔄 CLEARING CLAIM DATA FOR VENDOR\'S PRODUCTS');
     const clearResults = await Promise.all(
       validUniqueIds.map(async (unique_id) => {
         try {
@@ -8385,7 +8063,7 @@ router.post('/reverse-grouped', async (req, res) => {
           );
           return { unique_id, success: true };
         } catch (error) {
-          console.log('❌ FAILED TO CLEAR CLAIM DATA FOR:', unique_id, error.message);
+          logger.info('❌ FAILED TO CLEAR CLAIM DATA FOR:', unique_id, error.message);
           return { unique_id, success: false, error: error.message };
         }
       })
@@ -8393,23 +8071,23 @@ router.post('/reverse-grouped', async (req, res) => {
 
     const failedClears = clearResults.filter(result => !result.success);
     if (failedClears.length > 0) {
-      console.log('⚠️ SOME CLAIM DATA CLEARING FAILED:', failedClears);
+      logger.info('⚠️ SOME CLAIM DATA CLEARING FAILED:', failedClears);
     }
 
-    console.log('✅ CLAIM DATA CLEARED FOR VENDOR\'S PRODUCTS');
+    logger.info('✅ CLAIM DATA CLEARED FOR VENDOR\'S PRODUCTS');
 
     // Set is_in_new_order = 1 for all products in this order so unclaimed orders appear in All Orders tab
     await database.mysqlConnection.execute(
       'UPDATE orders SET is_in_new_order = 1 WHERE order_id = ?',
       [order_id]
     );
-    console.log('✅ ORDERS SET TO NEW ORDER STATUS');
+    logger.info('✅ ORDERS SET TO NEW ORDER STATUS');
 
     const successMessage = isLabelDownloaded
       ? `Shipment cancelled and ${validUniqueIds.length} products reversed successfully`
       : `${validUniqueIds.length} products reversed successfully`;
 
-    console.log('✅ REVERSE GROUPED SUCCESS:', successMessage);
+    logger.info('✅ REVERSE GROUPED SUCCESS:', successMessage);
 
     return res.json({
       success: true,
@@ -8429,7 +8107,7 @@ router.post('/reverse-grouped', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ REVERSE GROUPED ERROR:', error);
+    logger.error('❌ REVERSE GROUPED ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to reverse grouped order',
@@ -8444,7 +8122,7 @@ router.post('/reverse-grouped', async (req, res) => {
  * @access  Admin/Superadmin only (or can be called by cron job)
  */
 router.post('/auto-reverse-expired', authenticateBasicAuth, requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔄 AUTO-REVERSE EXPIRED ORDERS REQUEST START');
+  logger.info('🔄 AUTO-REVERSE EXPIRED ORDERS REQUEST START');
 
   try {
     const autoReversalService = require('../services/autoReversalService');
@@ -8457,7 +8135,7 @@ router.post('/auto-reverse-expired', authenticateBasicAuth, requireAdminOrSupera
     }
 
   } catch (error) {
-    console.error('❌ AUTO-REVERSE ERROR:', error);
+    logger.error('❌ AUTO-REVERSE ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to auto-reverse expired orders',
@@ -8481,7 +8159,7 @@ router.get('/auto-reverse-stats', authenticateBasicAuth, requireAdminOrSuperadmi
       data: stats
     });
   } catch (error) {
-    console.error('❌ GET AUTO-REVERSE STATS ERROR:', error);
+    logger.error('❌ GET AUTO-REVERSE STATS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to get auto-reversal statistics',
@@ -8499,13 +8177,10 @@ router.post('/download-manifest-summary', async (req, res) => {
   const { manifest_ids, format = 'a4', async: runAsync = false } = req.body;
   const token = req.headers['authorization'];
 
-  console.log('🔵 DOWNLOAD MANIFEST SUMMARY REQUEST START');
-  console.log('  - manifest_ids:', manifest_ids);
-  console.log('  - runAsync:', runAsync);
-  console.log('  - token received:', token ? 'YES' : 'NO');
+  logger.info('🔵 DOWNLOAD MANIFEST SUMMARY REQUEST START');
 
   if (!manifest_ids || !token) {
-    console.log('❌ DOWNLOAD MANIFEST SUMMARY FAILED: Missing required fields');
+    logger.info('❌ DOWNLOAD MANIFEST SUMMARY FAILED: Missing required fields');
     return res.status(400).json({
       success: false,
       message: 'manifest_ids and Authorization token required'
@@ -8555,32 +8230,30 @@ router.post('/download-manifest-summary', async (req, res) => {
     await database.waitForMySQLInitialization();
 
     if (!database.isMySQLAvailable()) {
-      console.log('❌ MySQL connection not available');
+      logger.info('❌ MySQL connection not available');
       return res.status(500).json({ success: false, message: 'Database connection not available' });
     }
 
     const vendor = req.user || await database.getUserByToken(token);
 
     if (!vendor || vendor.active_session !== 'TRUE') {
-      console.log('❌ VENDOR NOT FOUND OR INACTIVE');
+      logger.info('❌ VENDOR NOT FOUND OR INACTIVE');
       return res.status(401).json({ success: false, message: 'Invalid or inactive vendor token' });
     }
 
-    console.log('✅ VENDOR FOUND:');
-    console.log('  - Email:', vendor.email);
-    console.log('  - Warehouse ID:', vendor.warehouseId);
+    logger.info('✅ VENDOR FOUND:');
 
     // Get vendor address
     let vendorAddress = '';
     try {
-      console.log('🔍 Fetching address for warehouseId:', vendor.warehouseId);
+      logger.info('🔍 Fetching address for warehouseId:', vendor.warehouseId);
       const [addressRows] = await database.mysqlConnection.execute(`
         SELECT address, pincode 
         FROM users 
         WHERE warehouseId = ?
       `, [vendor.warehouseId]);
 
-      console.log('📋 Address query results:', addressRows);
+      logger.info('📋 Address query results:', addressRows);
 
       if (addressRows.length > 0 && addressRows[0].address) {
         const addr = addressRows[0];
@@ -8588,28 +8261,26 @@ router.post('/download-manifest-summary', async (req, res) => {
         if (addr.address) parts.push(addr.address);
         if (addr.pincode) parts.push(addr.pincode);
         vendorAddress = parts.join(', ');
-        console.log('✅ Vendor address constructed:', vendorAddress);
+        logger.info('✅ Vendor address constructed:', vendorAddress);
       } else {
-        console.log('⚠️ No address found or address is null/empty');
-        console.log('  - Rows returned:', addressRows.length);
+        logger.info('⚠️ No address found or address is null/empty');
         if (addressRows.length > 0) {
-          console.log('  - Address field value:', addressRows[0].address);
         }
       }
     } catch (error) {
-      console.log('❌ Error fetching warehouse address:', error.message);
+      logger.info('❌ Error fetching warehouse address:', error.message);
     }
 
     // Convert manifest_ids to array if single value
     const manifestIdsArray = Array.isArray(manifest_ids) ? manifest_ids : [manifest_ids];
-    console.log('📋 Processing manifest IDs:', manifestIdsArray);
+    logger.info('📋 Processing manifest IDs:', manifestIdsArray);
 
     // Query database for manifest summary data grouped by account_code
     // Structure: { account_code: { store_name, logo_url, manifests: [...] } }
     const manifestDataByStore = {};
 
     for (const manifest_id of manifestIdsArray) {
-      console.log(`🔍 Querying data for manifest_id: ${manifest_id}`);
+      logger.info(`🔍 Querying data for manifest_id: ${manifest_id}`);
 
       // Query to get carrier summary for this manifest with account_code
       const [summaryRows] = await database.mysqlConnection.execute(`
@@ -8626,13 +8297,12 @@ router.post('/download-manifest-summary', async (req, res) => {
         ORDER BY l.account_code, l.carrier_name, o.payment_type
       `, [manifest_id]);
 
-      console.log(`  - Found ${summaryRows.length} carrier/payment combinations`);
 
       // Group by account_code
       for (const row of summaryRows) {
         const accountCode = row.account_code;
         if (!accountCode) {
-          console.log('⚠️ Skipping row with missing account_code');
+          logger.info('⚠️ Skipping row with missing account_code');
           continue;
         }
 
@@ -8669,14 +8339,14 @@ router.post('/download-manifest-summary', async (req, res) => {
     }
 
     if (Object.keys(manifestDataByStore).length === 0) {
-      console.log('❌ No data found for provided manifest IDs');
+      logger.info('❌ No data found for provided manifest IDs');
       return res.status(404).json({
         success: false,
         message: 'No orders found for the provided manifest IDs'
       });
     }
 
-    console.log('✅ Manifest data collected, grouped by store:', Object.keys(manifestDataByStore));
+    logger.info('✅ Manifest data collected, grouped by store:', Object.keys(manifestDataByStore));
 
     // Fetch store logos
     const storeLogos = {};
@@ -8686,18 +8356,18 @@ router.post('/download-manifest-summary', async (req, res) => {
           const logoResponse = await fetch(storeData.logo_url);
           if (logoResponse.ok) {
             storeLogos[accountCode] = Buffer.from(await logoResponse.arrayBuffer());
-            console.log(`✅ Logo fetched for ${storeData.store_name}`);
+            logger.info(`✅ Logo fetched for ${storeData.store_name}`);
           } else {
-            console.log(`⚠️ Could not fetch logo for ${storeData.store_name}: ${logoResponse.statusText}`);
+            logger.info(`⚠️ Could not fetch logo for ${storeData.store_name}: ${logoResponse.statusText}`);
             storeLogos[accountCode] = null;
           }
         } catch (error) {
-          console.log(`⚠️ Could not fetch logo for ${storeData.store_name}:`, error.message);
+          logger.info(`⚠️ Could not fetch logo for ${storeData.store_name}:`, error.message);
           storeLogos[accountCode] = null;
         }
       } else {
         storeLogos[accountCode] = null;
-        console.log(`ℹ️ No logo URL configured for ${storeData.store_name}`);
+        logger.info(`ℹ️ No logo URL configured for ${storeData.store_name}`);
       }
     }
 
@@ -8743,13 +8413,13 @@ router.post('/download-manifest-summary', async (req, res) => {
         const whMapping = await database.getWhMappingByClaimioWhIdAndAccountCode(vendor.warehouseId, accountCode);
         if (whMapping && whMapping.vendor_wh_id) {
           vendorWarehouseId = whMapping.vendor_wh_id;
-          console.log(`✅ Using vendor_wh_id (${vendorWarehouseId}) for ${storeName} instead of claimio_wh_id (${vendor.warehouseId})`);
+          logger.info(`✅ Using vendor_wh_id (${vendorWarehouseId}) for ${storeName} instead of claimio_wh_id (${vendor.warehouseId})`);
         } else {
-          console.log(`⚠️ No warehouse mapping found for ${storeName}, using claimio_wh_id (${vendor.warehouseId})`);
+          logger.info(`⚠️ No warehouse mapping found for ${storeName}, using claimio_wh_id (${vendor.warehouseId})`);
         }
       } catch (error) {
-        console.log(`⚠️ Error fetching warehouse mapping for ${storeName}:`, error.message);
-        console.log(`   Using claimio_wh_id (${vendor.warehouseId}) as fallback`);
+        logger.info(`⚠️ Error fetching warehouse mapping for ${storeName}:`, error.message);
+        logger.info(`   Using claimio_wh_id (${vendor.warehouseId}) as fallback`);
       }
 
       // Add new page for each store (except the first one)
@@ -8769,13 +8439,13 @@ router.post('/download-manifest-summary', async (req, res) => {
             logoWidth = 55;
             const logoHeight = 55;
             doc.image(logoBuffer, leftMargin, topY, { width: logoWidth, height: logoHeight, fit: [logoWidth, logoHeight] });
-            console.log(`✅ Logo embedded for ${storeName}`);
+            logger.info(`✅ Logo embedded for ${storeName}`);
           } catch (error) {
-            console.log(`⚠️ Could not embed logo for ${storeName}:`, error.message);
+            logger.info(`⚠️ Could not embed logo for ${storeName}:`, error.message);
             logoWidth = 0; // Reset if embedding failed
           }
         } else {
-          console.log(`ℹ️ No logo for ${storeName} - keeping logo space blank`);
+          logger.info(`ℹ️ No logo for ${storeName} - keeping logo space blank`);
         }
 
         // Add store name next to logo (or at left margin if no logo)
@@ -8817,7 +8487,7 @@ router.post('/download-manifest-summary', async (req, res) => {
       let storeTotal = 0;
 
       if (isThermal) {
-        console.log(`📄 [THERMAL] Processing store: ${storeName} with ${storeData.manifests.length} manifest(s)`);
+        logger.info(`📄 [THERMAL] Processing store: ${storeName} with ${storeData.manifests.length} manifest(s)`);
 
         // Add new page for each store (except first store)
         if (storeIndex > 0) {
@@ -8835,7 +8505,7 @@ router.post('/download-manifest-summary', async (req, res) => {
             const logoHeight = 40;
             doc.image(logoBuffer, leftMarginRef, currentY, { width: logoWidth, height: logoHeight, fit: [logoWidth, logoHeight] });
           } catch (error) {
-            console.log(`⚠️ Logo embed fail (Thermal):`, error.message);
+            logger.info(`⚠️ Logo embed fail (Thermal):`, error.message);
             logoWidth = 0;
           }
         }
@@ -9192,10 +8862,10 @@ router.post('/download-manifest-summary', async (req, res) => {
     // Finalize PDF
     doc.end();
 
-    console.log('✅ PDF generated and sent successfully');
+    logger.info('✅ PDF generated and sent successfully');
 
   } catch (error) {
-    console.error('❌ DOWNLOAD MANIFEST SUMMARY ERROR:', error);
+    logger.error('❌ DOWNLOAD MANIFEST SUMMARY ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to generate manifest summary',
@@ -9210,7 +8880,7 @@ router.post('/download-manifest-summary', async (req, res) => {
  * @access  Admin/Superadmin only
  */
 router.post('/rto-inventory/process', requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔵 RTO INVENTORY PROCESS REQUEST START');
+  logger.info('🔵 RTO INVENTORY PROCESS REQUEST START');
 
   try {
     const rtoInventoryService = require('../services/rtoInventoryService');
@@ -9218,15 +8888,15 @@ router.post('/rto-inventory/process', requireAdminOrSuperadmin, async (req, res)
     const result = await rtoInventoryService.processDeliveredRTOOrders();
 
     if (result.success) {
-      console.log('✅ RTO INVENTORY PROCESSING SUCCESS:', result);
+      logger.info('✅ RTO INVENTORY PROCESSING SUCCESS:', result);
       return res.json(result);
     } else {
-      console.log('⚠️ RTO INVENTORY PROCESSING SKIPPED:', result.message);
+      logger.info('⚠️ RTO INVENTORY PROCESSING SKIPPED:', result.message);
       return res.json(result);
     }
 
   } catch (error) {
-    console.error('❌ RTO INVENTORY PROCESS ERROR:', error);
+    logger.error('❌ RTO INVENTORY PROCESS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to process RTO inventory',
@@ -9241,14 +8911,14 @@ router.post('/rto-inventory/process', requireAdminOrSuperadmin, async (req, res)
  * @access  Admin/Superadmin only
  */
 router.get('/rto-inventory', requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔵 GET RTO INVENTORY REQUEST');
+  logger.info('🔵 GET RTO INVENTORY REQUEST');
 
   try {
     const rtoInventoryService = require('../services/rtoInventoryService');
 
     const inventory = await rtoInventoryService.getRTOInventory();
 
-    console.log(`✅ RTO INVENTORY FETCHED: ${inventory.length} records`);
+    logger.info(`✅ RTO INVENTORY FETCHED: ${inventory.length} records`);
 
     return res.json({
       success: true,
@@ -9258,7 +8928,7 @@ router.get('/rto-inventory', requireAdminOrSuperadmin, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ GET RTO INVENTORY ERROR:', error);
+    logger.error('❌ GET RTO INVENTORY ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to get RTO inventory',
@@ -9273,14 +8943,14 @@ router.get('/rto-inventory', requireAdminOrSuperadmin, async (req, res) => {
  * @access  Admin/Superadmin only
  */
 router.get('/rto-inventory/unprocessed', requireAdminOrSuperadmin, async (req, res) => {
-  console.log('🔵 GET UNPROCESSED RTO ORDERS REQUEST');
+  logger.info('🔵 GET UNPROCESSED RTO ORDERS REQUEST');
 
   try {
     const rtoInventoryService = require('../services/rtoInventoryService');
 
     const unprocessedOrders = await rtoInventoryService.getUnprocessedOrders();
 
-    console.log(`✅ UNPROCESSED RTO ORDERS FETCHED: ${unprocessedOrders.length} records`);
+    logger.info(`✅ UNPROCESSED RTO ORDERS FETCHED: ${unprocessedOrders.length} records`);
 
     return res.json({
       success: true,
@@ -9290,7 +8960,7 @@ router.get('/rto-inventory/unprocessed', requireAdminOrSuperadmin, async (req, r
     });
 
   } catch (error) {
-    console.error('❌ GET UNPROCESSED RTO ORDERS ERROR:', error);
+    logger.error('❌ GET UNPROCESSED RTO ORDERS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to get unprocessed RTO orders',
@@ -9315,7 +8985,7 @@ router.get('/rto-inventory/status', requireAdminOrSuperadmin, async (req, res) =
     });
 
   } catch (error) {
-    console.error('❌ GET RTO INVENTORY STATUS ERROR:', error);
+    logger.error('❌ GET RTO INVENTORY STATUS ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to get RTO inventory status',
@@ -9358,7 +9028,7 @@ router.post('/message-tracking', async (req, res) => {
       message_status
     );
 
-    console.log(`✅ [Message Tracking] Recorded status "${message_status}" for order ${order_id} (${account_code})`);
+    logger.info(`✅ [Message Tracking] Recorded status "${message_status}" for order ${order_id} (${account_code})`);
 
     return res.json({
       success: true,
@@ -9367,7 +9037,7 @@ router.post('/message-tracking', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ POST MESSAGE TRACKING ERROR:', error);
+    logger.error('❌ POST MESSAGE TRACKING ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to record message tracking',
@@ -9430,7 +9100,7 @@ router.post('/trigger-webhook', requireAdminOrSuperadmin, async (req, res) => {
     const webhookService = require('../services/webhookService');
     const webhookResult = await webhookService.sendStatusUpdateWebhook(statusChangedOrders);
 
-    console.log(`✅ [Manual Webhook Trigger] Webhook triggered for ${orders.length} orders`);
+    logger.info(`✅ [Manual Webhook Trigger] Webhook triggered for ${orders.length} orders`);
 
     return res.json({
       success: true,
@@ -9442,7 +9112,7 @@ router.post('/trigger-webhook', requireAdminOrSuperadmin, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ TRIGGER WEBHOOK ERROR:', error);
+    logger.error('❌ TRIGGER WEBHOOK ERROR:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to trigger webhook',

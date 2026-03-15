@@ -1,5 +1,6 @@
 const axios = require('axios');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 /**
  * Webhook Service for Customer Message Tracking
@@ -17,7 +18,7 @@ class WebhookService {
      */
     async sendStatusUpdateWebhook(updatedOrders) {
         if (!updatedOrders || updatedOrders.length === 0) {
-            console.log('📤 [Webhook] No updated orders to send');
+            logger.info('📤 [Webhook] No updated orders to send');
             return { success: true, message: 'No orders to send', sent: 0 };
         }
 
@@ -26,11 +27,11 @@ class WebhookService {
             this.webhookUrl = await database.getUtilityValue('OrderStatusWebhookUrl');
 
             if (!this.webhookUrl) {
-                console.log('⚠️ [Webhook] OrderStatusWebhookUrl not configured in utility table, skipping webhook');
+                logger.info('⚠️ [Webhook] OrderStatusWebhookUrl not configured in utility table, skipping webhook');
                 return { success: false, message: 'Webhook URL not configured', sent: 0 };
             }
 
-            console.log(`📤 [Webhook] Preparing to send ${updatedOrders.length} orders to ${this.webhookUrl}`);
+            logger.info(`📤 [Webhook] Preparing to send ${updatedOrders.length} orders to ${this.webhookUrl}`);
 
             // Fetch additional data for all orders in bulk
             const orderIds = updatedOrders.map(o => o.order_id);
@@ -127,7 +128,7 @@ class WebhookService {
                 orders: orders
             };
 
-            console.log(`📤 [Webhook] Sending payload with ${orders.length} orders...`);
+            logger.info(`📤 [Webhook] Sending payload with ${orders.length} orders...`);
 
             // Get retry count from utility table (default: 3)
             let maxRetries = 3;
@@ -137,14 +138,14 @@ class WebhookService {
                     maxRetries = parseInt(retryCount);
                 }
             } catch (e) {
-                console.log('⚠️ [Webhook] Could not fetch WebhookRetryCount, using default: 3');
+                logger.info('⚠️ [Webhook] Could not fetch WebhookRetryCount, using default: 3');
             }
 
             // Attempt webhook with retry logic
             let lastError = null;
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    console.log(`📤 [Webhook] Attempt ${attempt}/${maxRetries}...`);
+                    logger.info(`📤 [Webhook] Attempt ${attempt}/${maxRetries}...`);
 
                     const response = await axios.post(this.webhookUrl, payload, {
                         timeout: 30000, // 30 second timeout
@@ -154,8 +155,8 @@ class WebhookService {
                         }
                     });
 
-                    console.log(`✅ [Webhook] Successfully sent to ${this.webhookUrl} on attempt ${attempt}`);
-                    console.log(`📊 [Webhook] Response status: ${response.status}`);
+                    logger.info(`✅ [Webhook] Successfully sent to ${this.webhookUrl} on attempt ${attempt}`);
+                    logger.info(`📊 [Webhook] Response status: ${response.status}`);
 
                     return {
                         success: true,
@@ -167,25 +168,25 @@ class WebhookService {
 
                 } catch (attemptError) {
                     lastError = attemptError;
-                    console.error(`❌ [Webhook] Attempt ${attempt}/${maxRetries} failed:`, attemptError.message);
+                    logger.error(`❌ [Webhook] Attempt ${attempt}/${maxRetries} failed:`, attemptError.message);
 
                     if (attemptError.response) {
-                        console.error(`   Response status: ${attemptError.response.status}`);
+                        logger.error(`   Response status: ${attemptError.response.status}`);
                     } else if (attemptError.request) {
-                        console.error('   No response received from webhook endpoint');
+                        logger.error('   No response received from webhook endpoint');
                     }
 
                     // If not the last attempt, wait with exponential backoff
                     if (attempt < maxRetries) {
                         const delayMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s, 8s...
-                        console.log(`⏳ [Webhook] Waiting ${delayMs / 1000}s before retry...`);
+                        logger.info(`⏳ [Webhook] Waiting ${delayMs / 1000}s before retry...`);
                         await new Promise(resolve => setTimeout(resolve, delayMs));
                     }
                 }
             }
 
             // All retries exhausted
-            console.error(`❌ [Webhook] All ${maxRetries} attempts failed. Giving up.`);
+            logger.error(`❌ [Webhook] All ${maxRetries} attempts failed. Giving up.`);
 
             return {
                 success: false,
@@ -196,7 +197,7 @@ class WebhookService {
             };
 
         } catch (error) {
-            console.error('❌ [Webhook] Failed to prepare webhook data:', error.message);
+            logger.error('❌ [Webhook] Failed to prepare webhook data:', error.message);
 
             return {
                 success: false,

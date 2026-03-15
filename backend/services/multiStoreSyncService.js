@@ -6,6 +6,7 @@
 const database = require('../config/database');
 const ShipwayService = require('./shipwayService');
 const ShiprocketService = require('./shiprocketService');
+const logger = require('../utils/logger');
 const { ShipwayCarrierService } = require('./shipwayCarrierService');
 
 class MultiStoreSyncService {
@@ -19,15 +20,15 @@ class MultiStoreSyncService {
     const startTime = Date.now();
     
     try {
-      console.log('\n🚀 ========================================');
-      console.log('   MULTI-STORE SYNC STARTED');
-      console.log('========================================\n');
+      logger.info('\n🚀 ========================================');
+      logger.info('   MULTI-STORE SYNC STARTED');
+      logger.info('========================================\n');
       
       // Get all active stores
       const activeStores = await database.getActiveStores();
       
       if (activeStores.length === 0) {
-        console.log('⚠️ No active stores found');
+        logger.info('⚠️ No active stores found');
         return { 
           success: true, 
           message: 'No active stores to sync',
@@ -38,45 +39,43 @@ class MultiStoreSyncService {
         };
       }
       
-      console.log(`📦 Active stores found: ${activeStores.length}`);
+      logger.info(`📦 Active stores found: ${activeStores.length}`);
       activeStores.forEach(store => {
-        console.log(`   - ${store.store_name} (${store.account_code})`);
       });
-      console.log('');
+      logger.info('');
       
       let results;
       
       // Choose sync strategy based on store count and concurrency limit
       if (concurrencyLimit && activeStores.length > concurrencyLimit) {
-        console.log(`⚙️ Using batch processing (${concurrencyLimit} stores at a time)\n`);
+        logger.info(`⚙️ Using batch processing (${concurrencyLimit} stores at a time)\n`);
         results = await this.syncInBatches(activeStores, concurrencyLimit);
       } else {
-        console.log(`⚙️ Using full parallel processing\n`);
+        logger.info(`⚙️ Using full parallel processing\n`);
         results = await this.syncInParallel(activeStores);
       }
       
       const totalDuration = ((Date.now() - startTime) / 1000).toFixed(2);
       
-      console.log('\n========================================');
-      console.log('   MULTI-STORE SYNC COMPLETED');
-      console.log(`   Duration: ${totalDuration}s`);
-      console.log(`   ✅ Success: ${results.successful.length}/${results.totalStores}`);
-      console.log(`   ❌ Failed: ${results.failed.length}/${results.totalStores}`);
-      console.log(`   📦 Total Orders: ${results.totalOrders}`);
-      console.log('========================================\n');
+      logger.info('\n========================================');
+      logger.info('   MULTI-STORE SYNC COMPLETED');
+      logger.info(`   Duration: ${totalDuration}s`);
+      logger.info(`   ✅ Success: ${results.successful.length}/${results.totalStores}`);
+      logger.info(`   ❌ Failed: ${results.failed.length}/${results.totalStores}`);
+      logger.info(`   📦 Total Orders: ${results.totalOrders}`);
+      logger.info('========================================\n');
       
       if (results.failed.length > 0) {
-        console.log('⚠️ Failed stores:');
+        logger.info('⚠️ Failed stores:');
         results.failed.forEach(f => {
-          console.log(`   - ${f.storeName} (${f.accountCode}): ${f.error}`);
         });
-        console.log('');
+        logger.info('');
       }
       
       return results;
       
     } catch (error) {
-      console.error('❌ Multi-store sync failed:', error);
+      logger.error('❌ Multi-store sync failed:', error);
       throw error;
     }
   }
@@ -112,8 +111,8 @@ class MultiStoreSyncService {
       const batchNumber = Math.floor(i / batchSize) + 1;
       const totalBatches = Math.ceil(stores.length / batchSize);
       
-      console.log(`\n📦 Batch ${batchNumber}/${totalBatches}:`);
-      console.log(`   Stores: ${batch.map(s => s.store_name).join(', ')}\n`);
+      logger.info(`\n📦 Batch ${batchNumber}/${totalBatches}:`);
+      logger.info(`   Stores: ${batch.map(s => s.store_name).join(', ')}\n`);
       
       // Sync batch in parallel
       const batchPromises = batch.map(store => this.syncSingleStore(store));
@@ -134,7 +133,7 @@ class MultiStoreSyncService {
     const startTime = Date.now();
     
     try {
-      console.log(`\n🔄 [${store.account_code}] Starting sync for "${store.store_name}"...`);
+      logger.info(`\n🔄 [${store.account_code}] Starting sync for "${store.store_name}"...`);
       
       let orderCount = 0;
       let carrierCount = 0;
@@ -144,7 +143,7 @@ class MultiStoreSyncService {
       
       // Sync orders based on shipping partner
       try {
-        console.log(`   📦 Syncing orders (${store.shipping_partner})...`);
+        logger.info(`   📦 Syncing orders (${store.shipping_partner})...`);
         
         if (shippingPartner === 'shiprocket') {
           const shiprocketService = new ShiprocketService(store.account_code);
@@ -157,15 +156,15 @@ class MultiStoreSyncService {
           orderCount = orderResult.count || 0;
         }
         
-        console.log(`   ✅ Orders synced: ${orderCount}`);
+        logger.info(`   ✅ Orders synced: ${orderCount}`);
       } catch (orderError) {
-        console.error(`   ❌ Order sync failed:`, orderError.message);
+        logger.error(`   ❌ Order sync failed:`, orderError.message);
         throw new Error(`Order sync failed: ${orderError.message}`);
       }
       
       // Sync carriers based on shipping partner
       try {
-        console.log(`   🚚 Syncing carriers (${store.shipping_partner})...`);
+        logger.info(`   🚚 Syncing carriers (${store.shipping_partner})...`);
         
         if (shippingPartner === 'shiprocket') {
           const shiprocketService = new ShiprocketService(store.account_code);
@@ -177,26 +176,26 @@ class MultiStoreSyncService {
           carrierCount = carrierResult.carrierCount || 0;
         }
         
-        console.log(`   ✅ Carriers synced: ${carrierCount}`);
+        logger.info(`   ✅ Carriers synced: ${carrierCount}`);
       } catch (carrierError) {
-        console.error(`   ⚠️ Carrier sync failed (non-critical):`, carrierError.message);
+        logger.error(`   ⚠️ Carrier sync failed (non-critical):`, carrierError.message);
         // Don't fail the whole sync if carrier sync fails
       }
       
       // Sync products from Shopify (if configured)
       if (store.shopify_token && store.shopify_store_url) {
         try {
-          console.log(`   🛍️ Syncing products from Shopify...`);
+          logger.info(`   🛍️ Syncing products from Shopify...`);
           const ShopifyProductFetcher = require('./shopifyProductFetcher');
           const productFetcher = new ShopifyProductFetcher(store.account_code);
           const productResult = await productFetcher.syncProducts();
           productCount = productResult.productCount || 0;
-          console.log(`   ✅ Products synced: ${productCount}`);
+          logger.info(`   ✅ Products synced: ${productCount}`);
           
           // Update Shopify sync timestamp
           await database.updateStoreShopifySync(store.account_code);
         } catch (productError) {
-          console.error(`   ⚠️ Product sync failed (non-critical):`, productError.message);
+          logger.error(`   ⚠️ Product sync failed (non-critical):`, productError.message);
           // Don't fail the whole sync if product sync fails
         }
       }
@@ -205,8 +204,8 @@ class MultiStoreSyncService {
       await database.updateStoreLastSync(store.account_code);
       
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.log(`✅ [${store.account_code}] Sync completed in ${duration}s`);
-      console.log(`   Orders: ${orderCount} | Carriers: ${carrierCount} | Products: ${productCount}`);
+      logger.info(`✅ [${store.account_code}] Sync completed in ${duration}s`);
+      logger.info(`   Orders: ${orderCount} | Carriers: ${carrierCount} | Products: ${productCount}`);
       
       return {
         success: true,
@@ -220,8 +219,8 @@ class MultiStoreSyncService {
       
     } catch (error) {
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.error(`❌ [${store.account_code}] Sync failed after ${duration}s`);
-      console.error(`   Error: ${error.message}`);
+      logger.error(`❌ [${store.account_code}] Sync failed after ${duration}s`);
+      logger.error(`   Error: ${error.message}`);
       
       return {
         success: false,
@@ -294,14 +293,14 @@ class MultiStoreSyncService {
         throw new Error(`Store is not active: ${accountCode}`);
       }
       
-      console.log(`\n🔄 Syncing single store: ${store.store_name} (${accountCode})\n`);
+      logger.info(`\n🔄 Syncing single store: ${store.store_name} (${accountCode})\n`);
       
       const result = await this.syncSingleStore(store);
       
       return result;
       
     } catch (error) {
-      console.error(`❌ Failed to sync store ${accountCode}:`, error);
+      logger.error(`❌ Failed to sync store ${accountCode}:`, error);
       throw error;
     }
   }

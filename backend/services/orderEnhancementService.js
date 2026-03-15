@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 class OrderEnhancementService {
   constructor() {
@@ -12,13 +13,13 @@ class OrderEnhancementService {
    * This is called after orders are synced to MySQL by shipwayService
    */
   async enhanceOrdersMySQL() {
-    console.log('🔧 OrderEnhancementService: Starting automatic MySQL enhancement...');
+    logger.info('🔧 OrderEnhancementService: Starting automatic MySQL enhancement...');
     
     try {
       // Wait for MySQL initialization
       await database.waitForMySQLInitialization();
       if (!database.isMySQLAvailable()) {
-        console.log('❌ OrderEnhancementService: MySQL connection not available');
+        logger.info('❌ OrderEnhancementService: MySQL connection not available');
         return { success: false, message: 'MySQL connection not available' };
       }
 
@@ -26,19 +27,19 @@ class OrderEnhancementService {
       const [orders] = await database.mysqlConnection.execute(
         'SELECT unique_id, order_id, customer_name FROM orders WHERE customer_name IS NULL OR customer_name = \'\''
       );
-      console.log(`📊 OrderEnhancementService: ${orders.length} orders need customer_name from MySQL`);
+      logger.info(`📊 OrderEnhancementService: ${orders.length} orders need customer_name from MySQL`);
 
       if (orders.length === 0) {
-        console.log('ℹ️  OrderEnhancementService: All orders already have customer_name, skipping');
+        logger.info('ℹ️  OrderEnhancementService: All orders already have customer_name, skipping');
         return { success: true, message: 'No orders to enhance' };
       }
 
       let customerNamesAdded = 0;
 
-      console.log(`🖊️ OrderEnhancementService: Adding customer names for ${orders.length} orders...`);
+      logger.info(`🖊️ OrderEnhancementService: Adding customer names for ${orders.length} orders...`);
       customerNamesAdded = await this.addCustomerNamesToMySQL(orders);
 
-      console.log(`✅ OrderEnhancementService: MySQL enhancement completed - Customer names: ${customerNamesAdded}`);
+      logger.info(`✅ OrderEnhancementService: MySQL enhancement completed - Customer names: ${customerNamesAdded}`);
       
       return {
         success: true,
@@ -47,7 +48,7 @@ class OrderEnhancementService {
       };
 
     } catch (error) {
-      console.error('❌ OrderEnhancementService: MySQL enhancement failed:', error);
+      logger.error('❌ OrderEnhancementService: MySQL enhancement failed:', error);
       return { success: false, message: 'Enhancement failed: ' + error.message };
     }
   }
@@ -58,7 +59,7 @@ class OrderEnhancementService {
    */
   async addCustomerNames(orders) {
     if (!fs.existsSync(this.rawShipwayPath)) {
-      console.log('⚠️  OrderEnhancementService: raw_shipway_orders.json not found');
+      logger.info('⚠️  OrderEnhancementService: raw_shipway_orders.json not found');
       return orders.map(order => ({ ...order, customer_name: 'N/A' }));
     }
 
@@ -85,7 +86,7 @@ class OrderEnhancementService {
         }
       });
 
-      console.log(`🗺️  OrderEnhancementService: Created customer map with ${Object.keys(customerNameMap).length} entries`);
+      logger.info(`🗺️  OrderEnhancementService: Created customer map with ${Object.keys(customerNameMap).length} entries`);
 
       // Add customer names to orders
       return orders.map(order => ({
@@ -94,7 +95,7 @@ class OrderEnhancementService {
       }));
 
     } catch (error) {
-      console.error('❌ OrderEnhancementService: Error adding customer names:', error.message);
+      logger.error('❌ OrderEnhancementService: Error adding customer names:', error.message);
       return orders.map(order => ({ ...order, customer_name: 'N/A' }));
     }
   }
@@ -126,7 +127,7 @@ class OrderEnhancementService {
         }
       });
 
-      console.log(`🗺️  OrderEnhancementService: Created customer map with ${customerMap.size} entries for MySQL update`);
+      logger.info(`🗺️  OrderEnhancementService: Created customer map with ${customerMap.size} entries for MySQL update`);
 
       // Update orders in MySQL
       for (const order of orders) {
@@ -139,7 +140,7 @@ class OrderEnhancementService {
       }
       
     } catch (error) {
-      console.error('❌ OrderEnhancementService: Error adding customer names to MySQL:', error);
+      logger.error('❌ OrderEnhancementService: Error adding customer names to MySQL:', error);
     }
     
     return customerNamesAdded;

@@ -4,6 +4,7 @@
  */
 
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 class ProductMonitorService {
   constructor() {
@@ -16,12 +17,12 @@ class ProductMonitorService {
    */
   async checkNewProducts() {
     if (this.isRunning) {
-      console.log('[Product Monitor] Check already in progress, skipping...');
+      logger.info('[Product Monitor] Check already in progress, skipping...');
       return { skipped: true };
     }
 
     this.isRunning = true;
-    console.log('[Product Monitor] Starting check for new products...');
+    logger.info('[Product Monitor] Starting check for new products...');
 
     try {
       // Wait for MySQL initialization
@@ -49,13 +50,13 @@ class ProductMonitorService {
         ORDER BY created_at DESC
       `);
 
-      console.log(`[Product Monitor] Found ${newProducts.length} new product(s) in the last 24 hours`);
+      logger.info(`[Product Monitor] Found ${newProducts.length} new product(s) in the last 24 hours`);
 
       // Log details of new products
       if (newProducts.length > 0) {
-        console.log('[Product Monitor] New Products:');
+        logger.info('[Product Monitor] New Products:');
         newProducts.forEach((product, index) => {
-          console.log(`  ${index + 1}. ${product.name} (ID: ${product.id}, SKU: ${product.sku_id || 'N/A'}, Created: ${product.created_at})`);
+          logger.info(`  ${index + 1}. ${product.name} (ID: ${product.id}, SKU: ${product.sku_id || 'N/A'}, Created: ${product.created_at})`);
         });
       }
 
@@ -75,7 +76,7 @@ class ProductMonitorService {
         timestamp: new Date().toISOString()
       };
     } catch (error) {
-      console.error('[Product Monitor] Error checking new products:', error.message);
+      logger.error('[Product Monitor] Error checking new products:', error.message);
       this.isRunning = false;
       throw error;
     }
@@ -88,12 +89,12 @@ class ProductMonitorService {
    */
   async checkNewProductsCustomWindow(hours = 24) {
     if (this.isRunning) {
-      console.log('[Product Monitor] Check already in progress, skipping...');
+      logger.info('[Product Monitor] Check already in progress, skipping...');
       return { skipped: true };
     }
 
     this.isRunning = true;
-    console.log(`[Product Monitor] Starting check for new products (last ${hours} hours)...`);
+    logger.info(`[Product Monitor] Starting check for new products (last ${hours} hours)...`);
 
     try {
       await database.waitForMySQLInitialization();
@@ -122,12 +123,12 @@ class ProductMonitorService {
         [hours]
       );
 
-      console.log(`[Product Monitor] Found ${newProducts.length} new product(s) in the last ${hours} hours`);
+      logger.info(`[Product Monitor] Found ${newProducts.length} new product(s) in the last ${hours} hours`);
 
       if (newProducts.length > 0) {
-        console.log('[Product Monitor] New Products:');
+        logger.info('[Product Monitor] New Products:');
         newProducts.forEach((product, index) => {
-          console.log(`  ${index + 1}. ${product.name} (ID: ${product.id}, SKU: ${product.sku_id || 'N/A'}, Created: ${product.created_at})`);
+          logger.info(`  ${index + 1}. ${product.name} (ID: ${product.id}, SKU: ${product.sku_id || 'N/A'}, Created: ${product.created_at})`);
         });
       }
 
@@ -140,7 +141,7 @@ class ProductMonitorService {
         timestamp: new Date().toISOString()
       };
     } catch (error) {
-      console.error('[Product Monitor] Error checking new products:', error.message);
+      logger.error('[Product Monitor] Error checking new products:', error.message);
       this.isRunning = false;
       throw error;
     }
@@ -152,7 +153,7 @@ class ProductMonitorService {
    * @returns {Promise<Object>} Result with updated products count and data
    */
   async checkUpdatedProducts(hours = 24) {
-    console.log(`[Product Monitor] Checking for updated products (last ${hours} hours)...`);
+    logger.info(`[Product Monitor] Checking for updated products (last ${hours} hours)...`);
 
     try {
       await database.waitForMySQLInitialization();
@@ -182,7 +183,7 @@ class ProductMonitorService {
         [hours]
       );
 
-      console.log(`[Product Monitor] Found ${updatedProducts.length} updated product(s) in the last ${hours} hours`);
+      logger.info(`[Product Monitor] Found ${updatedProducts.length} updated product(s) in the last ${hours} hours`);
 
       return {
         success: true,
@@ -192,7 +193,7 @@ class ProductMonitorService {
         timestamp: new Date().toISOString()
       };
     } catch (error) {
-      console.error('[Product Monitor] Error checking updated products:', error.message);
+      logger.error('[Product Monitor] Error checking updated products:', error.message);
       throw error;
     }
   }

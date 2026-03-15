@@ -1,6 +1,8 @@
 const path = require('path');
 const fs = require('fs');
 const mysql = require('mysql2/promise');
+const logger = require('../utils/logger');
+const { normalizeProductCode } = require('../utils/productCodeNormalizer');
 
 /**
  * Database Configuration and Utilities
@@ -64,13 +66,13 @@ class Database {
 
       // 2.4 — Log pool-level errors (e.g. unexpected disconnects)
       this.pool.on('error', (err) => {
-        console.error('Pool error:', err.code, err.message);
+        logger.error('Pool error:', err.code, err.message);
       });
 
       // Keep mysqlConnection as an alias so existing callers don't break
       this.mysqlConnection = this.pool;
 
-      console.log('✅ MySQL connection pool established with IST timezone (+05:30) - 20 connections available');
+      logger.info('✅ MySQL connection pool established with IST timezone (+05:30) - 20 connections available');
       await this.createUtilityTable();
       await this.createStoreInfoTable();
       await this.createCarriersTable();
@@ -87,7 +89,7 @@ class Database {
       // 2.2 — Mark as 'ready' only after all tables are created
       this.mysqlState = 'ready';
     } catch (error) {
-      console.error('❌ MySQL connection pool failed:', error.message);
+      logger.error('❌ MySQL connection pool failed:', error.message);
       // 2.2 — 'failed' lets waitForMySQLInitialization() reject instead of spinning
       this.mysqlState = 'failed';
       this.pool = null;
@@ -117,7 +119,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ Utility table created/verified');
+      logger.info('✅ Utility table created/verified');
 
       // Migrate existing utility table to support TEXT values if needed
       await this.migrateUtilityTableToText();
@@ -139,9 +141,9 @@ class Database {
       // Initialize ShipmentStatusMapping
       await this.initializeShipmentStatusMapping();
 
-      console.log('✅ Utility table initialized with default parameters');
+      logger.info('✅ Utility table initialized with default parameters');
     } catch (error) {
-      console.error('❌ Error creating utility table:', error.message);
+      logger.error('❌ Error creating utility table:', error.message);
     }
   }
 
@@ -163,14 +165,14 @@ class Database {
 
         // If it's VARCHAR, alter to TEXT
         if (currentType.includes('VARCHAR')) {
-          console.log('🔄 Migrating utility.value column from VARCHAR to TEXT...');
+          logger.info('🔄 Migrating utility.value column from VARCHAR to TEXT...');
 
           // First, drop the unique constraint if it exists (on parameter, value)
           try {
             await this.mysqlConnection.execute(
               `ALTER TABLE utility DROP INDEX unique_parameter_value`
             );
-            console.log('✅ Dropped old unique_parameter_value constraint');
+            logger.info('✅ Dropped old unique_parameter_value constraint');
           } catch (err) {
             // Constraint might not exist, that's OK
           }
@@ -189,11 +191,11 @@ class Database {
             // Constraint might already exist
           }
 
-          console.log('✅ Migrated utility.value column to TEXT');
+          logger.info('✅ Migrated utility.value column to TEXT');
         }
       }
     } catch (error) {
-      console.error('❌ Error migrating utility table to TEXT:', error.message);
+      logger.error('❌ Error migrating utility table to TEXT:', error.message);
     }
   }
 
@@ -211,7 +213,7 @@ class Database {
       );
 
       if (existing.length === 0) {
-        console.log('🔄 Initializing ShipmentStatusMapping...');
+        logger.info('🔄 Initializing ShipmentStatusMapping...');
 
         // Mapping based on user-provided table
         const shipmentStatusMapping = [
@@ -247,12 +249,12 @@ class Database {
           ['ShipmentStatusMapping', JSON.stringify(shipmentStatusMapping)]
         );
 
-        console.log('✅ ShipmentStatusMapping initialized with', shipmentStatusMapping.length, 'status mappings');
+        logger.info('✅ ShipmentStatusMapping initialized with', shipmentStatusMapping.length, 'status mappings');
       } else {
-        console.log('✅ ShipmentStatusMapping already exists');
+        logger.info('✅ ShipmentStatusMapping already exists');
       }
     } catch (error) {
-      console.error('❌ Error initializing ShipmentStatusMapping:', error.message);
+      logger.error('❌ Error initializing ShipmentStatusMapping:', error.message);
     }
   }
 
@@ -282,12 +284,12 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ Carriers table created/verified');
+      logger.info('✅ Carriers table created/verified');
 
       // Add account_code column if it doesn't exist (for existing tables)
       await this.addAccountCodeToCarriersIfNotExists();
     } catch (error) {
-      console.error('❌ Error creating carriers table:', error.message);
+      logger.error('❌ Error creating carriers table:', error.message);
     }
   }
 
@@ -304,7 +306,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding account_code column to existing carriers table...');
+        logger.info('🔄 Adding account_code column to existing carriers table...');
 
         // Add account_code column as NOT NULL (will require data migration for existing rows)
         await this.mysqlConnection.execute(
@@ -316,12 +318,12 @@ class Database {
           `ALTER TABLE carriers ADD INDEX idx_account_code (account_code)`
         );
 
-        console.log('✅ account_code column added to carriers table');
+        logger.info('✅ account_code column added to carriers table');
       } else {
-        console.log('✅ account_code column already exists in carriers table');
+        logger.info('✅ account_code column already exists in carriers table');
       }
     } catch (error) {
-      console.error('❌ Error adding account_code column to carriers table:', error.message);
+      logger.error('❌ Error adding account_code column to carriers table:', error.message);
     }
   }
 
@@ -349,7 +351,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ Products table created/verified');
+      logger.info('✅ Products table created/verified');
 
       // Add sku_id column if it doesn't exist (for existing tables)
       try {
@@ -357,13 +359,13 @@ class Database {
           ALTER TABLE products 
           ADD COLUMN sku_id VARCHAR(100)
         `);
-        console.log('✅ Added sku_id column to products table');
+        logger.info('✅ Added sku_id column to products table');
       } catch (error) {
         // Column might already exist, check if it's the expected error
         if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ sku_id column already exists in products table');
+          logger.info('ℹ️ sku_id column already exists in products table');
         } else {
-          console.error('❌ Error adding sku_id column to products table:', error.message);
+          logger.error('❌ Error adding sku_id column to products table:', error.message);
         }
       }
 
@@ -374,13 +376,13 @@ class Database {
           CREATE UNIQUE INDEX idx_sku_account_unique 
           ON products (sku_id, account_code)
         `);
-        console.log('✅ Added unique index on (sku_id, account_code)');
+        logger.info('✅ Added unique index on (sku_id, account_code)');
       } catch (error) {
         // Index might already exist
         if (error.code === 'ER_DUP_KEYNAME' || error.code === 'ER_DUP_ENTRY') {
-          console.log('ℹ️ Unique index on (sku_id, account_code) already exists');
+          logger.info('ℹ️ Unique index on (sku_id, account_code) already exists');
         } else {
-          console.error('❌ Error adding unique index on (sku_id, account_code):', error.message);
+          logger.error('❌ Error adding unique index on (sku_id, account_code):', error.message);
         }
       }
 
@@ -396,12 +398,12 @@ class Database {
           ALTER TABLE products 
           ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         `);
-        console.log('✅ Added created_at column to products table');
+        logger.info('✅ Added created_at column to products table');
       } catch (error) {
         if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ created_at column already exists in products table');
+          logger.info('ℹ️ created_at column already exists in products table');
         } else {
-          console.error('❌ Error adding created_at column to products table:', error.message);
+          logger.error('❌ Error adding created_at column to products table:', error.message);
         }
       }
 
@@ -411,16 +413,16 @@ class Database {
           ALTER TABLE products 
           ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         `);
-        console.log('✅ Added updated_at column to products table');
+        logger.info('✅ Added updated_at column to products table');
       } catch (error) {
         if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ updated_at column already exists in products table');
+          logger.info('ℹ️ updated_at column already exists in products table');
         } else {
-          console.error('❌ Error adding updated_at column to products table:', error.message);
+          logger.error('❌ Error adding updated_at column to products table:', error.message);
         }
       }
     } catch (error) {
-      console.error('❌ Error creating products table:', error.message);
+      logger.error('❌ Error creating products table:', error.message);
     }
   }
 
@@ -437,7 +439,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding account_code column to existing products table...');
+        logger.info('🔄 Adding account_code column to existing products table...');
 
         // Add account_code column as NOT NULL (will require data migration for existing rows)
         await this.mysqlConnection.execute(
@@ -449,12 +451,12 @@ class Database {
           `ALTER TABLE products ADD INDEX idx_account_code (account_code)`
         );
 
-        console.log('✅ account_code column added to products table');
+        logger.info('✅ account_code column added to products table');
       } else {
-        console.log('✅ account_code column already exists in products table');
+        logger.info('✅ account_code column already exists in products table');
       }
     } catch (error) {
-      console.error('❌ Error adding account_code column to products table:', error.message);
+      logger.error('❌ Error adding account_code column to products table:', error.message);
     }
   }
 
@@ -475,7 +477,7 @@ class Database {
 
       // If primary key is only on 'id', migrate to composite (id, account_code)
       if (primaryKeyCols.length === 1 && primaryKeyCols[0] === 'id') {
-        console.log('🔄 Migrating products primary key to composite (id, account_code)...');
+        logger.info('🔄 Migrating products primary key to composite (id, account_code)...');
 
         // First, remove any duplicate rows that might exist (keep the first one)
         // This prevents the ALTER from failing due to duplicate composite keys
@@ -495,12 +497,12 @@ class Database {
           `ALTER TABLE products DROP PRIMARY KEY, ADD PRIMARY KEY (id, account_code)`
         );
 
-        console.log('✅ Products primary key migrated to composite (id, account_code)');
+        logger.info('✅ Products primary key migrated to composite (id, account_code)');
       } else if (primaryKeyCols.includes('id') && primaryKeyCols.includes('account_code')) {
-        console.log('✅ Products primary key already composite (id, account_code)');
+        logger.info('✅ Products primary key already composite (id, account_code)');
       }
     } catch (error) {
-      console.error('❌ Error migrating products primary key:', error.message);
+      logger.error('❌ Error migrating products primary key:', error.message);
     }
   }
 
@@ -538,9 +540,9 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ Users table created/verified');
+      logger.info('✅ Users table created/verified');
     } catch (error) {
-      console.error('❌ Error creating users table:', error.message);
+      logger.error('❌ Error creating users table:', error.message);
     }
   }
 
@@ -581,9 +583,9 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ Settlements table created/verified');
+      logger.info('✅ Settlements table created/verified');
     } catch (error) {
-      console.error('❌ Error creating settlements table:', error.message);
+      logger.error('❌ Error creating settlements table:', error.message);
     }
   }
 
@@ -609,9 +611,9 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ Transactions table created/verified');
+      logger.info('✅ Transactions table created/verified');
     } catch (error) {
-      console.error('❌ Error creating transactions table:', error.message);
+      logger.error('❌ Error creating transactions table:', error.message);
     }
   }
 
@@ -623,7 +625,7 @@ class Database {
 
     try {
       // Create orders table if it doesn't exist (preserve existing data)
-      console.log('🔄 Creating orders table if it doesn\'t exist...');
+      logger.info('🔄 Creating orders table if it doesn\'t exist...');
 
       const createTableQuery = `
         CREATE TABLE IF NOT EXISTS orders (
@@ -661,7 +663,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ Fresh orders table created with clean structure');
+      logger.info('✅ Fresh orders table created with clean structure');
 
       // Add size column to existing tables if it doesn't exist (migration)
       await this.addSizeColumnIfNotExists();
@@ -686,8 +688,98 @@ class Database {
 
       // Create customer info table for storing customer details
       await this.createCustomerInfoTable();
+
+      // Stage 8 — Add normalized_product_code column + index + backfill
+      await this.addNormalizedProductCodeIfNotExists();
     } catch (error) {
-      console.error('❌ Error creating orders table:', error.message);
+      logger.error('❌ Error creating orders table:', error.message);
+    }
+  }
+
+  /**
+   * Stage 8 — Add normalized_product_code column, index, and backfill existing rows.
+   * Runs automatically on every startup; all steps are idempotent.
+   * New rows are handled by createOrder() which calls normalizeProductCode() before INSERT.
+   */
+  async addNormalizedProductCodeIfNotExists() {
+    if (!this.mysqlConnection) return;
+
+    try {
+      // ── 1. Add column if missing ──────────────────────────────────────────
+      const [cols] = await this.mysqlConnection.execute(
+        `SELECT COLUMN_NAME
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME   = 'orders'
+           AND COLUMN_NAME  = 'normalized_product_code'`
+      );
+
+      if (cols.length === 0) {
+        logger.info('🔄 Stage 8: Adding normalized_product_code column...');
+        await this.mysqlConnection.execute(
+          `ALTER TABLE orders
+             ADD COLUMN normalized_product_code VARCHAR(255) DEFAULT NULL
+               AFTER product_code`
+        );
+        logger.info('✅ Stage 8: normalized_product_code column added');
+      }
+
+      // ── 2. Add index if missing ───────────────────────────────────────────
+      const [idxRows] = await this.mysqlConnection.execute(
+        `SELECT INDEX_NAME
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME   = 'orders'
+           AND INDEX_NAME   = 'idx_normalized_code'`
+      );
+
+      if (idxRows.length === 0) {
+        logger.info('🔄 Stage 8: Creating idx_normalized_code index...');
+        await this.mysqlConnection.execute(
+          `CREATE INDEX idx_normalized_code ON orders (normalized_product_code)`
+        );
+        logger.info('✅ Stage 8: idx_normalized_code index created');
+      }
+
+      // ── 3. Backfill rows that still have NULL (first deploy, or missed rows) ──
+      //    Fetch only the rows that need it — keeps the startup fast on re-runs.
+      const [nullRows] = await this.mysqlConnection.execute(
+        `SELECT unique_id, product_code
+         FROM orders
+         WHERE normalized_product_code IS NULL
+           AND product_code IS NOT NULL
+         LIMIT 5000`
+      );
+
+      if (nullRows.length > 0) {
+        logger.info(`🔄 Stage 8: Backfilling ${nullRows.length} rows...`);
+        // Build a CASE WHEN batch UPDATE to avoid N individual queries
+        const cases = nullRows
+          .map(() => 'WHEN unique_id = ? THEN ?')
+          .join('\n          ');
+        const params = nullRows.flatMap(row => [
+          row.unique_id,
+          normalizeProductCode(row.product_code)
+        ]);
+        const ids = nullRows.map(() => '?').join(',');
+
+        await this.mysqlConnection.execute(
+          `UPDATE orders
+           SET normalized_product_code = CASE
+             ${cases}
+             ELSE normalized_product_code
+           END
+           WHERE unique_id IN (${ids})`,
+          [...params, ...nullRows.map(r => r.unique_id)]
+        );
+        logger.info(`✅ Stage 8: Backfilled ${nullRows.length} rows`);
+      } else {
+        logger.info('✅ Stage 8: normalized_product_code is up to date');
+      }
+    } catch (error) {
+      // Non-fatal: log and continue startup — the old REGEXP_REPLACE joins are gone,
+      // so images may not load for un-backfilled rows, but the server stays up.
+      logger.error('⚠️ Stage 8 migration error (non-fatal):', error.message);
     }
   }
 
@@ -695,6 +787,7 @@ class Database {
    * Add size column to existing orders table if it doesn't exist (migration)
    */
   async addSizeColumnIfNotExists() {
+
     if (!this.mysqlConnection) return;
 
     try {
@@ -704,7 +797,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding size column to existing orders table...');
+        logger.info('🔄 Adding size column to existing orders table...');
 
         // Add size column
         await this.mysqlConnection.execute(
@@ -716,15 +809,15 @@ class Database {
           `ALTER TABLE orders ADD INDEX idx_size (size)`
         );
 
-        console.log('✅ Size column added to orders table');
+        logger.info('✅ Size column added to orders table');
 
         // Update existing orders with extracted size
         await this.updateExistingOrdersWithSize();
       } else {
-        console.log('✅ Size column already exists in orders table');
+        logger.info('✅ Size column already exists in orders table');
       }
     } catch (error) {
-      console.error('❌ Error adding size column:', error.message);
+      logger.error('❌ Error adding size column:', error.message);
     }
   }
 
@@ -744,7 +837,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding account_code column to existing orders table...');
+        logger.info('🔄 Adding account_code column to existing orders table...');
 
         // Add account_code column as NOT NULL (will require data migration for existing rows)
         await this.mysqlConnection.execute(
@@ -756,12 +849,12 @@ class Database {
           `ALTER TABLE orders ADD INDEX idx_account_code (account_code)`
         );
 
-        console.log('✅ account_code column added to orders table');
+        logger.info('✅ account_code column added to orders table');
       } else {
-        console.log('✅ account_code column already exists in orders table');
+        logger.info('✅ account_code column already exists in orders table');
       }
     } catch (error) {
-      console.error('❌ Error adding account_code column to orders table:', error.message);
+      logger.error('❌ Error adding account_code column to orders table:', error.message);
     }
   }
 
@@ -778,14 +871,14 @@ class Database {
       );
 
       if (shipmentCols.length === 0) {
-        console.log('🔄 Adding shipment_id column to orders table...');
+        logger.info('🔄 Adding shipment_id column to orders table...');
         await this.mysqlConnection.execute(
           `ALTER TABLE orders ADD COLUMN shipment_id VARCHAR(100) AFTER unique_id`
         );
         await this.mysqlConnection.execute(
           `ALTER TABLE orders ADD INDEX idx_shipment_id (shipment_id)`
         );
-        console.log('✅ shipment_id column added to orders table');
+        logger.info('✅ shipment_id column added to orders table');
       }
 
       // Check and add channel_id column
@@ -794,14 +887,14 @@ class Database {
       );
 
       if (channelCols.length === 0) {
-        console.log('🔄 Adding channel_id column to orders table...');
+        logger.info('🔄 Adding channel_id column to orders table...');
         await this.mysqlConnection.execute(
           `ALTER TABLE orders ADD COLUMN channel_id VARCHAR(100) AFTER shipment_id`
         );
         await this.mysqlConnection.execute(
           `ALTER TABLE orders ADD INDEX idx_channel_id (channel_id)`
         );
-        console.log('✅ channel_id column added to orders table');
+        logger.info('✅ channel_id column added to orders table');
       }
 
       // Check and add partner_order_id column
@@ -810,17 +903,17 @@ class Database {
       );
 
       if (partnerOrderCols.length === 0) {
-        console.log('🔄 Adding partner_order_id column to orders table...');
+        logger.info('🔄 Adding partner_order_id column to orders table...');
         await this.mysqlConnection.execute(
           `ALTER TABLE orders ADD COLUMN partner_order_id VARCHAR(100) AFTER channel_id`
         );
         await this.mysqlConnection.execute(
           `ALTER TABLE orders ADD INDEX idx_partner_order_id (partner_order_id)`
         );
-        console.log('✅ partner_order_id column added to orders table');
+        logger.info('✅ partner_order_id column added to orders table');
       }
     } catch (error) {
-      console.error('❌ Error adding Shiprocket columns to orders table:', error.message);
+      logger.error('❌ Error adding Shiprocket columns to orders table:', error.message);
     }
   }
 
@@ -842,21 +935,21 @@ class Database {
         if (match) {
           const currentSize = parseInt(match[1]);
           if (currentSize < 255) {
-            console.log(`🔄 Increasing id column size from VARCHAR(${currentSize}) to VARCHAR(255)...`);
+            logger.info(`🔄 Increasing id column size from VARCHAR(${currentSize}) to VARCHAR(255)...`);
 
             // Note: Don't specify PRIMARY KEY here - MySQL preserves it when modifying the column
             await this.mysqlConnection.execute(
               `ALTER TABLE orders MODIFY COLUMN id VARCHAR(255)`
             );
 
-            console.log('✅ id column size increased to VARCHAR(255)');
+            logger.info('✅ id column size increased to VARCHAR(255)');
           } else {
-            console.log(`✅ id column size is already VARCHAR(${currentSize})`);
+            logger.info(`✅ id column size is already VARCHAR(${currentSize})`);
           }
         }
       }
     } catch (error) {
-      console.error('❌ Error increasing id column size:', error.message);
+      logger.error('❌ Error increasing id column size:', error.message);
     }
   }
 
@@ -867,7 +960,7 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      console.log('🔄 Updating existing orders with size information...');
+      logger.info('🔄 Updating existing orders with size information...');
 
       // Get all orders that don't have size information
       const [orders] = await this.mysqlConnection.execute(
@@ -886,9 +979,9 @@ class Database {
         }
       }
 
-      console.log(`✅ Updated ${updatedCount} orders with size information`);
+      logger.info(`✅ Updated ${updatedCount} orders with size information`);
     } catch (error) {
-      console.error('❌ Error updating existing orders with size:', error.message);
+      logger.error('❌ Error updating existing orders with size:', error.message);
     }
   }
 
@@ -898,7 +991,7 @@ class Database {
   async createLabelsTable() {
     try {
       // Create labels table if it doesn't exist (preserve existing data)
-      console.log('🔄 Creating labels table if not exists...');
+      logger.info('🔄 Creating labels table if not exists...');
 
       const createLabelsTableQuery = `
         CREATE TABLE IF NOT EXISTS labels (
@@ -930,7 +1023,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createLabelsTableQuery);
-      console.log('✅ Labels table created/verified (existing data preserved)');
+      logger.info('✅ Labels table created/verified (existing data preserved)');
 
       // Add is_manifest column if it doesn't exist (for existing tables)
       try {
@@ -939,13 +1032,13 @@ class Database {
           ADD COLUMN is_manifest TINYINT(1) DEFAULT 0,
           ADD INDEX idx_is_manifest (is_manifest)
         `);
-        console.log('✅ Added is_manifest column to labels table');
+        logger.info('✅ Added is_manifest column to labels table');
       } catch (error) {
         // Column might already exist, check if it's the expected error
         if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ is_manifest column already exists in labels table');
+          logger.info('ℹ️ is_manifest column already exists in labels table');
         } else {
-          console.error('❌ Error adding is_manifest column to labels table:', error.message);
+          logger.error('❌ Error adding is_manifest column to labels table:', error.message);
         }
       }
 
@@ -956,12 +1049,12 @@ class Database {
           ADD COLUMN is_handover TINYINT(1) DEFAULT 0,
           ADD INDEX idx_is_handover (is_handover)
         `);
-        console.log('✅ Added is_handover column to labels table');
+        logger.info('✅ Added is_handover column to labels table');
       } catch (error) {
         if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ is_handover column already exists in labels table');
+          logger.info('ℹ️ is_handover column already exists in labels table');
         } else {
-          console.error('❌ Error adding is_handover column to labels table:', error.message);
+          logger.error('❌ Error adding is_handover column to labels table:', error.message);
         }
       }
 
@@ -972,12 +1065,12 @@ class Database {
           ADD COLUMN current_shipment_status VARCHAR(100) NULL,
           ADD INDEX idx_current_shipment_status (current_shipment_status)
         `);
-        console.log('✅ Added current_shipment_status column to labels table');
+        logger.info('✅ Added current_shipment_status column to labels table');
       } catch (error) {
         if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ current_shipment_status column already exists in labels table');
+          logger.info('ℹ️ current_shipment_status column already exists in labels table');
         } else {
-          console.error('❌ Error adding current_shipment_status column to labels table:', error.message);
+          logger.error('❌ Error adding current_shipment_status column to labels table:', error.message);
         }
       }
 
@@ -988,12 +1081,12 @@ class Database {
           ADD COLUMN manifest_id VARCHAR(100) NULL,
           ADD INDEX idx_manifest_id (manifest_id)
         `);
-        console.log('✅ Added manifest_id column to labels table');
+        logger.info('✅ Added manifest_id column to labels table');
       } catch (error) {
         if (error.code === 'ER_DUP_FIELDNAME') {
-          console.log('ℹ️ manifest_id column already exists in labels table');
+          logger.info('ℹ️ manifest_id column already exists in labels table');
         } else {
-          console.error('❌ Error adding manifest_id column to labels table:', error.message);
+          logger.error('❌ Error adding manifest_id column to labels table:', error.message);
         }
       }
 
@@ -1001,7 +1094,7 @@ class Database {
       await this.addAccountCodeToLabelsIfNotExists();
 
     } catch (error) {
-      console.error('❌ Error creating labels table:', error.message);
+      logger.error('❌ Error creating labels table:', error.message);
     }
   }
 
@@ -1018,7 +1111,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding account_code column to existing labels table...');
+        logger.info('🔄 Adding account_code column to existing labels table...');
 
         // Add account_code column as NOT NULL (will require data migration for existing rows)
         await this.mysqlConnection.execute(
@@ -1030,12 +1123,12 @@ class Database {
           `ALTER TABLE labels ADD INDEX idx_account_code (account_code)`
         );
 
-        console.log('✅ account_code column added to labels table');
+        logger.info('✅ account_code column added to labels table');
       } else {
-        console.log('✅ account_code column already exists in labels table');
+        logger.info('✅ account_code column already exists in labels table');
       }
     } catch (error) {
-      console.error('❌ Error adding account_code column to labels table:', error.message);
+      logger.error('❌ Error adding account_code column to labels table:', error.message);
     }
   }
 
@@ -1046,7 +1139,7 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      console.log('🔄 Creating order tracking table...');
+      logger.info('🔄 Creating order tracking table...');
 
       const createOrderTrackingTableQuery = `
         CREATE TABLE IF NOT EXISTS order_tracking (
@@ -1072,12 +1165,12 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createOrderTrackingTableQuery);
-      console.log('✅ Order tracking table created/verified');
+      logger.info('✅ Order tracking table created/verified');
 
       // Add account_code column if it doesn't exist (for existing tables)
       await this.addAccountCodeToOrderTrackingIfNotExists();
     } catch (error) {
-      console.error('❌ Error creating order tracking table:', error.message);
+      logger.error('❌ Error creating order tracking table:', error.message);
     }
   }
 
@@ -1094,7 +1187,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding account_code column to existing order_tracking table...');
+        logger.info('🔄 Adding account_code column to existing order_tracking table...');
 
         // Add account_code column as NOT NULL (will require data migration for existing rows)
         await this.mysqlConnection.execute(
@@ -1106,12 +1199,12 @@ class Database {
           `ALTER TABLE order_tracking ADD INDEX idx_account_code (account_code)`
         );
 
-        console.log('✅ account_code column added to order_tracking table');
+        logger.info('✅ account_code column added to order_tracking table');
       } else {
-        console.log('✅ account_code column already exists in order_tracking table');
+        logger.info('✅ account_code column already exists in order_tracking table');
       }
     } catch (error) {
-      console.error('❌ Error adding account_code column to order_tracking table:', error.message);
+      logger.error('❌ Error adding account_code column to order_tracking table:', error.message);
     }
   }
 
@@ -1123,7 +1216,7 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      console.log('🔄 Creating rto_tracking table...');
+      logger.info('🔄 Creating rto_tracking table...');
 
       const createRTOTrackingTableQuery = `
         CREATE TABLE IF NOT EXISTS rto_tracking (
@@ -1156,7 +1249,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createRTOTrackingTableQuery);
-      console.log('✅ RTO tracking table created/verified');
+      logger.info('✅ RTO tracking table created/verified');
 
       // Add is_fetched column if it doesn't exist (for existing tables)
       await this.addIsFetchedToRTOTrackingIfNotExists();
@@ -1167,7 +1260,7 @@ class Database {
       // Create RTO inventory table
       await this.createRTOInventoryTable();
     } catch (error) {
-      console.error('❌ Error creating RTO tracking table:', error.message);
+      logger.error('❌ Error creating RTO tracking table:', error.message);
     }
   }
 
@@ -1184,7 +1277,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding is_fetched column to existing rto_tracking table...');
+        logger.info('🔄 Adding is_fetched column to existing rto_tracking table...');
 
         // Add is_fetched column
         await this.mysqlConnection.execute(
@@ -1196,12 +1289,12 @@ class Database {
           `ALTER TABLE rto_tracking ADD INDEX idx_is_fetched (is_fetched)`
         );
 
-        console.log('✅ is_fetched column added to rto_tracking table');
+        logger.info('✅ is_fetched column added to rto_tracking table');
       } else {
-        console.log('✅ is_fetched column already exists in rto_tracking table');
+        logger.info('✅ is_fetched column already exists in rto_tracking table');
       }
     } catch (error) {
-      console.error('❌ Error adding is_fetched column to rto_tracking table:', error.message);
+      logger.error('❌ Error adding is_fetched column to rto_tracking table:', error.message);
     }
   }
 
@@ -1218,7 +1311,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding activity_date column to existing rto_tracking table...');
+        logger.info('🔄 Adding activity_date column to existing rto_tracking table...');
 
         // Add activity_date column after rto_wh
         await this.mysqlConnection.execute(
@@ -1230,12 +1323,12 @@ class Database {
           `ALTER TABLE rto_tracking ADD INDEX idx_activity_date (activity_date)`
         );
 
-        console.log('✅ activity_date column added to rto_tracking table');
+        logger.info('✅ activity_date column added to rto_tracking table');
       } else {
-        console.log('✅ activity_date column already exists in rto_tracking table');
+        logger.info('✅ activity_date column already exists in rto_tracking table');
       }
     } catch (error) {
-      console.error('❌ Error adding activity_date column to rto_tracking table:', error.message);
+      logger.error('❌ Error adding activity_date column to rto_tracking table:', error.message);
     }
   }
 
@@ -1246,7 +1339,7 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      console.log('🔄 Creating rto_inventory table...');
+      logger.info('🔄 Creating rto_inventory table...');
 
       const createRTOInventoryTableQuery = `
         CREATE TABLE IF NOT EXISTS rto_inventory (
@@ -1269,9 +1362,9 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createRTOInventoryTableQuery);
-      console.log('✅ RTO inventory table created/verified');
+      logger.info('✅ RTO inventory table created/verified');
     } catch (error) {
-      console.error('❌ Error creating RTO inventory table:', error.message);
+      logger.error('❌ Error creating RTO inventory table:', error.message);
     }
   }
 
@@ -1282,7 +1375,7 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      console.log('🔄 Creating customer_info table...');
+      logger.info('🔄 Creating customer_info table...');
 
       const createCustomerInfoTableQuery = `
         CREATE TABLE IF NOT EXISTS customer_info (
@@ -1323,7 +1416,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createCustomerInfoTableQuery);
-      console.log('✅ Customer info table created/verified');
+      logger.info('✅ Customer info table created/verified');
 
       // Add account_code column to existing customer_info table if it doesn't exist (migration)
       await this.addAccountCodeToCustomerInfoIfNotExists();
@@ -1331,7 +1424,7 @@ class Database {
       // Add store_code column to existing customer_info table if it doesn't exist (migration)
       await this.addStoreCodeToCustomerInfoIfNotExists();
     } catch (error) {
-      console.error('❌ Error creating customer info table:', error.message);
+      logger.error('❌ Error creating customer info table:', error.message);
     }
   }
 
@@ -1348,7 +1441,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding account_code column to existing customer_info table...');
+        logger.info('🔄 Adding account_code column to existing customer_info table...');
 
         // Add account_code column as NOT NULL (will require data migration for existing rows)
         await this.mysqlConnection.execute(
@@ -1360,12 +1453,12 @@ class Database {
           `ALTER TABLE customer_info ADD INDEX idx_account_code (account_code)`
         );
 
-        console.log('✅ account_code column added to customer_info table');
+        logger.info('✅ account_code column added to customer_info table');
       } else {
-        console.log('✅ account_code column already exists in customer_info table');
+        logger.info('✅ account_code column already exists in customer_info table');
       }
     } catch (error) {
-      console.error('❌ Error adding account_code column to customer_info table:', error.message);
+      logger.error('❌ Error adding account_code column to customer_info table:', error.message);
     }
   }
 
@@ -1382,19 +1475,19 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding store_code column to existing customer_info table...');
+        logger.info('🔄 Adding store_code column to existing customer_info table...');
 
         // Add store_code column after order_id (to match production database structure)
         await this.mysqlConnection.execute(
           `ALTER TABLE customer_info ADD COLUMN store_code VARCHAR(20) AFTER order_id`
         );
 
-        console.log('✅ store_code column added to customer_info table');
+        logger.info('✅ store_code column added to customer_info table');
       } else {
-        console.log('✅ store_code column already exists in customer_info table');
+        logger.info('✅ store_code column already exists in customer_info table');
       }
     } catch (error) {
-      console.error('❌ Error adding store_code column to customer_info table:', error.message);
+      logger.error('❌ Error adding store_code column to customer_info table:', error.message);
     }
   }
 
@@ -1405,13 +1498,13 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      console.log('🔄 Migrating labels data from orders table...');
+      logger.info('🔄 Migrating labels data from orders table...');
 
       // Skip migration since labels table will be populated during label download process
-      console.log('ℹ️ Labels table will be populated during label download process - no migration needed');
+      logger.info('ℹ️ Labels table will be populated during label download process - no migration needed');
 
     } catch (error) {
-      console.error('❌ Error migrating labels data:', error.message);
+      logger.error('❌ Error migrating labels data:', error.message);
     }
   }
 
@@ -1422,7 +1515,7 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      console.log('🔄 Creating customer_message_tracking table...');
+      logger.info('🔄 Creating customer_message_tracking table...');
 
       const createTableQuery = `
         CREATE TABLE IF NOT EXISTS customer_message_tracking (
@@ -1438,9 +1531,9 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ customer_message_tracking table created/verified');
+      logger.info('✅ customer_message_tracking table created/verified');
     } catch (error) {
-      console.error('❌ Error creating customer_message_tracking table:', error.message);
+      logger.error('❌ Error creating customer_message_tracking table:', error.message);
     }
   }
 
@@ -1453,7 +1546,7 @@ class Database {
     if (!this.mysqlConnection) return;
 
     try {
-      console.log('🔄 Creating clone_transactions table...');
+      logger.info('🔄 Creating clone_transactions table...');
 
       const createTableQuery = `
         CREATE TABLE IF NOT EXISTS clone_transactions (
@@ -1482,9 +1575,9 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ clone_transactions table created/verified');
+      logger.info('✅ clone_transactions table created/verified');
     } catch (error) {
-      console.error('❌ Error creating clone_transactions table:', error.message);
+      logger.error('❌ Error creating clone_transactions table:', error.message);
     }
   }
 
@@ -1513,7 +1606,7 @@ class Database {
         const hasCorrectStructure = columns[0].count > 0;
 
         if (!hasCorrectStructure) {
-          console.log('🔄 Claims table exists but has old structure, recreating...');
+          logger.info('🔄 Claims table exists but has old structure, recreating...');
           // Drop the old table
           await this.mysqlConnection.execute('DROP TABLE claims');
         }
@@ -1546,7 +1639,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createClaimsTableQuery);
-      console.log('✅ Claims table created/verified');
+      logger.info('✅ Claims table created/verified');
 
       // Add priority_carrier column if it doesn't exist (migration for existing tables)
       await this.addPriorityCarrierColumnToClaims();
@@ -1560,7 +1653,7 @@ class Database {
       // Migrate existing claims data from orders table if claims table is empty
       await this.migrateClaimsData();
     } catch (error) {
-      console.error('❌ Error creating claims table:', error.message);
+      logger.error('❌ Error creating claims table:', error.message);
     }
   }
 
@@ -1577,7 +1670,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding account_code column to existing claims table...');
+        logger.info('🔄 Adding account_code column to existing claims table...');
 
         // Add account_code column as NOT NULL (will require data migration for existing rows)
         await this.mysqlConnection.execute(
@@ -1589,12 +1682,12 @@ class Database {
           `ALTER TABLE claims ADD INDEX idx_account_code (account_code)`
         );
 
-        console.log('✅ account_code column added to claims table');
+        logger.info('✅ account_code column added to claims table');
       } else {
-        console.log('✅ account_code column already exists in claims table');
+        logger.info('✅ account_code column already exists in claims table');
       }
     } catch (error) {
-      console.error('❌ Error adding account_code column to claims table:', error.message);
+      logger.error('❌ Error adding account_code column to claims table:', error.message);
     }
   }
 
@@ -1609,17 +1702,17 @@ class Database {
       const [claimsCount] = await this.mysqlConnection.execute('SELECT COUNT(*) as count FROM claims');
 
       if (claimsCount[0].count > 0) {
-        console.log('✅ Claims table already has data, skipping migration');
+        logger.info('✅ Claims table already has data, skipping migration');
         return;
       }
 
-      console.log('🔄 Migrating claims data from orders table...');
+      logger.info('🔄 Migrating claims data from orders table...');
 
       // Skip migration since claims table will be populated as orders are claimed
-      console.log('ℹ️ Claims table will be populated as orders are claimed - no migration needed');
+      logger.info('ℹ️ Claims table will be populated as orders are claimed - no migration needed');
 
     } catch (error) {
-      console.error('❌ Error migrating claims data:', error.message);
+      logger.error('❌ Error migrating claims data:', error.message);
     }
   }
 
@@ -1636,19 +1729,19 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding priority_carrier column to existing claims table...');
+        logger.info('🔄 Adding priority_carrier column to existing claims table...');
 
         // Add priority_carrier column
         await this.mysqlConnection.execute(
           `ALTER TABLE claims ADD COLUMN priority_carrier TEXT AFTER label_downloaded`
         );
 
-        console.log('✅ priority_carrier column added to claims table');
+        logger.info('✅ priority_carrier column added to claims table');
       } else {
-        console.log('✅ priority_carrier column already exists in claims table');
+        logger.info('✅ priority_carrier column already exists in claims table');
       }
     } catch (error) {
-      console.error('❌ Error adding priority_carrier column to claims:', error.message);
+      logger.error('❌ Error adding priority_carrier column to claims:', error.message);
     }
   }
 
@@ -1665,7 +1758,7 @@ class Database {
       );
 
       if (columns.length === 0) {
-        console.log('🔄 Adding is_critical column to existing claims table...');
+        logger.info('🔄 Adding is_critical column to existing claims table...');
 
         // Add is_critical column
         await this.mysqlConnection.execute(
@@ -1677,12 +1770,12 @@ class Database {
           `ALTER TABLE claims ADD INDEX idx_is_critical (is_critical)`
         );
 
-        console.log('✅ is_critical column added to claims table');
+        logger.info('✅ is_critical column added to claims table');
       } else {
-        console.log('✅ is_critical column already exists in claims table');
+        logger.info('✅ is_critical column already exists in claims table');
       }
     } catch (error) {
-      console.error('❌ Error adding is_critical column to claims:', error.message);
+      logger.error('❌ Error adding is_critical column to claims:', error.message);
     }
   }
 
@@ -1768,7 +1861,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createNotificationsTableQuery);
-      console.log('✅ Notifications table created/verified');
+      logger.info('✅ Notifications table created/verified');
 
       // Create notification_views table
       const createNotificationViewsTableQuery = `
@@ -1788,7 +1881,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createNotificationViewsTableQuery);
-      console.log('✅ Notification views table created/verified');
+      logger.info('✅ Notification views table created/verified');
 
       // Create push_subscriptions table
       const createPushSubscriptionsTableQuery = `
@@ -1810,7 +1903,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createPushSubscriptionsTableQuery);
-      console.log('✅ Push subscriptions table created/verified');
+      logger.info('✅ Push subscriptions table created/verified');
 
       // Create push_notification_logs table
       const createPushNotificationLogsTableQuery = `
@@ -1833,7 +1926,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createPushNotificationLogsTableQuery);
-      console.log('✅ Push notification logs table created/verified');
+      logger.info('✅ Push notification logs table created/verified');
 
       // Add push_notifications_enabled column to users table if it doesn't exist
       try {
@@ -1851,16 +1944,16 @@ class Database {
             ALTER TABLE users 
             ADD COLUMN push_notifications_enabled BOOLEAN DEFAULT FALSE
           `);
-          console.log('✅ Push notifications enabled column added to users table');
+          logger.info('✅ Push notifications enabled column added to users table');
         } else {
-          console.log('✅ Push notifications enabled column already exists in users table');
+          logger.info('✅ Push notifications enabled column already exists in users table');
         }
       } catch (error) {
-        console.error('❌ Error adding push_notifications_enabled column:', error.message);
+        logger.error('❌ Error adding push_notifications_enabled column:', error.message);
       }
 
     } catch (error) {
-      console.error('❌ Error creating notifications tables:', error.message);
+      logger.error('❌ Error creating notifications tables:', error.message);
     }
   }
 
@@ -1916,7 +2009,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting all carriers:', error);
+      logger.error('Error getting all carriers:', error);
       throw new Error('Failed to get carriers from database');
     }
   }
@@ -1949,7 +2042,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting carriers by account_code:', error);
+      logger.error('Error getting carriers by account_code:', error);
       throw new Error('Failed to get carriers from database');
     }
   }
@@ -1971,7 +2064,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0].value : null;
     } catch (error) {
-      console.error('Error getting utility parameter:', error);
+      logger.error('Error getting utility parameter:', error);
       throw new Error(`Failed to get utility parameter: ${parameter}`);
     }
   }
@@ -1997,7 +2090,7 @@ class Database {
       );
       return true;
     } catch (error) {
-      console.error('Error updating utility parameter:', error);
+      logger.error('Error updating utility parameter:', error);
       throw new Error(`Failed to update utility parameter: ${parameter}`);
     }
   }
@@ -2017,7 +2110,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting all utility parameters:', error);
+      logger.error('Error getting all utility parameters:', error);
       throw new Error('Failed to get all utility parameters from database');
     }
   }
@@ -2057,7 +2150,7 @@ class Database {
       }
       return [];
     } catch (error) {
-      console.error('Error getting shipment status mapping:', error);
+      logger.error('Error getting shipment status mapping:', error);
       return this.shipmentStatusMappingCache || [];
     }
   }
@@ -2068,7 +2161,7 @@ class Database {
   clearShipmentStatusMappingCache() {
     this.shipmentStatusMappingCache = null;
     this.shipmentStatusMappingCacheTime = null;
-    console.log('✅ Shipment status mapping cache cleared');
+    logger.info('✅ Shipment status mapping cache cleared');
   }
 
   /**
@@ -2176,7 +2269,7 @@ class Database {
       }
       return [value];
     } catch (error) {
-      console.error('Error getting shipping partners:', error);
+      logger.error('Error getting shipping partners:', error);
       throw new Error('Failed to get shipping partners from database');
     }
   }
@@ -2206,7 +2299,7 @@ class Database {
       const [rows] = await this.mysqlConnection.execute(query, params);
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting carrier by ID:', error);
+      logger.error('Error getting carrier by ID:', error);
       throw new Error('Failed to get carrier from database');
     }
   }
@@ -2242,7 +2335,7 @@ class Database {
         priority
       };
     } catch (error) {
-      console.error('Error creating carrier:', error);
+      logger.error('Error creating carrier:', error);
       if (error.code === 'ER_DUP_ENTRY') {
         throw new Error('Carrier with this ID already exists');
       }
@@ -2316,7 +2409,7 @@ class Database {
       const finalAccountCode = accountCode || updateData.account_code || null;
       return await this.getCarrierById(carrierId, finalAccountCode);
     } catch (error) {
-      console.error('Error updating carrier:', error);
+      logger.error('Error updating carrier:', error);
       throw new Error('Failed to update carrier in database');
     }
   }
@@ -2330,29 +2423,35 @@ class Database {
    * @returns {Promise<void>}
    */
   async swapCarrierPriorities(carrierId1, carrierId2, priority1, priority2) {
-    if (!this.mysqlConnection) {
+    if (!this.pool) {
       throw new Error('MySQL connection not available');
     }
 
-    try {
-      await this.mysqlConnection.beginTransaction();
+    // 6.3 — Get a dedicated connection before calling beginTransaction.
+    // Calling beginTransaction() on a pool object is invalid (pools manage
+    // multiple connections and have no transaction state of their own).
+    const conn = await this.pool.getConnection();
 
-      // Update both carriers in a single transaction
-      await this.mysqlConnection.execute(
+    try {
+      await conn.beginTransaction();
+
+      await conn.execute(
         'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
         [priority2, carrierId1]
       );
 
-      await this.mysqlConnection.execute(
+      await conn.execute(
         'UPDATE carriers SET priority = ? WHERE carrier_id = ?',
         [priority1, carrierId2]
       );
 
-      await this.mysqlConnection.commit();
+      await conn.commit();
     } catch (error) {
-      await this.mysqlConnection.rollback();
-      console.error('Error swapping carrier priorities:', error);
+      await conn.rollback();
+      logger.error('Error swapping carrier priorities:', error);
       throw new Error('Failed to swap carrier priorities');
+    } finally {
+      conn.release();
     }
   }
 
@@ -2391,10 +2490,10 @@ class Database {
       }
 
       await connection.commit();
-      console.log(`✅ Reordered ${carriers.length} carrier priorities sequentially${accountCode ? ` for store ${accountCode}` : ''}`);
+      logger.info(`✅ Reordered ${carriers.length} carrier priorities sequentially${accountCode ? ` for store ${accountCode}` : ''}`);
     } catch (error) {
       await connection.rollback();
-      console.error('Error reordering carrier priorities:', error);
+      logger.error('Error reordering carrier priorities:', error);
       throw new Error('Failed to reorder carrier priorities');
     } finally {
       connection.release();
@@ -2427,7 +2526,7 @@ class Database {
 
       return result.affectedRows > 0;
     } catch (error) {
-      console.error('Error deleting carrier:', error);
+      logger.error('Error deleting carrier:', error);
       throw new Error('Failed to delete carrier from database');
     }
   }
@@ -2467,7 +2566,7 @@ class Database {
         total: carriers.length
       };
     } catch (error) {
-      console.error('Error bulk upserting carriers:', error);
+      logger.error('Error bulk upserting carriers:', error);
       throw new Error('Failed to bulk upsert carriers');
     }
   }
@@ -2489,7 +2588,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting carriers by status:', error);
+      logger.error('Error getting carriers by status:', error);
       throw new Error('Failed to get carriers by status');
     }
   }
@@ -2511,7 +2610,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting all products:', error);
+      logger.error('Error getting all products:', error);
       throw new Error('Failed to get products from database');
     }
   }
@@ -2543,7 +2642,7 @@ class Database {
         return rows.length > 0 ? rows[0] : null;
       }
     } catch (error) {
-      console.error('Error getting product by ID:', error);
+      logger.error('Error getting product by ID:', error);
       throw new Error('Failed to get product from database');
     }
   }
@@ -2570,7 +2669,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting product by SKU ID:', error);
+      logger.error('Error getting product by SKU ID:', error);
       throw new Error('Failed to get product from database');
     }
   }
@@ -2605,7 +2704,7 @@ class Database {
         totalImages: totalImages || 0
       };
     } catch (error) {
-      console.error('Error creating product:', error);
+      logger.error('Error creating product:', error);
       if (error.code === 'ER_DUP_ENTRY') {
         throw new Error('Product with this ID and account_code already exists');
       }
@@ -2672,7 +2771,7 @@ class Database {
         return await this.getProductById(id);
       }
     } catch (error) {
-      console.error('Error updating product:', error);
+      logger.error('Error updating product:', error);
       throw new Error('Failed to update product in database');
     }
   }
@@ -2703,7 +2802,7 @@ class Database {
         return result.affectedRows > 0;
       }
     } catch (error) {
-      console.error('Error deleting product:', error);
+      logger.error('Error deleting product:', error);
       throw new Error('Failed to delete product from database');
     }
   }
@@ -2754,7 +2853,7 @@ class Database {
         total: products.length
       };
     } catch (error) {
-      console.error('Error bulk upserting products:', error);
+      logger.error('Error bulk upserting products:', error);
       throw new Error('Failed to bulk upsert products');
     }
   }
@@ -2776,7 +2875,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error searching products by name:', error);
+      logger.error('Error searching products by name:', error);
       throw new Error('Failed to search products');
     }
   }
@@ -2798,7 +2897,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting all users:', error);
+      logger.error('Error getting all users:', error);
       throw new Error('Failed to get users from database');
     }
   }
@@ -2828,7 +2927,7 @@ class Database {
         activeVendors: parseInt(activeResult[0][0]?.count || 0)
       };
     } catch (error) {
-      console.error('Error getting vendor stats:', error);
+      logger.error('Error getting vendor stats:', error);
       throw new Error('Failed to get vendor stats from database');
     }
   }
@@ -2850,7 +2949,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting user by ID:', error);
+      logger.error('Error getting user by ID:', error);
       throw new Error('Failed to get user from database');
     }
   }
@@ -2872,7 +2971,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting user by email:', error);
+      logger.error('Error getting user by email:', error);
       throw new Error('Failed to get user from database');
     }
   }
@@ -2894,7 +2993,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting user by phone:', error);
+      logger.error('Error getting user by phone:', error);
       throw new Error('Failed to get user from database');
     }
   }
@@ -2916,7 +3015,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting user by warehouse ID:', error);
+      logger.error('Error getting user by warehouse ID:', error);
       throw new Error('Failed to get user from database');
     }
   }
@@ -2938,7 +3037,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting user by token:', error);
+      logger.error('Error getting user by token:', error);
       throw new Error('Failed to get user from database');
     }
   }
@@ -2984,7 +3083,7 @@ class Database {
         pincode
       };
     } catch (error) {
-      console.error('Error creating user:', error);
+      logger.error('Error creating user:', error);
       if (error.code === 'ER_DUP_ENTRY') {
         throw new Error('User with this email already exists');
       }
@@ -3081,7 +3180,7 @@ class Database {
 
       return await this.getUserById(id);
     } catch (error) {
-      console.error('Error updating user:', error);
+      logger.error('Error updating user:', error);
       throw new Error('Failed to update user in database');
     }
   }
@@ -3104,7 +3203,7 @@ class Database {
 
       return result.affectedRows > 0;
     } catch (error) {
-      console.error('Error deleting user:', error);
+      logger.error('Error deleting user:', error);
       throw new Error('Failed to delete user from database');
     }
   }
@@ -3126,7 +3225,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting users by role:', error);
+      logger.error('Error getting users by role:', error);
       throw new Error('Failed to get users by role');
     }
   }
@@ -3148,7 +3247,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting users by status:', error);
+      logger.error('Error getting users by status:', error);
       throw new Error('Failed to get users by status');
     }
   }
@@ -3170,7 +3269,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error searching users:', error);
+      logger.error('Error searching users:', error);
       throw new Error('Failed to search users');
     }
   }
@@ -3192,7 +3291,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting all settlements:', error);
+      logger.error('Error getting all settlements:', error);
       throw new Error('Failed to get settlements from database');
     }
   }
@@ -3214,7 +3313,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting settlement by ID:', error);
+      logger.error('Error getting settlement by ID:', error);
       throw new Error('Failed to get settlement from database');
     }
   }
@@ -3236,7 +3335,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting settlements by vendor:', error);
+      logger.error('Error getting settlements by vendor:', error);
       throw new Error('Failed to get settlements by vendor');
     }
   }
@@ -3258,7 +3357,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting settlements by status:', error);
+      logger.error('Error getting settlements by status:', error);
       throw new Error('Failed to get settlements by status');
     }
   }
@@ -3307,7 +3406,7 @@ class Database {
 
       return await this.getSettlementById(id || `settlement_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
     } catch (error) {
-      console.error('Error creating settlement:', error);
+      logger.error('Error creating settlement:', error);
       throw new Error('Failed to create settlement in database');
     }
   }
@@ -3413,7 +3512,7 @@ class Database {
 
       return await this.getSettlementById(id);
     } catch (error) {
-      console.error('Error updating settlement:', error);
+      logger.error('Error updating settlement:', error);
       throw new Error('Failed to update settlement in database');
     }
   }
@@ -3436,7 +3535,7 @@ class Database {
 
       return result.affectedRows > 0;
     } catch (error) {
-      console.error('Error deleting settlement:', error);
+      logger.error('Error deleting settlement:', error);
       throw new Error('Failed to delete settlement from database');
     }
   }
@@ -3458,7 +3557,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error searching settlements:', error);
+      logger.error('Error searching settlements:', error);
       throw new Error('Failed to search settlements');
     }
   }
@@ -3480,7 +3579,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting all transactions:', error);
+      logger.error('Error getting all transactions:', error);
       throw new Error('Failed to get all transactions');
     }
   }
@@ -3502,7 +3601,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting transaction by ID:', error);
+      logger.error('Error getting transaction by ID:', error);
       throw new Error('Failed to get transaction by ID');
     }
   }
@@ -3524,7 +3623,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting transactions by vendor:', error);
+      logger.error('Error getting transactions by vendor:', error);
       throw new Error('Failed to get transactions by vendor');
     }
   }
@@ -3546,7 +3645,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting transactions by type:', error);
+      logger.error('Error getting transactions by type:', error);
       throw new Error('Failed to get transactions by type');
     }
   }
@@ -3579,7 +3678,7 @@ class Database {
       const createdTransaction = await this.getTransactionById(id || `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
       return createdTransaction;
     } catch (error) {
-      console.error('Error creating transaction:', error);
+      logger.error('Error creating transaction:', error);
       throw new Error('Failed to create transaction');
     }
   }
@@ -3633,7 +3732,7 @@ class Database {
 
       return await this.getTransactionById(id);
     } catch (error) {
-      console.error('Error updating transaction:', error);
+      logger.error('Error updating transaction:', error);
       throw new Error('Failed to update transaction');
     }
   }
@@ -3655,7 +3754,7 @@ class Database {
       );
       return result.affectedRows > 0;
     } catch (error) {
-      console.error('Error deleting transaction:', error);
+      logger.error('Error deleting transaction:', error);
       throw new Error('Failed to delete transaction');
     }
   }
@@ -3677,7 +3776,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error searching transactions:', error);
+      logger.error('Error searching transactions:', error);
       throw new Error('Failed to search transactions');
     }
   }
@@ -3702,14 +3801,17 @@ class Database {
       // Extract size from product_code
       const extractedSize = this.extractSizeFromSku(orderData.product_code);
 
+      // 8.4 — Pre-compute normalized_product_code so JOINs can use the index
+      const normalizedCode = normalizeProductCode(orderData.product_code);
+
       // Use INSERT ... ON DUPLICATE KEY UPDATE for orders table
       await this.mysqlConnection.execute(
         `INSERT INTO orders (
           id, unique_id, shipment_id, channel_id, partner_order_id, order_id, customer_name, order_date,
-          product_name, product_code, size, quantity, selling_price, order_total, payment_type,
-          is_partial_paid, prepaid_amount, order_total_ratio, order_total_split, collectable_amount,
-          pincode, is_in_new_order, account_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          product_name, product_code, normalized_product_code, size, quantity, selling_price, order_total,
+          payment_type, is_partial_paid, prepaid_amount, order_total_ratio, order_total_split,
+          collectable_amount, pincode, is_in_new_order, account_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           shipment_id = VALUES(shipment_id),
           channel_id = VALUES(channel_id),
@@ -3717,6 +3819,7 @@ class Database {
           order_date = VALUES(order_date),
           product_name = VALUES(product_name),
           product_code = VALUES(product_code),
+          normalized_product_code = VALUES(normalized_product_code),
           size = VALUES(size),
           quantity = VALUES(quantity),
           selling_price = VALUES(selling_price),
@@ -3741,6 +3844,7 @@ class Database {
           orderData.order_date || null,
           orderData.product_name || null,
           orderData.product_code || null,
+          normalizedCode,
           extractedSize || null,
           orderData.quantity || null,
           orderData.selling_price || null,
@@ -3801,7 +3905,7 @@ class Database {
 
       return await this.getOrderByUniqueId(orderData.unique_id);
     } catch (error) {
-      console.error('Error creating order:', error);
+      logger.error('Error creating order:', error);
       // Include the actual error message for better debugging
       const errorMessage = error.message || 'Unknown error';
       throw new Error(`Failed to create order: ${errorMessage}`);
@@ -3943,10 +4047,7 @@ class Database {
           l.is_manifest
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -3956,7 +4057,7 @@ class Database {
 
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting order by unique_id:', error);
+      logger.error('Error getting order by unique_id:', error);
       throw new Error('Failed to get order from database');
     }
   }
@@ -3994,10 +4095,7 @@ class Database {
           l.is_manifest
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -4008,7 +4106,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting orders by order_id:', error);
+      logger.error('Error getting orders by order_id:', error);
       throw new Error('Failed to get orders from database');
     }
   }
@@ -4067,10 +4165,7 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -4082,7 +4177,7 @@ class Database {
 
       return rows || [];
     } catch (error) {
-      console.error('Error getting orders by order_ids:', error);
+      logger.error('Error getting orders by order_ids:', error);
       throw new Error('Failed to get orders from database');
     }
   }
@@ -4127,10 +4222,7 @@ class Database {
           l.is_manifest
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -4140,7 +4232,7 @@ class Database {
 
       return rows || [];
     } catch (error) {
-      console.error('Error getting orders by unique_ids:', error);
+      logger.error('Error getting orders by unique_ids:', error);
       throw new Error('Failed to get orders from database');
     }
   }
@@ -4190,10 +4282,7 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -4217,7 +4306,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting all orders:', error);
+      logger.error('Error getting all orders:', error);
       throw new Error('Failed to get orders from database');
     }
   }
@@ -4265,10 +4354,7 @@ class Database {
            END as status
          FROM orders o
          LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-           (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-           REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+           o.normalized_product_code = p.sku_id
            AND o.account_code = p.account_code
          )
          LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -4280,7 +4366,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting orders by order_id:', error);
+      logger.error('Error getting orders by order_id:', error);
       throw new Error('Failed to get orders from database');
     }
   }
@@ -4454,10 +4540,7 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -4495,7 +4578,7 @@ class Database {
         totalQuantity
       };
     } catch (error) {
-      console.error('Error getting paginated orders:', error);
+      logger.error('Error getting paginated orders:', error);
       throw new Error('Failed to get paginated orders from database');
     }
   }
@@ -4689,10 +4772,7 @@ class Database {
           END as customer_name_from_info
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -4725,7 +4805,7 @@ class Database {
       const totalQuantity = parseInt(countResult[0][0]?.total_quantity || 0);
       const orders = dataResult[0];
 
-      console.log(`📊 Admin Orders Paginated: Found ${totalCount} total orders, returning ${orders.length} orders (offset: ${offset}, limit: ${limit})`);
+      logger.info(`📊 Admin Orders Paginated: Found ${totalCount} total orders, returning ${orders.length} orders (offset: ${offset}, limit: ${limit})`);
 
       return {
         orders,
@@ -4733,7 +4813,7 @@ class Database {
         totalQuantity
       };
     } catch (error) {
-      console.error('Error getting admin paginated orders:', error);
+      logger.error('Error getting admin paginated orders:', error);
       throw new Error('Failed to get admin paginated orders from database');
     }
   }
@@ -4776,10 +4856,10 @@ class Database {
       // Sort and return as array
       const distinctStatuses = Array.from(statusSet).sort();
 
-      console.log(`📊 Found ${distinctStatuses.length} distinct statuses in the system`);
+      logger.info(`📊 Found ${distinctStatuses.length} distinct statuses in the system`);
       return distinctStatuses;
     } catch (error) {
-      console.error('Error getting distinct statuses:', error);
+      logger.error('Error getting distinct statuses:', error);
       throw new Error('Failed to get distinct statuses from database');
     }
   }
@@ -5036,7 +5116,7 @@ class Database {
       const claimedCount = parseInt(claimedResult[0][0]?.total_count || 0);
       const unclaimedCount = parseInt(unclaimedResult[0][0]?.total_count || 0);
 
-      console.log(`📊 Admin Dashboard Stats: Total=${totalCount}, Claimed=${claimedCount}, Unclaimed=${unclaimedCount}`);
+      logger.info(`📊 Admin Dashboard Stats: Total=${totalCount}, Claimed=${claimedCount}, Unclaimed=${unclaimedCount}`);
 
       return {
         totalOrders: totalCount,
@@ -5046,7 +5126,7 @@ class Database {
         hasFilters: !!(search || dateFrom || dateTo || vendor || store)
       };
     } catch (error) {
-      console.error('Error getting admin dashboard stats:', error);
+      logger.error('Error getting admin dashboard stats:', error);
       throw new Error('Failed to get admin dashboard stats from database');
     }
   }
@@ -5084,10 +5164,7 @@ class Database {
           l.is_manifest
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -5098,7 +5175,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting orders by vendor:', error);
+      logger.error('Error getting orders by vendor:', error);
       throw new Error('Failed to get vendor orders from database');
     }
   }
@@ -5144,10 +5221,7 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -5166,7 +5240,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting vendor orders:', error);
+      logger.error('Error getting vendor orders:', error);
       throw new Error('Failed to get vendor orders from database');
     }
   }
@@ -5212,10 +5286,7 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -5235,15 +5306,14 @@ class Database {
       // Debug logging for orders with is_in_new_order = 0
       const problematicOrders = rows.filter(r => r.is_in_new_order === 0);
       if (problematicOrders.length > 0) {
-        console.log('⚠️ DEBUG: Found orders with is_in_new_order = 0 in My Orders:');
+        logger.info('⚠️ DEBUG: Found orders with is_in_new_order = 0 in My Orders:');
         problematicOrders.forEach(order => {
-          console.log(`  - Order ID: ${order.order_id}, Account: ${order.account_code}, Shipping Partner: ${order.shipping_partner || 'NULL'}, is_in_new_order: ${order.is_in_new_order}, label_downloaded: ${order.label_downloaded}`);
         });
       }
 
       return rows;
     } catch (error) {
-      console.error('Error getting My Orders:', error);
+      logger.error('Error getting My Orders:', error);
       throw new Error('Failed to get My Orders from database');
     }
   }
@@ -5289,10 +5359,7 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -5307,7 +5374,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting Handover Orders:', error);
+      logger.error('Error getting Handover Orders:', error);
       throw new Error('Failed to get Handover Orders from database');
     }
   }
@@ -5353,10 +5420,7 @@ class Database {
           END as status
         FROM orders o
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -5371,7 +5435,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting Order Tracking Orders:', error);
+      logger.error('Error getting Order Tracking Orders:', error);
       throw new Error('Failed to get Order Tracking Orders from database');
     }
   }
@@ -5380,10 +5444,17 @@ class Database {
    * Update order in MySQL
    * @param {string} unique_id - Order unique ID
    * @param {Object} updateData - Data to update
+   * @param {import('mysql2/promise').PoolConnection|null} [conn=null]
+   *   Optional dedicated connection. Pass this when calling inside a
+   *   TransactionManager.runInTransaction() callback so all writes share
+   *   the same transaction. When omitted the pool is used (auto-commit).
    * @returns {Object|null} Updated order or null if not found
    */
-  async updateOrder(unique_id, updateData) {
-    if (!this.mysqlConnection) {
+  async updateOrder(unique_id, updateData, conn = null) {
+    // 6.2 — Use the supplied connection (transactional) or fall back to pool.
+    const db = conn || this.pool;
+
+    if (!db) {
       throw new Error('MySQL connection not available');
     }
 
@@ -5444,28 +5515,23 @@ class Database {
       // Update orders table if there are order fields to update
       if (orderFields.length > 0) {
         orderValues.push(unique_id);
-        const [orderResult] = await this.mysqlConnection.execute(
+        await db.execute(
           `UPDATE orders SET ${orderFields.join(', ')} WHERE unique_id = ?`,
           orderValues
         );
-
-        // Don't return early - we still need to update claims and labels tables
-        // if (orderResult.affectedRows === 0) {
-        //   return null;
-        // }
       }
 
       // Update claims table if there are claim fields to update
       if (claimFields.length > 0) {
         // First, ensure a claim record exists for this unique_id
-        await this.mysqlConnection.execute(`
+        await db.execute(`
           INSERT INTO claims (order_unique_id, order_id, account_code) 
           SELECT o.unique_id, o.order_id, o.account_code FROM orders o WHERE o.unique_id = ?
           ON DUPLICATE KEY UPDATE order_unique_id = VALUES(order_unique_id), account_code = VALUES(account_code)
         `, [unique_id]);
 
         claimValues.push(unique_id);
-        await this.mysqlConnection.execute(
+        await db.execute(
           `UPDATE claims SET ${claimFields.join(', ')} WHERE order_unique_id = ?`,
           claimValues
         );
@@ -5474,7 +5540,7 @@ class Database {
       // Update labels table if there are label fields to update
       if (labelFields.length > 0) {
         // First, get the order_id for this unique_id
-        const [orderRows] = await this.mysqlConnection.execute(
+        const [orderRows] = await db.execute(
           'SELECT order_id FROM orders WHERE unique_id = ?',
           [unique_id]
         );
@@ -5483,7 +5549,7 @@ class Database {
           const orderId = orderRows[0].order_id;
 
           // Get the account_code from orders table
-          const [orderData] = await this.mysqlConnection.execute(
+          const [orderData] = await db.execute(
             'SELECT account_code FROM orders WHERE order_id = ? LIMIT 1',
             [orderId]
           );
@@ -5493,7 +5559,7 @@ class Database {
           const accountCode = orderData[0].account_code;
 
           // Ensure a label record exists for this order_id
-          await this.mysqlConnection.execute(`
+          await db.execute(`
             INSERT INTO labels (order_id, account_code) 
             VALUES (?, ?)
             ON DUPLICATE KEY UPDATE order_id = VALUES(order_id), account_code = VALUES(account_code)
@@ -5501,7 +5567,7 @@ class Database {
 
           // CRITICAL: Filter by both order_id AND account_code to ensure store-specific update
           labelValues.push(orderId, accountCode);
-          await this.mysqlConnection.execute(
+          await db.execute(
             `UPDATE labels SET ${labelFields.join(', ')} WHERE order_id = ? AND account_code = ?`,
             labelValues
           );
@@ -5513,9 +5579,13 @@ class Database {
         throw new Error('No fields to update');
       }
 
+      // Option A: keep the re-read so existing callers that use the return value continue to work.
+      // The re-read always uses the pool (not necessarily the transaction connection),
+      // which is fine because by the time we reach this line all writes are already
+      // on the connection and will be visible after commit.
       return await this.getOrderByUniqueId(unique_id);
     } catch (error) {
-      console.error('Error updating order:', error);
+      logger.error('Error updating order:', error);
       throw new Error('Failed to update order');
     }
   }
@@ -5524,9 +5594,15 @@ class Database {
    * Bulk update orders in MySQL
    * @param {Array} updates - Array of {unique_id, updateData} objects
    * @returns {Array} Array of updated orders
+   *
+   * 7.5 — Fixes three bugs that made the original transaction completely broken:
+   *   1. this.mysqlPool never existed — the db variable silently fell back to the pool.
+   *   2. updateOrder() was called WITHOUT conn, so every write used the pool (auto-commit)
+   *      and was NOT part of the transaction — rollback was a no-op.
+   *   3. Now uses TransactionManager + passes conn to every updateOrder() call.
    */
   async bulkUpdateOrders(updates) {
-    if (!this.mysqlConnection) {
+    if (!this.pool) {
       throw new Error('MySQL connection not available');
     }
 
@@ -5534,41 +5610,26 @@ class Database {
       return [];
     }
 
-    // Get a connection from the pool for transaction support
-    const db = this.mysqlPool || this.mysqlConnection;
-    const connection = await db.getConnection();
+    const TransactionManager = require('../utils/transactionManager');
+    const txManager = new TransactionManager(this.pool);
 
-    try {
-      // Use transaction for batch operations
-      await connection.beginTransaction();
-
+    return await txManager.runInTransaction(async (conn) => {
       const updatedOrders = [];
       for (const update of updates) {
         try {
-          // Note: updateOrder uses this.mysqlConnection (pool), which is fine for reads
-          // But we're in a transaction, so we should use the connection for consistency
-          // However, updateOrder is complex and uses pool internally, so we'll keep it as is
-          // The transaction will still work because we're committing/rolling back the connection
-          const updatedOrder = await this.updateOrder(update.unique_id, update.updateData);
+          // Pass conn so every write is part of this transaction.
+          // If any update throws, TransactionManager rolls everything back.
+          const updatedOrder = await this.updateOrder(update.unique_id, update.updateData, conn);
           if (updatedOrder) {
             updatedOrders.push(updatedOrder);
           }
         } catch (error) {
-          // Log but continue with other updates
-          console.error(`Error updating order ${update.unique_id}:`, error.message);
+          // Log but continue — one bad row doesn't abort the whole batch.
+          logger.error(`Error updating order ${update.unique_id}:`, error.message);
         }
       }
-
-      await connection.commit();
       return updatedOrders;
-    } catch (error) {
-      await connection.rollback();
-      console.error('Error bulk updating orders:', error);
-      throw new Error('Failed to bulk update orders');
-    } finally {
-      // Release the connection back to the pool
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -5588,7 +5649,7 @@ class Database {
       );
       return result.affectedRows > 0;
     } catch (error) {
-      console.error('Error deleting order:', error);
+      logger.error('Error deleting order:', error);
       throw new Error('Failed to delete order');
     }
   }
@@ -5608,10 +5669,7 @@ class Database {
         `SELECT o.*, p.image as product_image
          FROM orders o
          LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
          LEFT JOIN claims c ON o.unique_id = c.order_unique_id AND o.account_code = c.account_code
@@ -5626,7 +5684,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error searching orders:', error);
+      logger.error('Error searching orders:', error);
       throw new Error('Failed to search orders');
     }
   }
@@ -5675,7 +5733,7 @@ class Database {
       await this.pool.execute('SELECT 1');
       return true;
     } catch (error) {
-      console.error('❌ Database connection test failed:', error.message);
+      logger.error('❌ Database connection test failed:', error.message);
       return false;
     }
   }
@@ -5686,14 +5744,14 @@ class Database {
    */
   async reconnect() {
     try {
-      console.log('🔄 Attempting to reconnect to database...');
+      logger.info('🔄 Attempting to reconnect to database...');
 
       // Drain old pool
       if (this.pool) {
         try {
           await this.pool.end();
         } catch (error) {
-          console.log('ℹ️ Error draining old pool (expected if connection was lost):', error.message);
+          logger.info('ℹ️ Error draining old pool (expected if connection was lost):', error.message);
         }
       }
 
@@ -5705,10 +5763,10 @@ class Database {
       // Reinitialize
       await this.initializeMySQL();
 
-      console.log('✅ Database reconnected successfully');
+      logger.info('✅ Database reconnected successfully');
       return true;
     } catch (error) {
-      console.error('❌ Database reconnection failed:', error.message);
+      logger.error('❌ Database reconnection failed:', error.message);
       return false;
     }
   }
@@ -5740,18 +5798,24 @@ class Database {
       const [rows] = await this.mysqlConnection.execute(query, params);
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting label by order ID:', error);
+      logger.error('Error getting label by order ID:', error);
       throw new Error('Failed to get label from database');
     }
   }
 
   /**
    * Create or update label
-   * @param {Object} labelData - Label data {order_id, label_url, awb}
+   * @param {Object} labelData - Label data {order_id, label_url, awb, ...}
+   * @param {import('mysql2/promise').PoolConnection|null} [conn=null]
+   *   Optional dedicated connection. Pass when calling inside a
+   *   TransactionManager.runInTransaction() callback (6.4, 6.5).
    * @returns {Object} Created/updated label
    */
-  async upsertLabel(labelData) {
-    if (!this.mysqlConnection) {
+  async upsertLabel(labelData, conn = null) {
+    // 6.4/6.5 — Use supplied connection (transactional) or fall back to pool.
+    const db = conn || this.pool;
+
+    if (!db) {
       throw new Error('MySQL connection not available');
     }
 
@@ -5799,7 +5863,7 @@ class Database {
 
       const updateClause = updateFields.join(', ');
 
-      const [result] = await this.mysqlConnection.execute(
+      await db.execute(
         `INSERT INTO labels (order_id, label_url, awb, carrier_id, carrier_name, priority_carrier, is_manifest, manifest_id, account_code) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
          ON DUPLICATE KEY UPDATE ${updateClause}`,
@@ -5817,10 +5881,12 @@ class Database {
         ]
       );
 
-      // CRITICAL: Retrieve label with account_code to ensure store-specific retrieval
+      // CRITICAL: Retrieve label with account_code to ensure store-specific retrieval.
+      // Always uses pool (not transaction connection) — this read-after-write is safe
+      // because it runs after the INSERT/UPDATE above on the same connection.
       return await this.getLabelByOrderId(labelData.order_id, labelData.account_code);
     } catch (error) {
-      console.error('Error creating/updating label:', error);
+      logger.error('Error creating/updating label:', error);
       throw new Error('Failed to save label to database');
     }
   }
@@ -5915,7 +5981,7 @@ class Database {
       return results;
     } catch (error) {
       await connection.rollback();
-      console.error('Error batch upserting labels:', error);
+      logger.error('Error batch upserting labels:', error);
       throw new Error('Failed to batch update labels');
     } finally {
       // Release the connection back to the pool
@@ -5954,10 +6020,10 @@ class Database {
 
       // Format as MANIFEST-0001 (4 digits, zero-padded)
       const manifestId = `MANIFEST-${String(nextNumber).padStart(4, '0')}`;
-      console.log(`✅ Generated next Shiprocket manifest ID: ${manifestId}`);
+      logger.info(`✅ Generated next Shiprocket manifest ID: ${manifestId}`);
       return manifestId;
     } catch (error) {
-      console.error('Error getting next Shiprocket manifest ID:', error);
+      logger.error('Error getting next Shiprocket manifest ID:', error);
       throw new Error('Failed to generate manifest ID');
     }
   }
@@ -5988,7 +6054,7 @@ class Database {
 
       return rows || [];
     } catch (error) {
-      console.error('Error getting labels by order_ids:', error);
+      logger.error('Error getting labels by order_ids:', error);
       throw new Error('Failed to get labels from database');
     }
   }
@@ -6018,7 +6084,7 @@ class Database {
       );
       return rows;
     } catch (error) {
-      console.error('Error getting all labels:', error);
+      logger.error('Error getting all labels:', error);
       throw new Error('Failed to get labels from database');
     }
   }
@@ -6044,7 +6110,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting customer info by order ID:', error);
+      logger.error('Error getting customer info by order ID:', error);
       throw new Error('Failed to get customer info from database');
     }
   }
@@ -6074,7 +6140,7 @@ class Database {
 
       return rows || [];
     } catch (error) {
-      console.error('Error getting customer info by order_ids:', error);
+      logger.error('Error getting customer info by order_ids:', error);
       throw new Error('Failed to get customer info from database');
     }
   }
@@ -6146,7 +6212,7 @@ class Database {
 
       return await this.getCustomerInfoByOrderId(customerData.order_id);
     } catch (error) {
-      console.error('Error creating/updating customer info:', error);
+      logger.error('Error creating/updating customer info:', error);
       throw new Error('Failed to save customer info to database');
     }
   }
@@ -6183,10 +6249,10 @@ class Database {
       // Insert the copied customer info
       await this.upsertCustomerInfo(targetCustomer);
 
-      console.log(`✅ Copied customer info from ${sourceOrderId} to ${targetOrderId}`);
+      logger.info(`✅ Copied customer info from ${sourceOrderId} to ${targetOrderId}`);
       return await this.getCustomerInfoByOrderId(targetOrderId);
     } catch (error) {
-      console.error('Error copying customer info:', error);
+      logger.error('Error copying customer info:', error);
       throw new Error(`Failed to copy customer info: ${error.message}`);
     }
   }
@@ -6206,7 +6272,7 @@ class Database {
       const [rows] = await this.mysqlConnection.execute(sql, params);
       return rows;
     } catch (error) {
-      console.error('Error executing query:', error);
+      logger.error('Error executing query:', error);
       throw error;
     }
   }
@@ -6236,7 +6302,7 @@ class Database {
       `);
       return rows;
     } catch (error) {
-      console.error('Error getting active orders for tracking:', error);
+      logger.error('Error getting active orders for tracking:', error);
       throw error;
     }
   }
@@ -6270,7 +6336,7 @@ class Database {
       `);
       return rows;
     } catch (error) {
-      console.error('Error getting inactive orders for tracking:', error);
+      logger.error('Error getting inactive orders for tracking:', error);
       throw error;
     }
   }
@@ -6304,7 +6370,7 @@ class Database {
       `);
       return rows;
     } catch (error) {
-      console.error('Error getting orders needing auto-manifest:', error);
+      logger.error('Error getting orders needing auto-manifest:', error);
       throw error;
     }
   }
@@ -6360,7 +6426,7 @@ class Database {
             WHERE id = ?
           `, [newTimestamp, existingTracking[0].id]);
 
-          console.log(`✅ Updated existing tracking record (same status: ${newStatus}) for order ${orderId}`);
+          logger.info(`✅ Updated existing tracking record (same status: ${newStatus}) for order ${orderId}`);
           return;
         }
       }
@@ -6379,10 +6445,10 @@ class Database {
         accountCode
       ]);
 
-      console.log(`✅ Stored new tracking event (status: ${newStatus}) for order ${orderId}`);
+      logger.info(`✅ Stored new tracking event (status: ${newStatus}) for order ${orderId}`);
 
     } catch (error) {
-      console.error(`❌ Error storing tracking data for order ${orderId}:`, error);
+      logger.error(`❌ Error storing tracking data for order ${orderId}:`, error);
       throw error;
     }
   }
@@ -6420,7 +6486,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error(`Error getting tracking data for order ${orderId} (${accountCode}):`, error);
+      logger.error(`Error getting tracking data for order ${orderId} (${accountCode}):`, error);
       throw error;
     }
   }
@@ -6459,7 +6525,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting orders with tracking status:', error);
+      logger.error('Error getting orders with tracking status:', error);
       throw error;
     }
   }
@@ -6484,7 +6550,7 @@ class Database {
         message: `Deleted ${result.affectedRows} old tracking records`
       };
     } catch (error) {
-      console.error('Error cleaning up old tracking data:', error);
+      logger.error('Error cleaning up old tracking data:', error);
       throw error;
     }
   }
@@ -6511,7 +6577,7 @@ class Database {
 
       return stats[0];
     } catch (error) {
-      console.error('Error getting tracking statistics:', error);
+      logger.error('Error getting tracking statistics:', error);
       throw error;
     }
   }
@@ -6543,7 +6609,7 @@ class Database {
       );
 
       if (existingLabels.length === 0) {
-        console.log(`⚠️ No label found for order ${orderId} (${accountCode}), skipping labels update`);
+        logger.info(`⚠️ No label found for order ${orderId} (${accountCode}), skipping labels update`);
         return;
       }
 
@@ -6569,17 +6635,17 @@ class Database {
           if (handoverTimestamp) {
             updateQuery += `, handover_at = ?`;
             queryParams.push(handoverTimestamp);
-            console.log(`🚚 Setting is_handover = 1 and handover_at = ${handoverTimestamp} for order ${orderId} (${accountCode})`);
+            logger.info(`🚚 Setting is_handover = 1 and handover_at = ${handoverTimestamp} for order ${orderId} (${accountCode})`);
           } else {
             // If no timestamp provided, use current time
             updateQuery += `, handover_at = NOW()`;
-            console.log(`🚚 Setting is_handover = 1 and handover_at = NOW() for order ${orderId} (${accountCode})`);
+            logger.info(`🚚 Setting is_handover = 1 and handover_at = NOW() for order ${orderId} (${accountCode})`);
           }
         } else {
-          console.log(`🚚 Order ${orderId} (${accountCode}) already has handover_at = ${existingHandoverAt}, preserving original timestamp`);
+          logger.info(`🚚 Order ${orderId} (${accountCode}) already has handover_at = ${existingHandoverAt}, preserving original timestamp`);
         }
 
-        console.log(`🚚 Order ${orderId} (${accountCode}) status changed to In Transit (handed over)`);
+        logger.info(`🚚 Order ${orderId} (${accountCode}) status changed to In Transit (handed over)`);
       }
 
       updateQuery += ` WHERE order_id = ? AND account_code = ?`;
@@ -6587,10 +6653,10 @@ class Database {
 
       await this.mysqlConnection.execute(updateQuery, queryParams);
 
-      console.log(`✅ Updated labels table for order ${orderId} (${accountCode}): status=${currentStatus}, handover=${isHandover ? '1' : 'unchanged'}`);
+      logger.info(`✅ Updated labels table for order ${orderId} (${accountCode}): status=${currentStatus}, handover=${isHandover ? '1' : 'unchanged'}`);
 
     } catch (error) {
-      console.error(`❌ Error updating labels table for order ${orderId} (${accountCode}):`, error);
+      logger.error(`❌ Error updating labels table for order ${orderId} (${accountCode}):`, error);
       throw error;
     }
   }
@@ -6606,7 +6672,7 @@ class Database {
     }
 
     try {
-      console.log('🔍 [Handover/Tracking Validation] Starting validation check...');
+      logger.info('🔍 [Handover/Tracking Validation] Starting validation check...');
 
       // Get all orders with handover_at timestamp and is_manifest = 1 (grouped by account_code for store isolation)
       const [orders] = await this.mysqlConnection.execute(`
@@ -6633,11 +6699,7 @@ class Database {
       const trackingOrders = orders.filter(o => o.expected_tab === 'tracking');
       const ordersWithoutHandover = orders.filter(o => o.handover_at === null);
 
-      console.log(`📊 [Handover/Tracking Validation] Validation Summary:`);
-      console.log(`   - Total orders checked: ${orders.length}`);
-      console.log(`   - Orders in Handover tab: ${handoverOrders.length} (handover_at IS NULL or < 24 hours)`);
-      console.log(`   - Orders in Tracking tab: ${trackingOrders.length} (handover_at >= 24 hours)`);
-      console.log(`   - Orders without handover_at: ${ordersWithoutHandover.length}`);
+      logger.info(`📊 [Handover/Tracking Validation] Validation Summary:`);
 
       // Log orders that are close to the 24-hour threshold (within 1 hour)
       const nearThreshold = orders.filter(o =>
@@ -6647,9 +6709,8 @@ class Database {
       );
 
       if (nearThreshold.length > 0) {
-        console.log(`⚠️ [Handover/Tracking Validation] ${nearThreshold.length} order(s) approaching 24-hour threshold:`);
+        logger.info(`⚠️ [Handover/Tracking Validation] ${nearThreshold.length} order(s) approaching 24-hour threshold:`);
         nearThreshold.forEach(order => {
-          console.log(`   - Order ${order.order_id}: ${order.hours_since_handover.toFixed(1)} hours since handover (will move to tracking soon)`);
         });
       }
 
@@ -6661,9 +6722,8 @@ class Database {
       );
 
       if (justCrossed.length > 0) {
-        console.log(`🔄 [Handover/Tracking Validation] ${justCrossed.length} order(s) recently moved to tracking tab:`);
+        logger.info(`🔄 [Handover/Tracking Validation] ${justCrossed.length} order(s) recently moved to tracking tab:`);
         justCrossed.forEach(order => {
-          console.log(`   - Order ${order.order_id}: ${order.hours_since_handover.toFixed(1)} hours since handover (now in tracking)`);
         });
       }
 
@@ -6679,7 +6739,7 @@ class Database {
       };
 
     } catch (error) {
-      console.error('❌ [Handover/Tracking Validation] Validation failed:', error);
+      logger.error('❌ [Handover/Tracking Validation] Validation failed:', error);
       throw error;
     }
   }
@@ -6712,7 +6772,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting labels with shipment status:', error);
+      logger.error('Error getting labels with shipment status:', error);
       throw error;
     }
   }
@@ -6745,7 +6805,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting handed over labels:', error);
+      logger.error('Error getting handed over labels:', error);
       throw error;
     }
   }
@@ -6785,9 +6845,9 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ store_info table created/verified');
+      logger.info('✅ store_info table created/verified');
     } catch (error) {
-      console.error('❌ Error creating store_info table:', error.message);
+      logger.error('❌ Error creating store_info table:', error.message);
     }
   }
 
@@ -6818,7 +6878,7 @@ class Database {
       `;
 
       await this.mysqlConnection.execute(createTableQuery);
-      console.log('✅ wh_mapping table created/verified');
+      logger.info('✅ wh_mapping table created/verified');
 
       // Add return_warehouse_id column if it doesn't exist (migration)
       try {
@@ -6835,10 +6895,10 @@ class Database {
             ALTER TABLE wh_mapping 
             ADD COLUMN return_warehouse_id VARCHAR(50) AFTER account_code
           `);
-          console.log('✅ Added return_warehouse_id column to wh_mapping table');
+          logger.info('✅ Added return_warehouse_id column to wh_mapping table');
         }
       } catch (migrationError) {
-        console.error('⚠️ Error adding return_warehouse_id column (may already exist):', migrationError.message);
+        logger.error('⚠️ Error adding return_warehouse_id column (may already exist):', migrationError.message);
       }
 
       // Add pickup_location column if it doesn't exist (migration for Shiprocket support)
@@ -6856,13 +6916,13 @@ class Database {
             ALTER TABLE wh_mapping 
             ADD COLUMN pickup_location VARCHAR(255) AFTER return_warehouse_id
           `);
-          console.log('✅ Added pickup_location column to wh_mapping table');
+          logger.info('✅ Added pickup_location column to wh_mapping table');
         }
       } catch (migrationError) {
-        console.error('⚠️ Error adding pickup_location column (may already exist):', migrationError.message);
+        logger.error('⚠️ Error adding pickup_location column (may already exist):', migrationError.message);
       }
     } catch (error) {
-      console.error('❌ Error creating wh_mapping table:', error.message);
+      logger.error('❌ Error creating wh_mapping table:', error.message);
     }
   }
 
@@ -6884,7 +6944,7 @@ class Database {
 
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting store by account code:', error);
+      logger.error('Error getting store by account code:', error);
       throw error;
     }
   }
@@ -6914,7 +6974,7 @@ class Database {
 
       return rows || [];
     } catch (error) {
-      console.error('Error getting stores by account_codes:', error);
+      logger.error('Error getting stores by account_codes:', error);
       throw new Error('Failed to get stores from database');
     }
   }
@@ -6947,7 +7007,7 @@ class Database {
       // Remove protocol if still present
       storeDomain = storeDomain.replace(/^https?:\/\//, '');
 
-      console.log(`🔍 [Store Lookup] Searching for store with domain: ${storeDomain}`);
+      logger.info(`🔍 [Store Lookup] Searching for store with domain: ${storeDomain}`);
 
       // Try exact match first (ACTIVE stores only)
       let [rows] = await this.mysqlConnection.execute(
@@ -6981,7 +7041,6 @@ class Database {
 
       // If still not found and token is provided, try to find by token (ACTIVE stores only)
       if (rows.length === 0 && shopifyToken) {
-        console.log(`🔍 [Store Lookup] Trying to find store by Shopify token...`);
         [rows] = await this.mysqlConnection.execute(
           'SELECT * FROM store_info WHERE shopify_token = ? AND status = "active"',
           [shopifyToken]
@@ -6989,7 +7048,7 @@ class Database {
       }
 
       if (rows.length > 0) {
-        console.log(`✅ [Store Lookup] Found store: ${rows[0].store_name} (account_code: ${rows[0].account_code})`);
+        logger.info(`✅ [Store Lookup] Found store: ${rows[0].store_name} (account_code: ${rows[0].account_code})`);
         return rows[0];
       } else {
         // Log all available stores for debugging
@@ -6997,23 +7056,20 @@ class Database {
           const [allStores] = await this.mysqlConnection.execute(
             'SELECT account_code, store_name, shopify_store_url, status FROM store_info'
           );
-          console.log(`❌ [Store Lookup] Store not found. Searched domain: "${storeDomain}", Token provided: ${shopifyToken ? 'Yes' : 'No'}`);
           if (allStores.length === 0) {
-            console.log(`   ⚠️ No stores found in store_info table. Please add a store first.`);
+            logger.info(`   ⚠️ No stores found in store_info table. Please add a store first.`);
           } else {
-            console.log(`   Available stores in database (${allStores.length}):`);
+            logger.info(`   Available stores in database (${allStores.length}):`);
             allStores.forEach(store => {
-              console.log(`     - ${store.store_name} (${store.account_code}): "${store.shopify_store_url}" [${store.status}]`);
             });
-            console.log(`   💡 Tip: Make sure shopify_store_url matches the domain "${storeDomain}" or use the Shopify token to match.`);
           }
         } catch (logError) {
-          console.error(`❌ [Store Lookup] Error fetching store list for debugging:`, logError.message);
+          logger.error(`❌ [Store Lookup] Error fetching store list for debugging:`, logError.message);
         }
         return null;
       }
     } catch (error) {
-      console.error('Error getting store by Shopify credentials:', error);
+      logger.error('Error getting store by Shopify credentials:', error);
       throw error;
     }
   }
@@ -7034,7 +7090,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting all stores:', error);
+      logger.error('Error getting all stores:', error);
       throw error;
     }
   }
@@ -7057,7 +7113,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error('Error getting stores by status:', error);
+      logger.error('Error getting stores by status:', error);
       throw error;
     }
   }
@@ -7085,7 +7141,7 @@ class Database {
         [accountCode]
       );
     } catch (error) {
-      console.error('Error updating store last sync:', error);
+      logger.error('Error updating store last sync:', error);
       throw error;
     }
   }
@@ -7105,7 +7161,7 @@ class Database {
         [accountCode]
       );
     } catch (error) {
-      console.error('Error updating store Shopify sync:', error);
+      logger.error('Error updating store Shopify sync:', error);
       throw error;
     }
   }
@@ -7150,7 +7206,7 @@ class Database {
 
       return { success: true };
     } catch (error) {
-      console.error('Error creating store:', error);
+      logger.error('Error creating store:', error);
       throw error;
     }
   }
@@ -7213,7 +7269,7 @@ class Database {
 
       return { success: true };
     } catch (error) {
-      console.error('Error updating store:', error);
+      logger.error('Error updating store:', error);
       throw error;
     }
   }
@@ -7236,7 +7292,7 @@ class Database {
 
       return { success: true };
     } catch (error) {
-      console.error('Error deleting store:', error);
+      logger.error('Error deleting store:', error);
       throw error;
     }
   }
@@ -7259,7 +7315,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0].vendor_wh_id : null;
     } catch (error) {
-      console.error('Error getting vendor warehouse ID from mapping:', error);
+      logger.error('Error getting vendor warehouse ID from mapping:', error);
       throw new Error('Failed to get vendor warehouse ID from database');
     }
   }
@@ -7289,7 +7345,7 @@ class Database {
           }
         : null;
     } catch (error) {
-      console.error('Error getting warehouse mapping:', error);
+      logger.error('Error getting warehouse mapping:', error);
       throw new Error('Failed to get warehouse mapping from database');
     }
   }
@@ -7322,7 +7378,7 @@ class Database {
 
       return rows || [];
     } catch (error) {
-      console.error('Error getting warehouse mappings:', error);
+      logger.error('Error getting warehouse mappings:', error);
       throw new Error('Failed to get warehouse mappings from database');
     }
   }
@@ -7365,7 +7421,7 @@ class Database {
       const [rows] = await this.mysqlConnection.execute(query);
       return rows;
     } catch (error) {
-      console.error('Error getting warehouse mappings:', error);
+      logger.error('Error getting warehouse mappings:', error);
       throw new Error('Failed to get warehouse mappings from database');
     }
   }
@@ -7402,7 +7458,7 @@ class Database {
       );
       return rows.length > 0 ? rows[0] : null;
     } catch (error) {
-      console.error('Error getting warehouse mapping by ID:', error);
+      logger.error('Error getting warehouse mapping by ID:', error);
       throw new Error('Failed to get warehouse mapping from database');
     }
   }
@@ -7425,7 +7481,7 @@ class Database {
       );
       return rows.length > 0;
     } catch (error) {
-      console.error('Error checking warehouse mapping existence:', error);
+      logger.error('Error checking warehouse mapping existence:', error);
       throw new Error('Failed to check warehouse mapping in database');
     }
   }
@@ -7457,7 +7513,7 @@ class Database {
 
       return await this.getWhMappingById(result.insertId);
     } catch (error) {
-      console.error('Error creating warehouse mapping:', error);
+      logger.error('Error creating warehouse mapping:', error);
       throw error;
     }
   }
@@ -7479,7 +7535,7 @@ class Database {
       );
       return result.affectedRows > 0;
     } catch (error) {
-      console.error('Error deleting warehouse mapping:', error);
+      logger.error('Error deleting warehouse mapping:', error);
       throw new Error('Failed to delete warehouse mapping from database');
     }
   }
@@ -7527,7 +7583,7 @@ class Database {
             [existing[0].id]
           );
         }
-        console.log(`✅ [RTO] Updated existing RTO record (same status: ${orderStatus}) for order ${orderId}`);
+        logger.info(`✅ [RTO] Updated existing RTO record (same status: ${orderStatus}) for order ${orderId}`);
         return { action: 'updated', id: existing[0].id };
       }
 
@@ -7552,7 +7608,7 @@ class Database {
         [orderId, orderStatus, newInstanceNumber, isDelivered, rtoWh, activityDate, accountCode]
       );
 
-      console.log(`✅ [RTO] Stored new RTO tracking record (status: ${orderStatus}, instance: ${newInstanceNumber}) for order ${orderId}`);
+      logger.info(`✅ [RTO] Stored new RTO tracking record (status: ${orderStatus}, instance: ${newInstanceNumber}) for order ${orderId}`);
 
       // If this order now has a delivered status, update is_delivered for all records of this order
       if (isDelivered) {
@@ -7560,12 +7616,12 @@ class Database {
           `UPDATE rto_tracking SET is_delivered = 1 WHERE order_id = ? AND account_code = ?`,
           [orderId, accountCode]
         );
-        console.log(`✅ [RTO] Marked all RTO records as delivered for order ${orderId}`);
+        logger.info(`✅ [RTO] Marked all RTO records as delivered for order ${orderId}`);
       }
 
       return { action: 'inserted', id: result.insertId, instanceNumber: newInstanceNumber };
     } catch (error) {
-      console.error(`❌ [RTO] Error storing RTO tracking for order ${orderId}:`, error);
+      logger.error(`❌ [RTO] Error storing RTO tracking for order ${orderId}:`, error);
       throw error;
     }
   }
@@ -7607,7 +7663,7 @@ class Database {
 
       return rows;
     } catch (error) {
-      console.error(`❌ [RTO] Error getting RTO tracking for order ${orderId}:`, error);
+      logger.error(`❌ [RTO] Error getting RTO tracking for order ${orderId}:`, error);
       throw error;
     }
   }
@@ -7628,7 +7684,7 @@ class Database {
     }
 
     try {
-      console.log('🔄 [RTO] Starting daily update for days_since_initiated and is_focus...');
+      logger.info('🔄 [RTO] Starting daily update for days_since_initiated and is_focus...');
 
       // Step 1: Update days_since_initiated for all records (using activity_date)
       // If activity_date is NULL, fall back to created_at
@@ -7636,7 +7692,7 @@ class Database {
         UPDATE rto_tracking 
         SET days_since_initiated = DATEDIFF(CURRENT_DATE, DATE(COALESCE(activity_date, created_at)))
       `);
-      console.log(`✅ [RTO] Updated days_since_initiated for ${daysResult.affectedRows} records`);
+      logger.info(`✅ [RTO] Updated days_since_initiated for ${daysResult.affectedRows} records`);
 
       // Step 2: Mark is_delivered = 1 for ALL instances of orders that have a delivered status
       const [deliveredResult] = await this.mysqlConnection.execute(`
@@ -7649,7 +7705,7 @@ class Database {
                    OR order_status LIKE '%delivered%') as delivered_orders
         )
       `);
-      console.log(`✅ [RTO] Updated is_delivered for ${deliveredResult.affectedRows} records`);
+      logger.info(`✅ [RTO] Updated is_delivered for ${deliveredResult.affectedRows} records`);
 
       // Step 3: Reset is_focus to 0 for all records first
       await this.mysqlConnection.execute(`UPDATE rto_tracking SET is_focus = 0`);
@@ -7671,7 +7727,7 @@ class Database {
             ) as focus_orders
           )
       `);
-      console.log(`✅ [RTO] Updated is_focus for ${focusResult.affectedRows} records`);
+      logger.info(`✅ [RTO] Updated is_focus for ${focusResult.affectedRows} records`);
 
       return {
         success: true,
@@ -7681,7 +7737,7 @@ class Database {
         timestamp: new Date().toISOString()
       };
     } catch (error) {
-      console.error('❌ [RTO] Error updating RTO days and focus:', error);
+      logger.error('❌ [RTO] Error updating RTO days and focus:', error);
       throw error;
     }
   }
@@ -7717,7 +7773,7 @@ class Database {
       const [stats] = await this.mysqlConnection.execute(query, params);
       return stats[0];
     } catch (error) {
-      console.error('❌ [RTO] Error getting RTO tracking stats:', error);
+      logger.error('❌ [RTO] Error getting RTO tracking stats:', error);
       throw error;
     }
   }
@@ -7763,7 +7819,7 @@ class Database {
       const [rows] = await this.mysqlConnection.execute(query, params);
       return rows;
     } catch (error) {
-      console.error('❌ [RTO] Error getting RTO focus orders:', error);
+      logger.error('❌ [RTO] Error getting RTO focus orders:', error);
       throw error;
     }
   }
@@ -7822,10 +7878,7 @@ class Database {
         FROM claims c
         INNER JOIN orders o ON c.order_unique_id = o.unique_id AND c.account_code = o.account_code
         LEFT JOIN (SELECT sku_id, account_code, MIN(image) as image FROM products GROUP BY sku_id, account_code) p ON (
-          (REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_](XS|S|M|L|XL|2XL|3XL|4XL|5XL|XXXL|XXL|Small|Medium|Large|Extra Large)$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+-[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+\.[0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id OR
-          REGEXP_REPLACE(TRIM(REGEXP_REPLACE(o.product_code, '[-_][0-9]+$', '')), '[-_]{2,}', '-') = p.sku_id)
+          o.normalized_product_code = p.sku_id
           AND o.account_code = p.account_code
         )
         LEFT JOIN labels l ON o.order_id = l.order_id AND o.account_code = l.account_code
@@ -7846,7 +7899,7 @@ class Database {
       const [rows] = await db.execute(query, params);
       return rows;
     } catch (error) {
-      console.error('❌ [Critical Orders] Error getting critical orders:', error);
+      logger.error('❌ [Critical Orders] Error getting critical orders:', error);
       throw error;
     }
   }
@@ -7883,10 +7936,10 @@ class Database {
       }
 
       const [result] = await this.mysqlConnection.execute(query, params);
-      console.log(`✅ [RTO] Updated ${result.affectedRows} RTO focus orders to status: ${newStatus}`);
+      logger.info(`✅ [RTO] Updated ${result.affectedRows} RTO focus orders to status: ${newStatus}`);
       return { affectedRows: result.affectedRows };
     } catch (error) {
-      console.error('❌ [RTO] Error updating RTO focus status:', error);
+      logger.error('❌ [RTO] Error updating RTO focus status:', error);
       throw error;
     }
   }
@@ -7924,10 +7977,10 @@ class Database {
       `;
 
       const [rows] = await this.mysqlConnection.execute(query);
-      console.log(`📦 [RTO Inventory] Found ${rows.length} unprocessed delivered RTO orders`);
+      logger.info(`📦 [RTO Inventory] Found ${rows.length} unprocessed delivered RTO orders`);
       return rows;
     } catch (error) {
-      console.error('❌ [RTO Inventory] Error getting unprocessed RTO delivered orders:', error);
+      logger.error('❌ [RTO Inventory] Error getting unprocessed RTO delivered orders:', error);
       throw error;
     }
   }
@@ -7964,10 +8017,10 @@ class Database {
         quantity
       ]);
 
-      console.log(`✅ [RTO Inventory] Upserted: rto_wh=${rtoWh}, product_code=${productCode}, size=${size}, qty=${quantity}`);
+      logger.info(`✅ [RTO Inventory] Upserted: rto_wh=${rtoWh}, product_code=${productCode}, size=${size}, qty=${quantity}`);
       return result;
     } catch (error) {
-      console.error('❌ [RTO Inventory] Error upserting RTO inventory:', error);
+      logger.error('❌ [RTO Inventory] Error upserting RTO inventory:', error);
       throw error;
     }
   }
@@ -7997,10 +8050,10 @@ class Database {
       `;
 
       const [result] = await this.mysqlConnection.execute(query, rtoTrackingIds);
-      console.log(`✅ [RTO Inventory] Marked ${result.affectedRows} RTO tracking records as fetched`);
+      logger.info(`✅ [RTO Inventory] Marked ${result.affectedRows} RTO tracking records as fetched`);
       return result;
     } catch (error) {
-      console.error('❌ [RTO Inventory] Error marking RTO tracking as fetched:', error);
+      logger.error('❌ [RTO Inventory] Error marking RTO tracking as fetched:', error);
       throw error;
     }
   }
@@ -8033,7 +8086,7 @@ class Database {
       const [rows] = await this.mysqlConnection.execute(query);
       return rows;
     } catch (error) {
-      console.error('❌ [RTO Inventory] Error getting RTO inventory:', error);
+      logger.error('❌ [RTO Inventory] Error getting RTO inventory:', error);
       throw error;
     }
   }
@@ -8052,7 +8105,7 @@ class Database {
     }
 
     try {
-      console.log('📦 [RTO Inventory] Fetching RTO inventory with product names...');
+      logger.info('📦 [RTO Inventory] Fetching RTO inventory with product names...');
 
       // Query that:
       // 1. Strips size suffix from product_code to match sku_id
@@ -8121,10 +8174,10 @@ class Database {
       `;
 
       const [rows] = await this.mysqlConnection.execute(query);
-      console.log(`📦 [RTO Inventory] Found ${rows.length} RTO entries with product names`);
+      logger.info(`📦 [RTO Inventory] Found ${rows.length} RTO entries with product names`);
       return rows;
     } catch (error) {
-      console.error('❌ [RTO Inventory] Error getting RTO inventory with product names:', error);
+      logger.error('❌ [RTO Inventory] Error getting RTO inventory with product names:', error);
       throw error;
     }
   }
@@ -8142,13 +8195,13 @@ class Database {
     }
 
     try {
-      console.log('🚀 [RTO Inventory] Starting RTO inventory processing...');
+      logger.info('🚀 [RTO Inventory] Starting RTO inventory processing...');
 
       // Get unprocessed delivered RTO orders
       const unprocessedOrders = await this.getUnprocessedRTODeliveredOrders();
 
       if (unprocessedOrders.length === 0) {
-        console.log('✅ [RTO Inventory] No unprocessed RTO orders found');
+        logger.info('✅ [RTO Inventory] No unprocessed RTO orders found');
         return {
           success: true,
           processedCount: 0,
@@ -8173,7 +8226,7 @@ class Database {
           processedIds.push(order.rto_tracking_id);
           successCount++;
         } catch (error) {
-          console.error(`❌ [RTO Inventory] Failed to process order ${order.order_id}:`, error.message);
+          logger.error(`❌ [RTO Inventory] Failed to process order ${order.order_id}:`, error.message);
           errorCount++;
         }
       }
@@ -8183,7 +8236,7 @@ class Database {
         await this.markRTOTrackingAsFetched(processedIds);
       }
 
-      console.log(`✅ [RTO Inventory] Processing completed: ${successCount} success, ${errorCount} errors`);
+      logger.info(`✅ [RTO Inventory] Processing completed: ${successCount} success, ${errorCount} errors`);
 
       return {
         success: true,
@@ -8193,7 +8246,7 @@ class Database {
         message: `Processed ${successCount} RTO orders into inventory`
       };
     } catch (error) {
-      console.error('❌ [RTO Inventory] Error processing RTO inventory:', error);
+      logger.error('❌ [RTO Inventory] Error processing RTO inventory:', error);
       throw error;
     }
   }
@@ -8215,7 +8268,7 @@ class Database {
     }
 
     try {
-      console.log(`📦 [RTO Inventory] Batch updating ${updates.length} items...`);
+      logger.info(`📦 [RTO Inventory] Batch updating ${updates.length} items...`);
 
       let updatedCount = 0;
       let errorCount = 0;
@@ -8223,7 +8276,7 @@ class Database {
       // Process each update individually (each UPDATE is atomic)
       for (const update of updates) {
         if (update.id === undefined || update.quantity === undefined) {
-          console.warn(`⚠️ [RTO Inventory] Skipping invalid update:`, update);
+          logger.warn(`⚠️ [RTO Inventory] Skipping invalid update:`, update);
           continue;
         }
 
@@ -8239,12 +8292,12 @@ class Database {
             updatedCount++;
           }
         } catch (updateError) {
-          console.error(`⚠️ [RTO Inventory] Failed to update id ${update.id}:`, updateError.message);
+          logger.error(`⚠️ [RTO Inventory] Failed to update id ${update.id}:`, updateError.message);
           errorCount++;
         }
       }
 
-      console.log(`✅ [RTO Inventory] Batch update completed: ${updatedCount} items updated, ${errorCount} errors`);
+      logger.info(`✅ [RTO Inventory] Batch update completed: ${updatedCount} items updated, ${errorCount} errors`);
 
       return {
         success: true,
@@ -8253,7 +8306,7 @@ class Database {
         message: `Successfully updated ${updatedCount} items`
       };
     } catch (error) {
-      console.error('❌ [RTO Inventory] Error batch updating inventory:', error);
+      logger.error('❌ [RTO Inventory] Error batch updating inventory:', error);
       throw error;
     }
   }
@@ -8272,7 +8325,7 @@ class Database {
     }
 
     try {
-      console.log('🧹 [RTO Inventory] Starting cleanup of zero-quantity records older than 48 hours...');
+      logger.info('🧹 [RTO Inventory] Starting cleanup of zero-quantity records older than 48 hours...');
 
       const [result] = await this.mysqlConnection.execute(`
         DELETE FROM rto_inventory 
@@ -8280,7 +8333,7 @@ class Database {
           AND updated_at < DATE_SUB(NOW(), INTERVAL 48 HOUR)
       `);
 
-      console.log(`✅ [RTO Inventory] Cleanup completed: ${result.affectedRows} records deleted`);
+      logger.info(`✅ [RTO Inventory] Cleanup completed: ${result.affectedRows} records deleted`);
 
       return {
         success: true,
@@ -8288,7 +8341,7 @@ class Database {
         message: `Deleted ${result.affectedRows} zero-quantity records older than 48 hours`
       };
     } catch (error) {
-      console.error('❌ [RTO Inventory] Error cleaning up zero-quantity inventory:', error);
+      logger.error('❌ [RTO Inventory] Error cleaning up zero-quantity inventory:', error);
       throw error;
     }
   }
@@ -8313,10 +8366,10 @@ class Database {
       `;
 
       const [rows] = await this.mysqlConnection.execute(query);
-      console.log(`📍 [RTO Manual] Found ${rows.length} distinct locations`);
+      logger.info(`📍 [RTO Manual] Found ${rows.length} distinct locations`);
       return rows.map(row => row.location);
     } catch (error) {
-      console.error('❌ [RTO Manual] Error getting distinct RTO locations:', error);
+      logger.error('❌ [RTO Manual] Error getting distinct RTO locations:', error);
       throw error;
     }
   }
@@ -8362,10 +8415,10 @@ class Database {
       `;
 
       const [rows] = await this.mysqlConnection.execute(query);
-      console.log(`📦 [RTO Manual] Found ${rows.length} products for dropdown`);
+      logger.info(`📦 [RTO Manual] Found ${rows.length} products for dropdown`);
       return rows;
     } catch (error) {
-      console.error('❌ [RTO Manual] Error getting products for dropdown:', error);
+      logger.error('❌ [RTO Manual] Error getting products for dropdown:', error);
       throw error;
     }
   }
@@ -8407,10 +8460,10 @@ class Database {
       `;
 
       const [rows] = await this.mysqlConnection.execute(query, [skuId]);
-      console.log(`📏 [RTO Manual] Found ${rows.length} sizes for sku_id: ${skuId}`);
+      logger.info(`📏 [RTO Manual] Found ${rows.length} sizes for sku_id: ${skuId}`);
       return rows.map(row => row.size);
     } catch (error) {
-      console.error('❌ [RTO Manual] Error getting sizes for product:', error);
+      logger.error('❌ [RTO Manual] Error getting sizes for product:', error);
       throw error;
     }
   }
@@ -8492,7 +8545,7 @@ class Database {
           : 0
       };
     } catch (error) {
-      console.error('Error in getVendorFulfillmentStats:', error);
+      logger.error('Error in getVendorFulfillmentStats:', error);
       throw error;
     }
   }
@@ -8574,7 +8627,7 @@ class Database {
       const [rows] = await db.execute(distQuery, params);
       return rows.map(r => ({ status: r.status_group, count: r.count }));
     } catch (error) {
-      console.error('Error in getVendorStatusDistribution:', error);
+      logger.error('Error in getVendorStatusDistribution:', error);
       throw error;
     }
   }
@@ -8667,7 +8720,7 @@ class Database {
       const [rows] = await db.execute(trendQuery, [...params, ...params, ...params, ...params]);
       return rows;
     } catch (error) {
-      console.error('Error in getVendorHandoverTrend:', error);
+      logger.error('Error in getVendorHandoverTrend:', error);
       throw error;
     }
   }
@@ -8701,7 +8754,7 @@ class Database {
         sent_at: new Date()
       };
     } catch (error) {
-      console.error('Error inserting customer message tracking:', error);
+      logger.error('Error inserting customer message tracking:', error);
       throw error;
     }
   }
@@ -8754,7 +8807,7 @@ class Database {
 
       return messageStatusMap;
     } catch (error) {
-      console.error('Error getting latest message status:', error);
+      logger.error('Error getting latest message status:', error);
       throw error;
     }
   }
@@ -8777,7 +8830,7 @@ class Database {
 
       return rows.length > 0 ? rows[0].value : null;
     } catch (error) {
-      console.error('Error getting utility value:', error);
+      logger.error('Error getting utility value:', error);
       throw error;
     }
   }
@@ -8804,7 +8857,7 @@ class Database {
 
       return true;
     } catch (error) {
-      console.error('Error setting utility value:', error);
+      logger.error('Error setting utility value:', error);
       throw error;
     }
   }

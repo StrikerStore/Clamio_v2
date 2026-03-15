@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 /**
  * Generate stable unique_id from Shiprocket order.id and product.id
@@ -127,7 +128,7 @@ class ShiprocketService {
         error: error.message,
         stack: error.stack,
       });
-      console.error('Error cancelling Shiprocket shipments for AWBs:', awbs, 'from Shiprocket API:', error.message);
+      logger.error('Error cancelling Shiprocket shipments for AWBs:', awbs, 'from Shiprocket API:', error.message);
 
       if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
         throw new Error('Unable to connect to Shiprocket API. Please check your internet connection.');
@@ -188,7 +189,7 @@ class ShiprocketService {
         }
 
         this.authToken = store.auth_token; // Should already be "Bearer <token>"
-        console.log(`✅ ShiprocketService initialized for store: ${this.accountCode}`);
+        logger.info(`✅ ShiprocketService initialized for store: ${this.accountCode}`);
       } else {
         throw new Error('Account code is required for ShiprocketService');
       }
@@ -199,7 +200,7 @@ class ShiprocketService {
 
       this.initialized = true;
     } catch (error) {
-      console.error('❌ ShiprocketService initialization failed:', error.message);
+      logger.error('❌ ShiprocketService initialization failed:', error.message);
       throw error;
     }
   }
@@ -225,7 +226,7 @@ class ShiprocketService {
       let page = 1;
       let hasMorePages = true;
 
-      console.log(`🔄 Starting paginated fetch from Shiprocket API (${this.accountCode})...`);
+      logger.info(`🔄 Starting paginated fetch from Shiprocket API (${this.accountCode})...`);
 
       while (hasMorePages) {
         this.logApiActivity({
@@ -235,7 +236,7 @@ class ShiprocketService {
           headers: { Authorization: '***' }
         });
 
-        console.log(`📄 Fetching page ${page}...`);
+        logger.info(`📄 Fetching page ${page}...`);
 
         const response = await axios.get(url, {
           params: { page: page },
@@ -259,7 +260,7 @@ class ShiprocketService {
           throw new Error('Unexpected Shiprocket API response format');
         }
 
-        console.log(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
+        logger.info(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
 
         // Add orders from this page to our collection
         allOrders = allOrders.concat(currentPageOrders);
@@ -270,14 +271,14 @@ class ShiprocketService {
           const { current_page, total_pages } = meta.pagination;
           if (current_page >= total_pages) {
             hasMorePages = false;
-            console.log(`  🏁 Last page reached (page ${current_page}/${total_pages})`);
+            logger.info(`  🏁 Last page reached (page ${current_page}/${total_pages})`);
           } else {
-            console.log(`  ➡️ More pages available (page ${current_page}/${total_pages})`);
+            logger.info(`  ➡️ More pages available (page ${current_page}/${total_pages})`);
           }
         } else {
           // No pagination meta, stop
           hasMorePages = false;
-          console.log(`  🏁 No pagination meta, stopping`);
+          logger.info(`  🏁 No pagination meta, stopping`);
         }
 
         this.logApiActivity({
@@ -291,13 +292,13 @@ class ShiprocketService {
 
         // Safety check to prevent infinite loops
         if (page > 100) {
-          console.log('⚠️ Safety limit reached (100 pages), stopping pagination');
+          logger.info('⚠️ Safety limit reached (100 pages), stopping pagination');
           this.logApiActivity({ type: 'shiprocket-pagination-limit-reached', totalOrders: allOrders.length });
           break;
         }
       }
 
-      console.log(`🎉 Pagination complete! Total orders fetched: ${allOrders.length}`);
+      logger.info(`🎉 Pagination complete! Total orders fetched: ${allOrders.length}`);
 
       // Filter orders to only include last N days (configurable from utility table)
       let numberOfDays = 60; // default
@@ -307,12 +308,12 @@ class ShiprocketService {
           numberOfDays = parseInt(daysValue) || 60;
         }
       } catch (e) {
-        console.log('⚠️ Could not fetch number_of_day_of_order_include, using default 60 days');
+        logger.info('⚠️ Could not fetch number_of_day_of_order_include, using default 60 days');
       }
 
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - numberOfDays);
-      console.log(`📅 Applying date filter: last ${numberOfDays} days (cutoff: ${cutoffDate.toISOString()})`);
+      logger.info(`📅 Applying date filter: last ${numberOfDays} days (cutoff: ${cutoffDate.toISOString()})`);
 
       // 1) Filter by date range
       const filteredOrdersByDate = allOrders.filter(order => {
@@ -322,24 +323,24 @@ class ShiprocketService {
         const isWithinDateRange = orderDate >= cutoffDate;
 
         if (!isWithinDateRange) {
-          console.log(`  ⏰ Filtering out old order: ${order.channel_order_id} (${order.channel_created_at})`);
+          logger.info(`  ⏰ Filtering out old order: ${order.channel_order_id} (${order.channel_created_at})`);
         }
 
         return isWithinDateRange;
       });
 
-      console.log(`📅 Date filter applied: ${filteredOrdersByDate.length} orders within last ${numberOfDays} days (filtered out ${allOrders.length - filteredOrdersByDate.length} old orders)`);
+      logger.info(`📅 Date filter applied: ${filteredOrdersByDate.length} orders within last ${numberOfDays} days (filtered out ${allOrders.length - filteredOrdersByDate.length} old orders)`);
 
       // 2) Exclude cancelled orders (status === "CANCELED")
       const filteredOrders = filteredOrdersByDate.filter(order => {
         const isCancelled = String(order.status || '').toUpperCase() === 'CANCELED';
         if (isCancelled) {
-          console.log(`  🚫 Skipping cancelled order: ${order.channel_order_id} (status: ${order.status})`);
+          logger.info(`  🚫 Skipping cancelled order: ${order.channel_order_id} (status: ${order.status})`);
         }
         return !isCancelled;
       });
 
-      console.log(`✅ Cancellation filter applied: ${filteredOrders.length} active orders (filtered out ${filteredOrdersByDate.length - filteredOrders.length} cancelled orders)`);
+      logger.info(`✅ Cancellation filter applied: ${filteredOrders.length} active orders (filtered out ${filteredOrdersByDate.length - filteredOrders.length} cancelled orders)`);
 
       shiprocketOrders = filteredOrders;
       rawApiResponse = { data: allOrders }; // Keep all orders in raw JSON
@@ -351,9 +352,9 @@ class ShiprocketService {
           fs.mkdirSync(dataDir, { recursive: true });
         }
         fs.writeFileSync(rawDataJsonPath, JSON.stringify(rawApiResponse, null, 2));
-        console.log(`💾 Raw Shiprocket API data saved to: ${rawDataJsonPath}`);
+        logger.info(`💾 Raw Shiprocket API data saved to: ${rawDataJsonPath}`);
       } catch (fileError) {
-        console.warn(`⚠️ Could not save raw Shiprocket data: ${fileError.message}`);
+        logger.warn(`⚠️ Could not save raw Shiprocket data: ${fileError.message}`);
       }
 
     } catch (error) {
@@ -592,7 +593,7 @@ class ShiprocketService {
       }
     }
 
-    console.log(`📊 Sync Summary: ${newOrdersCount} new orders, ${existingOrders.length} existing orders`);
+    logger.info(`📊 Sync Summary: ${newOrdersCount} new orders, ${existingOrders.length} existing orders`);
 
     // ALWAYS update is_in_new_order flags (regardless of other changes)
     try {
@@ -637,7 +638,7 @@ class ShiprocketService {
             });
             updatedOrdersCount++;
             changed = true;
-            console.log(`✅ Updated all fields from Shiprocket API: ${orderRow.order_id}|${orderRow.product_code}`);
+            logger.info(`✅ Updated all fields from Shiprocket API: ${orderRow.order_id}|${orderRow.product_code}`);
           }
         } else {
           // Insert new order with error handling for potential unique_id collision
@@ -645,11 +646,11 @@ class ShiprocketService {
             await database.createOrder(orderRow);
             newOrdersCount++;
             changed = true;
-            console.log(`➕ Added new order: ${orderRow.order_id}|${orderRow.product_code}`);
+            logger.info(`➕ Added new order: ${orderRow.order_id}|${orderRow.product_code}`);
           } catch (insertError) {
             if (insertError.message && insertError.message.includes('ER_DUP_ENTRY')) {
-              console.error(`❌ COLLISION DETECTED: Duplicate unique_id for ${orderRow.order_id}|${orderRow.product_code}`);
-              console.error(`   unique_id: ${orderRow.unique_id}`);
+              logger.error(`❌ COLLISION DETECTED: Duplicate unique_id for ${orderRow.order_id}|${orderRow.product_code}`);
+              logger.error(`   unique_id: ${orderRow.unique_id}`);
               this.logApiActivity({
                 type: 'unique-id-collision',
                 orderId: orderRow.order_id,
@@ -658,7 +659,7 @@ class ShiprocketService {
                 error: insertError.message
               });
             } else {
-              console.error(`❌ Error inserting order ${orderRow.order_id}|${orderRow.product_code}:`, insertError.message);
+              logger.error(`❌ Error inserting order ${orderRow.order_id}|${orderRow.product_code}:`, insertError.message);
               this.logApiActivity({
                 type: 'order-insert-error',
                 orderId: orderRow.order_id,
@@ -683,7 +684,7 @@ class ShiprocketService {
         flagsUpdated: true
       });
 
-      console.log(`📊 Sync Results: ${newOrdersCount} new, ${updatedOrdersCount} updated, ${flatOrders.length - newOrdersCount - updatedOrdersCount} preserved`);
+      logger.info(`📊 Sync Results: ${newOrdersCount} new, ${updatedOrdersCount} updated, ${flatOrders.length - newOrdersCount - updatedOrdersCount} preserved`);
 
       // Only run enhancement if there were actual changes to orders
       if (changed || existingOrders.length === 0) {
@@ -713,7 +714,7 @@ class ShiprocketService {
 
         // Automatically populate customer_info table from Shiprocket orders
         try {
-          console.log('📋 Populating customer_info table from Shiprocket orders...');
+          logger.info('📋 Populating customer_info table from Shiprocket orders...');
           let customerInfoCount = 0;
 
           for (const order of shiprocketOrders) {
@@ -757,7 +758,7 @@ class ShiprocketService {
             customerInfoCount++;
           }
 
-          console.log(`✅ Customer info populated: ${customerInfoCount} records`);
+          logger.info(`✅ Customer info populated: ${customerInfoCount} records`);
           this.logApiActivity({
             type: 'customer-info-sync',
             success: true,
@@ -765,7 +766,7 @@ class ShiprocketService {
             message: `Successfully populated ${customerInfoCount} customer info records`
           });
         } catch (customerInfoError) {
-          console.error('⚠️ Failed to populate customer_info:', customerInfoError.message);
+          logger.error('⚠️ Failed to populate customer_info:', customerInfoError.message);
           this.logApiActivity({
             type: 'customer-info-sync-error',
             error: customerInfoError.message
@@ -793,7 +794,7 @@ class ShiprocketService {
     await this.initialize();
 
     try {
-      console.log(`🔵 SHIPROCKET CARRIER: Starting smart carrier sync to MySQL (${this.accountCode})...`);
+      logger.info(`🔵 SHIPROCKET CARRIER: Starting smart carrier sync to MySQL (${this.accountCode})...`);
 
       // Wait for MySQL initialization
       await database.waitForMySQLInitialization();
@@ -810,10 +811,10 @@ class ShiprocketService {
       }
       const existingCarrierMap = new Map(existingCarriers.map(c => [String(c.carrier_id), c]));
 
-      console.log(`📊 Existing carriers: ${existingCarriers.length}`);
+      logger.info(`📊 Existing carriers: ${existingCarriers.length}`);
 
       // 2. Fetch couriers from Shiprocket API
-      console.log(`📄 Fetching couriers from Shiprocket API...`);
+      logger.info(`📄 Fetching couriers from Shiprocket API...`);
       const url = `${this.baseURL}/courier/courierListWithCounts`;
 
       const response = await axios.get(url, {
@@ -833,7 +834,7 @@ class ShiprocketService {
         throw new Error('Unexpected Shiprocket courier API response format: courier_data is not an array');
       }
 
-      console.log(`✅ Fetched ${courierData.length} couriers from Shiprocket API`);
+      logger.info(`✅ Fetched ${courierData.length} couriers from Shiprocket API`);
 
       // 3. Extract carrier data from Shiprocket response
       const newCarriersFromAPI = courierData.map((courier, index) => ({
@@ -847,15 +848,15 @@ class ShiprocketService {
 
       const newCarrierMap = new Map(newCarriersFromAPI.map(c => [String(c.carrier_id), c]));
 
-      console.log(`📊 Couriers from API: ${newCarriersFromAPI.length}`);
+      logger.info(`📊 Couriers from API: ${newCarriersFromAPI.length}`);
 
       // 4. Find new carriers (not in existing database)
       const newCarrierIds = newCarriersFromAPI.filter(c => !existingCarrierMap.has(String(c.carrier_id)));
-      console.log(`📊 New couriers to add: ${newCarrierIds.length}`);
+      logger.info(`📊 New couriers to add: ${newCarrierIds.length}`);
 
       // 5. Find removed carriers (in existing database but not in API)
       const removedCarrierIds = existingCarriers.filter(c => !newCarrierMap.has(String(c.carrier_id)));
-      console.log(`📊 Removed couriers: ${removedCarrierIds.length}`);
+      logger.info(`📊 Removed couriers: ${removedCarrierIds.length}`);
 
       // 6. Calculate next available priority for new carriers
       const existingPriorities = existingCarriers.map(c => parseInt(c.priority) || 0);
@@ -891,7 +892,7 @@ class ShiprocketService {
           account_code: this.accountCode || newCarrier.account_code,
           priority: nextPriority++
         });
-        console.log(`➕ Added new courier: ${newCarrier.carrier_id} - ${newCarrier.carrier_name} with priority ${nextPriority - 1}`);
+        logger.info(`➕ Added new courier: ${newCarrier.carrier_id} - ${newCarrier.carrier_name} with priority ${nextPriority - 1}`);
       });
 
       // Re-sort by priority and renumber sequentially (1, 2, 3...)
@@ -910,7 +911,7 @@ class ShiprocketService {
         !this.accountCode || c.account_code === this.accountCode
       );
 
-      console.log(`📊 Final couriers for store ${this.accountCode}: ${storeCarriers.length}`);
+      logger.info(`📊 Final couriers for store ${this.accountCode}: ${storeCarriers.length}`);
 
       // 8. Save to MySQL database
       const result = await database.bulkUpsertCarriers(storeCarriers);
@@ -923,8 +924,8 @@ class ShiprocketService {
         );
       }
 
-      console.log('✅ SHIPROCKET CARRIER: Smart carrier sync completed');
-      console.log(`📊 Summary: ${newCarrierIds.length} added, ${removedCarrierIds.length} removed, ${storeCarriers.length} total`);
+      logger.info('✅ SHIPROCKET CARRIER: Smart carrier sync completed');
+      logger.info(`📊 Summary: ${newCarrierIds.length} added, ${removedCarrierIds.length} removed, ${storeCarriers.length} total`);
 
       this.logApiActivity({
         type: 'shiprocket-carrier-sync',
@@ -942,7 +943,7 @@ class ShiprocketService {
         updated: result.updated
       };
     } catch (error) {
-      console.error('💥 SHIPROCKET CARRIER: Error syncing couriers to MySQL:', error.message);
+      logger.error('💥 SHIPROCKET CARRIER: Error syncing couriers to MySQL:', error.message);
       this.logApiActivity({
         type: 'shiprocket-carrier-sync-error',
         error: error.message
@@ -1175,9 +1176,7 @@ class ShiprocketService {
 
     const url = `${this.baseURL}/orders/create/adhoc`;
 
-    console.log('🔄 Calling Shiprocket Create Adhoc Order API');
-    console.log('  - Order ID:', requestBody.order_id);
-    console.log('  - Account Code:', this.accountCode);
+    logger.info('🔄 Calling Shiprocket Create Adhoc Order API');
 
     try {
       const response = await axios.post(url, requestBody, {
@@ -1188,9 +1187,7 @@ class ShiprocketService {
         timeout: 30000,
       });
 
-      console.log('✅ Shiprocket Create Order API call successful');
-      console.log('  - Response status:', response.status);
-      console.log('  - Order ID:', requestBody.order_id);
+      logger.info('✅ Shiprocket Create Order API call successful');
 
       return {
         success: true,
@@ -1198,10 +1195,10 @@ class ShiprocketService {
         order_id: requestBody.order_id
       };
     } catch (error) {
-      console.error('❌ Shiprocket Create Order API call failed:', error.message);
+      logger.error('❌ Shiprocket Create Order API call failed:', error.message);
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
         throw new Error(`Shiprocket Create Order API failed: ${error.response.data?.message || error.message}`);
       }
       throw new Error(`Shiprocket Create Order API failed: ${error.message}`);
@@ -1218,9 +1215,7 @@ class ShiprocketService {
 
     const url = `${this.baseURL}/orders/update/adhoc`;
 
-    console.log('🔄 Calling Shiprocket Update Order API');
-    console.log('  - Order ID:', requestBody.order_id);
-    console.log('  - Account Code:', this.accountCode);
+    logger.info('🔄 Calling Shiprocket Update Order API');
 
     try {
       const response = await axios.post(url, requestBody, {
@@ -1231,9 +1226,7 @@ class ShiprocketService {
         timeout: 30000,
       });
 
-      console.log('✅ Shiprocket Update Order API call successful');
-      console.log('  - Response status:', response.status);
-      console.log('  - Order ID:', requestBody.order_id);
+      logger.info('✅ Shiprocket Update Order API call successful');
 
       return {
         success: true,
@@ -1241,10 +1234,10 @@ class ShiprocketService {
         order_id: requestBody.order_id
       };
     } catch (error) {
-      console.error('❌ Shiprocket Update Order API call failed:', error.message);
+      logger.error('❌ Shiprocket Update Order API call failed:', error.message);
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
         throw new Error(`Shiprocket Update Order API failed: ${error.response.data?.message || error.message}`);
       }
       throw new Error(`Shiprocket Update Order API failed: ${error.message}`);
@@ -1271,10 +1264,7 @@ class ShiprocketService {
       pickup_location: pickupLocation
     };
 
-    console.log('🔄 Calling Shiprocket Change Pickup Address API');
-    console.log('  - Partner Order IDs (order.id):', intPartnerOrderIds);
-    console.log('  - Pickup Location:', pickupLocation);
-    console.log('  - Account Code:', this.accountCode);
+    logger.info('🔄 Calling Shiprocket Change Pickup Address API');
 
     try {
       const response = await axios.patch(url, requestBody, {
@@ -1285,18 +1275,17 @@ class ShiprocketService {
         timeout: 30000,
       });
 
-      console.log('✅ Shiprocket Change Pickup Address API call successful');
-      console.log('  - Response status:', response.status);
+      logger.info('✅ Shiprocket Change Pickup Address API call successful');
 
       return {
         success: true,
         data: response.data
       };
     } catch (error) {
-      console.error('❌ Shiprocket Change Pickup Address API call failed:', error.message);
+      logger.error('❌ Shiprocket Change Pickup Address API call failed:', error.message);
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
         throw new Error(`Shiprocket Change Pickup Address failed: ${error.response.data?.message || error.message}`);
       }
       throw new Error(`Shiprocket Change Pickup Address failed: ${error.message}`);
@@ -1320,10 +1309,7 @@ class ShiprocketService {
       courier_id: String(courierId)
     };
 
-    console.log('🔄 Calling Shiprocket Assign AWB API');
-    console.log('  - Shipment ID:', shipmentId);
-    console.log('  - Courier ID:', courierId);
-    console.log('  - Account Code:', this.accountCode);
+    logger.info('🔄 Calling Shiprocket Assign AWB API');
 
     try {
       const response = await axios.post(url, requestBody, {
@@ -1338,9 +1324,7 @@ class ShiprocketService {
 
       // Check awb_assign_status: 1 = success, 0 = failure
       if (data.awb_assign_status === 1 && data.response?.data?.awb_code) {
-        console.log('✅ Shiprocket AWB assigned successfully');
-        console.log('  - AWB Code:', data.response.data.awb_code);
-        console.log('  - Courier:', data.response.data.courier_name);
+        logger.info('✅ Shiprocket AWB assigned successfully');
 
         return {
           success: true,
@@ -1351,8 +1335,7 @@ class ShiprocketService {
           data: data
         };
       } else {
-        console.log('❌ Shiprocket AWB assign failed (awb_assign_status=0)');
-        console.log('  - Response:', JSON.stringify(data, null, 2));
+        logger.info('❌ Shiprocket AWB assign failed (awb_assign_status=0)');
         return {
           success: false,
           message: data.message || data.response?.data?.message || 'AWB assignment failed',
@@ -1360,10 +1343,10 @@ class ShiprocketService {
         };
       }
     } catch (error) {
-      console.error('❌ Shiprocket Assign AWB API call failed:', error.message);
+      logger.error('❌ Shiprocket Assign AWB API call failed:', error.message);
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
       }
       return {
         success: false,
@@ -1414,10 +1397,7 @@ class ShiprocketService {
       };
     }
 
-    console.log('🔄 Calling Shiprocket Generate Label API');
-    console.log('  - Shipment IDs:', intShipmentIds);
-    console.log('  - Format:', format);
-    console.log('  - Account Code:', this.accountCode);
+    logger.info('🔄 Calling Shiprocket Generate Label API');
 
     try {
       const response = await axios.post(url, requestBody, {
@@ -1431,9 +1411,7 @@ class ShiprocketService {
       const data = response.data;
 
       if (data.label_created === 1 && data.label_url) {
-        console.log('✅ Shiprocket Label generated successfully');
-        console.log('  - Label URL:', data.label_url);
-        console.log('  - Not created:', data.not_created);
+        logger.info('✅ Shiprocket Label generated successfully');
 
         return {
           success: true,
@@ -1442,8 +1420,7 @@ class ShiprocketService {
           data: data
         };
       } else {
-        console.log('❌ Shiprocket Label generation failed');
-        console.log('  - Response:', JSON.stringify(data, null, 2));
+        logger.info('❌ Shiprocket Label generation failed');
         return {
           success: false,
           message: data.response || 'Label generation failed',
@@ -1452,10 +1429,10 @@ class ShiprocketService {
         };
       }
     } catch (error) {
-      console.error('❌ Shiprocket Generate Label API call failed:', error.message);
+      logger.error('❌ Shiprocket Generate Label API call failed:', error.message);
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
         throw new Error(`Shiprocket Generate Label failed: ${error.response.data?.message || error.message}`);
       }
       throw new Error(`Shiprocket Generate Label failed: ${error.message}`);
@@ -1477,9 +1454,7 @@ class ShiprocketService {
       shipment_id: [parseInt(shipmentId)]
     };
 
-    console.log('🔄 Calling Shiprocket Generate Pickup API');
-    console.log('  - Shipment ID:', shipmentId);
-    console.log('  - Account Code:', this.accountCode);
+    logger.info('🔄 Calling Shiprocket Generate Pickup API');
 
     try {
       const response = await axios.post(url, requestBody, {
@@ -1493,9 +1468,7 @@ class ShiprocketService {
       const data = response.data;
 
       if (data.pickup_status === 1) {
-        console.log('✅ Shiprocket Pickup requested successfully');
-        console.log('  - Pickup Scheduled Date:', data.response?.pickup_scheduled_date);
-        console.log('  - Pickup Token Number:', data.response?.pickup_token_number);
+        logger.info('✅ Shiprocket Pickup requested successfully');
 
         return {
           success: true,
@@ -1505,8 +1478,7 @@ class ShiprocketService {
           data: data
         };
       } else {
-        console.log('❌ Shiprocket Pickup request failed');
-        console.log('  - Response:', JSON.stringify(data, null, 2));
+        logger.info('❌ Shiprocket Pickup request failed');
         return {
           success: false,
           message: data.response?.data || data.message || 'Pickup request failed',
@@ -1514,10 +1486,10 @@ class ShiprocketService {
         };
       }
     } catch (error) {
-      console.error('❌ Shiprocket Generate Pickup API call failed:', error.message);
+      logger.error('❌ Shiprocket Generate Pickup API call failed:', error.message);
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
       }
       return {
         success: false,
@@ -1544,9 +1516,7 @@ class ShiprocketService {
       shipment_id: intShipmentIds
     };
 
-    console.log('🔄 Calling Shiprocket Generate Manifest API');
-    console.log('  - Shipment IDs:', intShipmentIds);
-    console.log('  - Account Code:', this.accountCode);
+    logger.info('🔄 Calling Shiprocket Generate Manifest API');
 
     try {
       const response = await axios.post(url, requestBody, {
@@ -1560,8 +1530,7 @@ class ShiprocketService {
       const data = response.data;
 
       if (data.status === 1 && data.manifest_url) {
-        console.log('✅ Shiprocket Manifest generated successfully');
-        console.log('  - Manifest URL:', data.manifest_url);
+        logger.info('✅ Shiprocket Manifest generated successfully');
 
         return {
           success: true,
@@ -1569,8 +1538,7 @@ class ShiprocketService {
           data: data
         };
       } else {
-        console.log('❌ Shiprocket Manifest generation failed');
-        console.log('  - Response:', JSON.stringify(data, null, 2));
+        logger.info('❌ Shiprocket Manifest generation failed');
         return {
           success: false,
           message: data.message || 'Manifest generation failed',
@@ -1578,10 +1546,10 @@ class ShiprocketService {
         };
       }
     } catch (error) {
-      console.error('❌ Shiprocket Generate Manifest API call failed:', error.message);
+      logger.error('❌ Shiprocket Generate Manifest API call failed:', error.message);
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', JSON.stringify(error.response.data, null, 2));
         throw new Error(`Shiprocket Generate Manifest failed: ${error.response.data?.message || error.message}`);
       }
       throw new Error(`Shiprocket Generate Manifest failed: ${error.message}`);
@@ -1593,7 +1561,7 @@ class ShiprocketService {
     const timestamp = new Date().toISOString();
     const logEntry = `[${timestamp}] [Shiprocket] ${JSON.stringify(activity)}\n`;
     fs.appendFile(logPath, logEntry, err => {
-      if (err) console.error('Failed to write API log:', err);
+      if (err) logger.error('Failed to write API log:', err);
     });
   }
 }

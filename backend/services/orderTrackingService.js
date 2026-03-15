@@ -25,16 +25,17 @@ class OrderTrackingService {
    */
   async syncActiveOrderTracking() {
     if (this.isActiveSyncRunning) {
-      console.log('🔄 [Active Tracking] Sync already running, skipping...');
+      logger.info('🔄 [Active Tracking] Sync already running, skipping...');
       return { success: false, message: 'Active tracking sync already in progress' };
     }
 
     this.isActiveSyncRunning = true;
 
     try {
-      console.log('🚀 [Active Tracking] Starting sync for active orders (batch mode)...');
+      logger.info('🚀 [Active Tracking] Starting sync for active orders (batch mode)...');
 
       const database = require('../config/database');
+const logger = require('../utils/logger');
       await database.waitForMySQLInitialization();
 
       if (!database.isMySQLAvailable()) {
@@ -43,7 +44,7 @@ class OrderTrackingService {
 
       // Get active orders (label_downloaded = 1)
       const activeOrders = await database.getActiveOrdersForTracking();
-      console.log(`📦 [Active Tracking] Found ${activeOrders.length} active orders to sync`);
+      logger.info(`📦 [Active Tracking] Found ${activeOrders.length} active orders to sync`);
 
       if (activeOrders.length === 0) {
         return {
@@ -73,21 +74,21 @@ class OrderTrackingService {
         ordersByPartnerAndStore.get(key).push(order);
       }
 
-      console.log(`📊 [Active Tracking] Orders grouped into ${ordersByPartnerAndStore.size} partner-store combination(s)`);
+      logger.info(`📊 [Active Tracking] Orders grouped into ${ordersByPartnerAndStore.size} partner-store combination(s)`);
 
       // Process each partner-store combination with batch AWB fetching
       const awbBatchSize = 50; // Max AWBs per API call
 
       for (const [key, storeOrders] of ordersByPartnerAndStore) {
         const [shippingPartner, accountCode] = key.split('|');
-        console.log(`🏪 [Active Tracking] Processing ${shippingPartner} store ${accountCode}: ${storeOrders.length} orders`);
+        logger.info(`🏪 [Active Tracking] Processing ${shippingPartner} store ${accountCode}: ${storeOrders.length} orders`);
 
         // Split orders into batches of 50 AWBs
         for (let i = 0; i < storeOrders.length; i += awbBatchSize) {
           const batch = storeOrders.slice(i, i + awbBatchSize);
           const awbs = batch.map(order => order.awb);
 
-          console.log(`📡 [Active Tracking] Fetching batch ${Math.floor(i / awbBatchSize) + 1}/${Math.ceil(storeOrders.length / awbBatchSize)} (${awbs.length} AWBs) for ${shippingPartner} store ${accountCode}`);
+          logger.info(`📡 [Active Tracking] Fetching batch ${Math.floor(i / awbBatchSize) + 1}/${Math.ceil(storeOrders.length / awbBatchSize)} (${awbs.length} AWBs) for ${shippingPartner} store ${accountCode}`);
 
           try {
             // Fetch tracking data based on shipping partner
@@ -97,7 +98,7 @@ class OrderTrackingService {
             } else if (shippingPartner.toLowerCase() === 'shipway') {
               trackingDataMap = await this.fetchBatchTrackingFromShipway(awbs, accountCode);
             } else {
-              console.log(`⚠️ [Active Tracking] Unknown shipping partner: ${shippingPartner}, skipping batch`);
+              logger.info(`⚠️ [Active Tracking] Unknown shipping partner: ${shippingPartner}, skipping batch`);
               errorCount += batch.length;
               continue;
             }
@@ -124,12 +125,12 @@ class OrderTrackingService {
                 }
               } else {
                 errorCount++;
-                console.error(`❌ [Active Tracking] Failed to process order ${batch[index].order_id}:`, result.reason?.message);
+                logger.error(`❌ [Active Tracking] Failed to process order ${batch[index].order_id}:`, result.reason?.message);
               }
             });
 
           } catch (batchError) {
-            console.error(`❌ [Active Tracking] Batch fetch failed for ${shippingPartner} store ${accountCode}:`, batchError.message);
+            logger.error(`❌ [Active Tracking] Batch fetch failed for ${shippingPartner} store ${accountCode}:`, batchError.message);
             errorCount += batch.length;
           }
 
@@ -143,31 +144,31 @@ class OrderTrackingService {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      console.log(`✅ [Active Tracking] Sync completed: ${successCount} success, ${errorCount} errors`);
+      logger.info(`✅ [Active Tracking] Sync completed: ${successCount} success, ${errorCount} errors`);
 
       // Validate handover/tracking logic after sync (runs hourly along with current_shipment_status update)
       try {
-        console.log('[Handover/Tracking Validation] Running validation check after tracking sync...');
+        logger.info('[Handover/Tracking Validation] Running validation check after tracking sync...');
         const validationResult = await database.validateHandoverTrackingLogic();
-        console.log(`✅ [Handover/Tracking Validation] Validation completed: ${validationResult.handoverTab} in handover, ${validationResult.trackingTab} in tracking`);
+        logger.info(`✅ [Handover/Tracking Validation] Validation completed: ${validationResult.handoverTab} in handover, ${validationResult.trackingTab} in tracking`);
       } catch (validationError) {
-        console.error('[Handover/Tracking Validation] Validation check failed:', validationError.message);
+        logger.error('[Handover/Tracking Validation] Validation check failed:', validationError.message);
         // Don't fail the entire sync if validation fails
       }
 
       // Send webhook for orders with status changes
       if (statusChangedOrders.length > 0) {
         try {
-          console.log(`📤 [Webhook] Triggering webhook for ${statusChangedOrders.length} orders with status changes...`);
+          logger.info(`📤 [Webhook] Triggering webhook for ${statusChangedOrders.length} orders with status changes...`);
           const webhookService = require('./webhookService');
           const webhookResult = await webhookService.sendStatusUpdateWebhook(statusChangedOrders);
-          console.log(`✅ [Webhook] ${webhookResult.success ? 'Successfully sent' : 'Failed to send'}: ${webhookResult.message}`);
+          logger.info(`✅ [Webhook] ${webhookResult.success ? 'Successfully sent' : 'Failed to send'}: ${webhookResult.message}`);
         } catch (webhookError) {
-          console.error('❌ [Webhook] Failed to send webhook:', webhookError.message);
+          logger.error('❌ [Webhook] Failed to send webhook:', webhookError.message);
           // Don't fail the entire sync if webhook fails
         }
       } else {
-        console.log('📤 [Webhook] No status changes detected, skipping webhook');
+        logger.info('📤 [Webhook] No status changes detected, skipping webhook');
       }
 
       return {
@@ -180,7 +181,7 @@ class OrderTrackingService {
       };
 
     } catch (error) {
-      console.error('💥 [Active Tracking] Sync failed:', error.message);
+      logger.error('💥 [Active Tracking] Sync failed:', error.message);
       return {
         success: false,
         message: error.message,
@@ -199,14 +200,14 @@ class OrderTrackingService {
    */
   async syncInactiveOrderTracking() {
     if (this.isInactiveSyncRunning) {
-      console.log('🔄 [Inactive Tracking] Sync already running, skipping...');
+      logger.info('🔄 [Inactive Tracking] Sync already running, skipping...');
       return { success: false, message: 'Inactive tracking sync already in progress' };
     }
 
     this.isInactiveSyncRunning = true;
 
     try {
-      console.log('🚀 [Inactive Tracking] Starting sync for inactive orders (batch mode)...');
+      logger.info('🚀 [Inactive Tracking] Starting sync for inactive orders (batch mode)...');
 
       const database = require('../config/database');
       await database.waitForMySQLInitialization();
@@ -217,7 +218,7 @@ class OrderTrackingService {
 
       // Get inactive orders (label_downloaded = 1)
       const inactiveOrders = await database.getInactiveOrdersForTracking();
-      console.log(`📦 [Inactive Tracking] Found ${inactiveOrders.length} inactive orders to sync`);
+      logger.info(`📦 [Inactive Tracking] Found ${inactiveOrders.length} inactive orders to sync`);
 
       if (inactiveOrders.length === 0) {
         return {
@@ -246,21 +247,21 @@ class OrderTrackingService {
         ordersByPartnerAndStore.get(key).push(order);
       }
 
-      console.log(`📊 [Inactive Tracking] Orders grouped into ${ordersByPartnerAndStore.size} partner-store combination(s)`);
+      logger.info(`📊 [Inactive Tracking] Orders grouped into ${ordersByPartnerAndStore.size} partner-store combination(s)`);
 
       // Process each partner-store combination with batch AWB fetching
       const awbBatchSize = 50; // Max AWBs per API call
 
       for (const [key, storeOrders] of ordersByPartnerAndStore) {
         const [shippingPartner, accountCode] = key.split('|');
-        console.log(`🏪 [Inactive Tracking] Processing ${shippingPartner} store ${accountCode}: ${storeOrders.length} orders`);
+        logger.info(`🏪 [Inactive Tracking] Processing ${shippingPartner} store ${accountCode}: ${storeOrders.length} orders`);
 
         // Split orders into batches of 50 AWBs
         for (let i = 0; i < storeOrders.length; i += awbBatchSize) {
           const batch = storeOrders.slice(i, i + awbBatchSize);
           const awbs = batch.map(order => order.awb);
 
-          console.log(`📡 [Inactive Tracking] Fetching batch ${Math.floor(i / awbBatchSize) + 1}/${Math.ceil(storeOrders.length / awbBatchSize)} (${awbs.length} AWBs) for ${shippingPartner} store ${accountCode}`);
+          logger.info(`📡 [Inactive Tracking] Fetching batch ${Math.floor(i / awbBatchSize) + 1}/${Math.ceil(storeOrders.length / awbBatchSize)} (${awbs.length} AWBs) for ${shippingPartner} store ${accountCode}`);
 
           try {
             // Fetch tracking data based on shipping partner
@@ -270,7 +271,7 @@ class OrderTrackingService {
             } else if (shippingPartner.toLowerCase() === 'shipway') {
               trackingDataMap = await this.fetchBatchTrackingFromShipway(awbs, accountCode);
             } else {
-              console.log(`⚠️ [Inactive Tracking] Unknown shipping partner: ${shippingPartner}, skipping batch`);
+              logger.info(`⚠️ [Inactive Tracking] Unknown shipping partner: ${shippingPartner}, skipping batch`);
               errorCount += batch.length;
               continue;
             }
@@ -288,12 +289,12 @@ class OrderTrackingService {
                 successCount++;
               } else {
                 errorCount++;
-                console.error(`❌ [Inactive Tracking] Failed to process order ${batch[index].order_id}:`, result.reason?.message);
+                logger.error(`❌ [Inactive Tracking] Failed to process order ${batch[index].order_id}:`, result.reason?.message);
               }
             });
 
           } catch (batchError) {
-            console.error(`❌ [Inactive Tracking] Batch fetch failed for ${shippingPartner} store ${accountCode}:`, batchError.message);
+            logger.error(`❌ [Inactive Tracking] Batch fetch failed for ${shippingPartner} store ${accountCode}:`, batchError.message);
             errorCount += batch.length;
           }
 
@@ -307,7 +308,7 @@ class OrderTrackingService {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      console.log(`✅ [Inactive Tracking] Sync completed: ${successCount} success, ${errorCount} errors`);
+      logger.info(`✅ [Inactive Tracking] Sync completed: ${successCount} success, ${errorCount} errors`);
 
       return {
         success: true,
@@ -319,7 +320,7 @@ class OrderTrackingService {
       };
 
     } catch (error) {
-      console.error('💥 [Inactive Tracking] Sync failed:', error.message);
+      logger.error('💥 [Inactive Tracking] Sync failed:', error.message);
       return {
         success: false,
         message: error.message,
@@ -356,7 +357,7 @@ class OrderTrackingService {
       const awbString = awbs.join(',');
       const apiUrl = `${this.shipwayApiUrl}?awb_numbers=${awbString}&tracking_history=1`;
 
-      console.log(`📡 [API] Calling Shipway Tracking API for ${awbs.length} AWBs (store: ${accountCode})`);
+      logger.info(`📡 [API] Calling Shipway Tracking API for ${awbs.length} AWBs (store: ${accountCode})`);
 
       const response = await axios.get(apiUrl, {
         headers: {
@@ -373,7 +374,7 @@ class OrderTrackingService {
       const data = response.data;
 
       if (!Array.isArray(data) || data.length === 0) {
-        console.log(`⚠️ [API] No tracking data returned for batch`);
+        logger.info(`⚠️ [API] No tracking data returned for batch`);
         return trackingDataMap;
       }
 
@@ -385,7 +386,7 @@ class OrderTrackingService {
         const trackingDetails = trackingResult.tracking_details;
 
         if (!trackingDetails || !trackingDetails.shipment_status) {
-          console.log(`⚠️ [API] No tracking_details for AWB ${awb}`);
+          logger.info(`⚠️ [API] No tracking_details for AWB ${awb}`);
           continue;
         }
 
@@ -410,12 +411,12 @@ class OrderTrackingService {
         trackingDataMap.set(awb, normalizedData);
       }
 
-      console.log(`✅ [API] Batch fetch complete: ${trackingDataMap.size}/${awbs.length} AWBs have tracking data`);
+      logger.info(`✅ [API] Batch fetch complete: ${trackingDataMap.size}/${awbs.length} AWBs have tracking data`);
       return trackingDataMap;
 
     } catch (error) {
       if (error.response) {
-        console.error(`❌ [API] Shipway batch API error:`, error.response.status, error.response.data);
+        logger.error(`❌ [API] Shipway batch API error:`, error.response.status, error.response.data);
         throw new Error(`Shipway API error: ${error.response.data?.message || error.response.statusText}`);
       } else if (error.code === 'ECONNABORTED') {
         throw new Error('Request timeout - Shipway API not responding');
@@ -449,7 +450,7 @@ class OrderTrackingService {
       // Shiprocket API uses POST with body
       const requestBody = { awbs };
 
-      console.log(`📡 [API] Calling Shiprocket Tracking API for ${awbs.length} AWBs (store: ${accountCode})`);
+      logger.info(`📡 [API] Calling Shiprocket Tracking API for ${awbs.length} AWBs (store: ${accountCode})`);
 
       const response = await axios.post(this.shiprocketApiUrl, requestBody, {
         headers: {
@@ -467,14 +468,14 @@ class OrderTrackingService {
 
       // Shiprocket returns an object with AWB codes as keys
       if (!data || typeof data !== 'object') {
-        console.log(`⚠️ [API] No tracking data returned for batch`);
+        logger.info(`⚠️ [API] No tracking data returned for batch`);
         return trackingDataMap;
       }
 
       // Process each tracking result (AWB is the key)
       for (const [awb, trackingResult] of Object.entries(data)) {
         if (!trackingResult || !trackingResult.tracking_data) {
-          console.log(`⚠️ [API] No tracking_data for AWB ${awb}`);
+          logger.info(`⚠️ [API] No tracking_data for AWB ${awb}`);
           continue;
         }
 
@@ -482,14 +483,14 @@ class OrderTrackingService {
 
         // Check if tracking is successful
         if (trackingData.track_status !== 1) {
-          console.log(`⚠️ [API] Track status is not 1 for AWB ${awb}`);
+          logger.info(`⚠️ [API] Track status is not 1 for AWB ${awb}`);
           continue;
         }
 
         // Extract current status from shipment_track array
         const shipmentTrack = trackingData.shipment_track || [];
         if (shipmentTrack.length === 0 || !shipmentTrack[0].current_status) {
-          console.log(`⚠️ [API] No current_status found for AWB ${awb}`);
+          logger.info(`⚠️ [API] No current_status found for AWB ${awb}`);
           continue;
         }
 
@@ -518,12 +519,12 @@ class OrderTrackingService {
         trackingDataMap.set(String(awb), normalizedData);
       }
 
-      console.log(`✅ [API] Shiprocket batch fetch complete: ${trackingDataMap.size}/${awbs.length} AWBs have tracking data`);
+      logger.info(`✅ [API] Shiprocket batch fetch complete: ${trackingDataMap.size}/${awbs.length} AWBs have tracking data`);
       return trackingDataMap;
 
     } catch (error) {
       if (error.response) {
-        console.error(`❌ [API] Shiprocket batch API error:`, error.response.status, error.response.data);
+        logger.error(`❌ [API] Shiprocket batch API error:`, error.response.status, error.response.data);
         throw new Error(`Shiprocket API error: ${error.response.data?.message || error.response.statusText}`);
       } else if (error.code === 'ECONNABORTED') {
         throw new Error('Request timeout - Shiprocket API not responding');
@@ -650,7 +651,7 @@ class OrderTrackingService {
 
           await database.storeRTOTracking(orderId, normalizedLatestStatus, accountCode, rtoWh, activityDate);
         } catch (rtoError) {
-          console.error(`⚠️ [RTO] Failed to store RTO tracking for order ${orderId}:`, rtoError.message);
+          logger.error(`⚠️ [RTO] Failed to store RTO tracking for order ${orderId}:`, rtoError.message);
         }
       }
 
@@ -668,7 +669,7 @@ class OrderTrackingService {
       };
 
     } catch (error) {
-      console.error(`❌ [Tracking] Failed to process order ${orderId}:`, error.message);
+      logger.error(`❌ [Tracking] Failed to process order ${orderId}:`, error.message);
       throw error;
     }
   }
@@ -687,30 +688,30 @@ class OrderTrackingService {
       }
 
       if (!awb) {
-        console.log(`⚠️ [Tracking] No AWB found for order ${orderId}, skipping tracking sync`);
+        logger.info(`⚠️ [Tracking] No AWB found for order ${orderId}, skipping tracking sync`);
         return { success: true, message: 'No AWB available for tracking' };
       }
 
-      console.log(`🔄 [Tracking] Fetching tracking data for order ${orderId} (AWB: ${awb}, ${orderType}, store: ${accountCode})`);
+      logger.info(`🔄 [Tracking] Fetching tracking data for order ${orderId} (AWB: ${awb}, ${orderType}, store: ${accountCode})`);
 
       // Fetch tracking data from Shipway API using AWB
       const trackingData = await this.fetchTrackingFromShipway(awb, accountCode);
 
       if (!trackingData || !trackingData.shipment_status_history) {
-        console.log(`⚠️ [Tracking] No tracking data found for order ${orderId}`);
+        logger.info(`⚠️ [Tracking] No tracking data found for order ${orderId}`);
         return { success: true, message: 'No tracking data available' };
       }
 
       // Validate that shipment_status_history is a non-empty array
       if (!Array.isArray(trackingData.shipment_status_history) || trackingData.shipment_status_history.length === 0) {
-        console.log(`⚠️ [Tracking] Empty or invalid shipment_status_history for order ${orderId}`);
+        logger.info(`⚠️ [Tracking] Empty or invalid shipment_status_history for order ${orderId}`);
         return { success: true, message: 'No tracking events available' };
       }
 
       // Validate that the last event has required properties
       const latestStatus = trackingData.shipment_status_history[trackingData.shipment_status_history.length - 1];
       if (!latestStatus || !latestStatus.name) {
-        console.log(`⚠️ [Tracking] Invalid latest status for order ${orderId}:`, latestStatus);
+        logger.info(`⚠️ [Tracking] Invalid latest status for order ${orderId}:`, latestStatus);
         return { success: true, message: 'Invalid tracking status data' };
       }
 
@@ -735,7 +736,7 @@ class OrderTrackingService {
       const database = require('../config/database');
       await database.storeOrderTracking(orderId, actualOrderType, normalizedTrackingEvents);
 
-      console.log(`✅ [Tracking] Stored ${normalizedTrackingEvents.length} tracking events for order ${orderId}`);
+      logger.info(`✅ [Tracking] Stored ${normalizedTrackingEvents.length} tracking events for order ${orderId}`);
 
       // Normalize latest status for labels table (now async)
       const normalizedLatestStatus = await this.normalizeShipmentStatus(latestStatus.name);
@@ -752,7 +753,7 @@ class OrderTrackingService {
             isHandover = true;
             if (!handoverTimestamp && event.time) {
               handoverTimestamp = event.time;
-              console.log(`🚚 [Tracking] Found handover-qualifying event for order ${orderId} at timestamp: ${handoverTimestamp} (status: ${event.name})`);
+              logger.info(`🚚 [Tracking] Found handover-qualifying event for order ${orderId} at timestamp: ${handoverTimestamp} (status: ${event.name})`);
             }
           }
         }
@@ -784,21 +785,21 @@ class OrderTrackingService {
               // Get location and date from the latest activity
               rtoWh = sortedActivities[0].location || null;
               activityDate = sortedActivities[0].date || null;
-              console.log(`📍 [RTO] Latest activity for order ${orderId}: location="${rtoWh}", date="${activityDate}"`);
+              logger.info(`📍 [RTO] Latest activity for order ${orderId}: location="${rtoWh}", date="${activityDate}"`);
             }
           }
 
           // Fallback to delivered_to from shipment_details if no activity location found
           if (!rtoWh && trackingData.shipment_details?.[0]?.delivered_to) {
             rtoWh = trackingData.shipment_details[0].delivered_to;
-            console.log(`📍 [RTO] Using delivered_to fallback for order ${orderId}: "${rtoWh}"`);
+            logger.info(`📍 [RTO] Using delivered_to fallback for order ${orderId}: "${rtoWh}"`);
           }
 
           await database.storeRTOTracking(orderId, normalizedLatestStatus, accountCode, rtoWh, activityDate);
-          console.log(`📦 [RTO] Stored RTO tracking for order ${orderId} (status: ${normalizedLatestStatus}, rto_wh: ${rtoWh || 'N/A'}, activity_date: ${activityDate || 'N/A'})`);
+          logger.info(`📦 [RTO] Stored RTO tracking for order ${orderId} (status: ${normalizedLatestStatus}, rto_wh: ${rtoWh || 'N/A'}, activity_date: ${activityDate || 'N/A'})`);
         } catch (rtoError) {
           // Log but don't fail the entire tracking process if RTO storage fails
-          console.error(`⚠️ [RTO] Failed to store RTO tracking for order ${orderId}:`, rtoError.message);
+          logger.error(`⚠️ [RTO] Failed to store RTO tracking for order ${orderId}:`, rtoError.message);
         }
       }
 
@@ -812,7 +813,7 @@ class OrderTrackingService {
       };
 
     } catch (error) {
-      console.error(`❌ [Tracking] Failed to process order ${orderId}:`, error.message);
+      logger.error(`❌ [Tracking] Failed to process order ${orderId}:`, error.message);
       throw error;
     }
   }
@@ -936,7 +937,7 @@ class OrderTrackingService {
       // Build the API URL with query parameters (tracking_history=1 to get shipment_track_activities)
       const apiUrl = `${this.shipwayApiUrl}?awb_numbers=${awb}&tracking_history=1`;
 
-      console.log(`📡 [API] Calling Shipway Tracking API for AWB ${awb} (store: ${accountCode})`);
+      logger.info(`📡 [API] Calling Shipway Tracking API for AWB ${awb} (store: ${accountCode})`);
 
       const response = await axios.get(apiUrl, {
         headers: {
@@ -970,7 +971,7 @@ class OrderTrackingService {
       // ]
 
       if (!Array.isArray(data) || data.length === 0) {
-        console.log(`⚠️ [API] No tracking data returned for AWB ${awb}`);
+        logger.info(`⚠️ [API] No tracking data returned for AWB ${awb}`);
         return null;
       }
 
@@ -978,14 +979,14 @@ class OrderTrackingService {
       const trackingResult = data.find(item => String(item.awb) === String(awb));
 
       if (!trackingResult || !trackingResult.tracking_details) {
-        console.log(`⚠️ [API] No tracking_details found for AWB ${awb}`);
+        logger.info(`⚠️ [API] No tracking_details found for AWB ${awb}`);
         return null;
       }
 
       const trackingDetails = trackingResult.tracking_details;
 
       if (!trackingDetails.shipment_status) {
-        console.log(`⚠️ [API] No shipment_status found for AWB ${awb}`);
+        logger.info(`⚠️ [API] No shipment_status found for AWB ${awb}`);
         return null;
       }
 
@@ -1006,7 +1007,7 @@ class OrderTrackingService {
         }
       ];
 
-      console.log(`✅ [API] Received tracking data for AWB ${awb}: status="${currentStatus}", activities=${shipmentTrackActivities.length}`);
+      logger.info(`✅ [API] Received tracking data for AWB ${awb}: status="${currentStatus}", activities=${shipmentTrackActivities.length}`);
 
       // Return in the expected format with shipment_track_activities for RTO warehouse extraction
       return {
@@ -1018,7 +1019,7 @@ class OrderTrackingService {
 
     } catch (error) {
       if (error.response) {
-        console.error(`❌ [API] Shipway API error for AWB ${awb}:`, error.response.status, error.response.data);
+        logger.error(`❌ [API] Shipway API error for AWB ${awb}:`, error.response.status, error.response.data);
         throw new Error(`Shipway API error: ${error.response.data?.message || error.response.statusText}`);
       } else if (error.code === 'ECONNABORTED') {
         throw new Error('Request timeout - Shipway API not responding');
@@ -1042,7 +1043,7 @@ class OrderTrackingService {
 
     // Validate latestStatus has name property
     if (!latestStatus || !latestStatus.name) {
-      console.log(`⚠️ [Tracking] Invalid latest status in determineOrderType:`, latestStatus);
+      logger.info(`⚠️ [Tracking] Invalid latest status in determineOrderType:`, latestStatus);
       return 'active'; // Default to active if invalid
     }
 
@@ -1077,7 +1078,7 @@ class OrderTrackingService {
    */
   async cleanupOldTrackingData() {
     try {
-      console.log('🧹 [Cleanup] Starting cleanup of old tracking data...');
+      logger.info('🧹 [Cleanup] Starting cleanup of old tracking data...');
 
       const database = require('../config/database');
       await database.waitForMySQLInitialization();
@@ -1089,7 +1090,7 @@ class OrderTrackingService {
       // Remove tracking data older than 90 days
       const result = await database.cleanupOldOrderTracking();
 
-      console.log(`✅ [Cleanup] Cleaned up ${result.deletedCount} old tracking records`);
+      logger.info(`✅ [Cleanup] Cleaned up ${result.deletedCount} old tracking records`);
 
       return {
         success: true,
@@ -1099,7 +1100,7 @@ class OrderTrackingService {
       };
 
     } catch (error) {
-      console.error('💥 [Cleanup] Failed:', error.message);
+      logger.error('💥 [Cleanup] Failed:', error.message);
       return {
         success: false,
         message: error.message,

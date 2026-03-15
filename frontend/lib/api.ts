@@ -1,3 +1,4 @@
+// __DEV_LOG_TRANSFORMED__
 // API utility for making backend calls with Basic Authentication
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'
@@ -6,9 +7,9 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/a
 const DEBUG_API = process.env.NODE_ENV === 'development';
 
 if (DEBUG_API) {
-  console.log('🔧 API Configuration:');
-  console.log('  API_BASE_URL:', API_BASE_URL);
-  console.log('  Environment:', process.env.NODE_ENV);
+  if (process.env.NODE_ENV !== 'production') console.log('🔧 API Configuration:');
+  if (process.env.NODE_ENV !== 'production') console.log('  API_BASE_URL:', API_BASE_URL);
+  if (process.env.NODE_ENV !== 'production') console.log('  Environment:', process.env.NODE_ENV);
 }
 
 // Network resilience configuration for slow mobile networks
@@ -163,8 +164,8 @@ class ApiClient {
 
       try {
         if (DEBUG_API) {
-          console.log(`🚀 API Request (attempt ${attempt + 1}/${NETWORK_CONFIG.MAX_RETRIES}): ${config.method || 'GET'} ${API_BASE_URL}${endpoint}`);
-          console.log('  Headers:', config.headers);
+          if (process.env.NODE_ENV !== 'production') console.log(`🚀 API Request (attempt ${attempt + 1}/${NETWORK_CONFIG.MAX_RETRIES}): ${config.method || 'GET'} ${API_BASE_URL}${endpoint}`);
+          if (process.env.NODE_ENV !== 'production') console.log('  Headers:', config.headers);
           if (config.body) console.log('  Body:', config.body);
         }
 
@@ -183,7 +184,7 @@ class ApiClient {
         if (!contentType || !contentType.includes('application/json')) {
           // If not JSON, read as text to get the actual error
           const text = await response.text()
-          console.error('Non-JSON response received:', {
+          if (process.env.NODE_ENV !== 'production') console.error('Non-JSON response received:', {
             status: response.status,
             statusText: response.statusText,
             url: `${API_BASE_URL}${endpoint}`,
@@ -214,7 +215,7 @@ class ApiClient {
 
           if (!isVerificationEndpoint) {
             // Log detailed error information for debugging (except for verification)
-            console.error('❌ API Error Response:', {
+            if (process.env.NODE_ENV !== 'production') console.error('❌ API Error Response:', {
               status: response.status,
               statusText: response.statusText,
               endpoint: endpoint,
@@ -231,7 +232,7 @@ class ApiClient {
           // Log detailed validation errors for debugging
           if (data && data.errors && Array.isArray(data.errors)) {
             if (!isVerificationEndpoint) {
-              console.error('Validation errors:', data.errors)
+              if (process.env.NODE_ENV !== 'production') console.error('Validation errors:', data.errors)
             }
             const errorMessages = data.errors.map((err: any) => `${err.field}: ${err.message}`).join(', ')
             throw new Error(`${data.message || 'Validation error'}: ${errorMessages}`)
@@ -253,7 +254,7 @@ class ApiClient {
 
         if (DEBUG_API) {
           console.log(`✅ API Response: ${response.status} ${response.statusText}`);
-          console.log('  Data:', data);
+          if (process.env.NODE_ENV !== 'production') console.log('  Data:', data);
         }
 
         return data
@@ -264,7 +265,7 @@ class ApiClient {
         // Check if we should retry
         if (isRetryableError(error) && attempt < NETWORK_CONFIG.MAX_RETRIES - 1) {
           const delay = getRetryDelay(attempt);
-          console.warn(`⚠️ Network error on attempt ${attempt + 1}/${NETWORK_CONFIG.MAX_RETRIES}. Retrying in ${Math.round(delay)}ms...`, {
+          if (process.env.NODE_ENV !== 'production') console.warn(`⚠️ Network error on attempt ${attempt + 1}/${NETWORK_CONFIG.MAX_RETRIES}. Retrying in ${Math.round(delay)}ms...`, {
             endpoint,
             error: error.message,
           });
@@ -274,7 +275,7 @@ class ApiClient {
 
         // If it's a timeout, provide a user-friendly message
         if (error.name === 'AbortError') {
-          console.error('❌ Request timed out:', {
+          if (process.env.NODE_ENV !== 'production') console.error('❌ Request timed out:', {
             endpoint,
             timeout: `${NETWORK_CONFIG.REQUEST_TIMEOUT_MS / 1000}s`,
             attempts: attempt + 1,
@@ -294,7 +295,7 @@ class ApiClient {
         }
 
         if (DEBUG_API) {
-          console.error('❌ API request failed:', error);
+          if (process.env.NODE_ENV !== 'production') console.error('❌ API request failed:', error);
         }
 
         // Provide user-friendly message for network errors
@@ -691,20 +692,20 @@ class ApiClient {
   }
 
   async claimOrder(unique_id: string): Promise<ApiResponse> {
-    console.log('🔵 API CLIENT: claimOrder called');
-    console.log('  - unique_id:', unique_id);
+    if (process.env.NODE_ENV !== 'production') console.log('🔵 API CLIENT: claimOrder called');
+    if (process.env.NODE_ENV !== 'production') console.log('  - unique_id:', unique_id);
 
     // Use vendor token for claim endpoint
     const vendorToken = localStorage.getItem('vendorToken')
 
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/claim');
-    console.log('  - Body:', JSON.stringify({ unique_id }));
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/claim');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Body:', JSON.stringify({ unique_id }));
 
     return this.makeRequest('/orders/claim', {
       method: 'POST',
@@ -717,23 +718,23 @@ class ApiClient {
   }
 
   async bulkClaimOrders(unique_ids: string[]): Promise<ApiResponse> {
-    console.log('🔵 API CLIENT: bulkClaimOrders called');
-    console.log('  - unique_ids:', unique_ids);
+    if (process.env.NODE_ENV !== 'production') console.log('🔵 API CLIENT: bulkClaimOrders called');
+    if (process.env.NODE_ENV !== 'production') console.log('  - unique_ids:', unique_ids);
 
     // Use vendor token for bulk claim endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-    console.log('🔑 API CLIENT: Token check');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    if (process.env.NODE_ENV !== 'production') console.log('🔑 API CLIENT: Token check');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/bulk-claim');
-    console.log('  - Method: POST');
-    console.log('  - Headers: Content-Type, Authorization');
-    console.log('  - Body:', JSON.stringify({ unique_ids }));
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/bulk-claim');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Method: POST');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers: Content-Type, Authorization');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Body:', JSON.stringify({ unique_ids }));
 
     return this.makeRequest('/orders/bulk-claim', {
       method: 'POST',
@@ -746,20 +747,20 @@ class ApiClient {
   }
 
   async verifyOrderStatuses(unique_ids: string[]): Promise<ApiResponse> {
-    console.log('🔵 API CLIENT: verifyOrderStatuses called');
-    console.log('  - unique_ids:', unique_ids);
+    if (process.env.NODE_ENV !== 'production') console.log('🔵 API CLIENT: verifyOrderStatuses called');
+    if (process.env.NODE_ENV !== 'production') console.log('  - unique_ids:', unique_ids);
 
     const vendorToken = localStorage.getItem('vendorToken')
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       return { success: false, message: 'No vendor token found' };
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/verify-status');
-    console.log('  - Method: POST');
-    console.log('  - Headers: Content-Type, Authorization');
-    console.log('  - Body:', JSON.stringify({ unique_ids }));
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/verify-status');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Method: POST');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers: Content-Type, Authorization');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Body:', JSON.stringify({ unique_ids }));
 
     // Now that the backend method exists, errors should be actual errors, not missing methods
     return this.makeRequest('/orders/verify-status', {
@@ -773,25 +774,25 @@ class ApiClient {
   }
 
   async getGroupedOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
-    console.log('🔵 API CLIENT: getGroupedOrders called');
-    console.log('  - page:', page);
-    console.log('  - limit:', limit);
+    if (process.env.NODE_ENV !== 'production') console.log('🔵 API CLIENT: getGroupedOrders called');
+    if (process.env.NODE_ENV !== 'production') console.log('  - page:', page);
+    if (process.env.NODE_ENV !== 'production') console.log('  - limit:', limit);
 
     // Use vendor token for grouped orders endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-    console.log('🔑 API CLIENT: Token check');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    console.log('  - vendorToken value:', JSON.stringify(vendorToken));
+    if (process.env.NODE_ENV !== 'production') console.log('🔑 API CLIENT: Token check');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken value:', JSON.stringify(vendorToken));
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/grouped');
-    console.log('  - Method: GET');
-    console.log('  - Headers: Authorization');
-    console.log('  - Query params: page=' + page + ', limit=' + limit);
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/grouped');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Method: GET');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers: Authorization');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Query params: page=' + page + ', limit=' + limit);
 
     return this.makeRequest(`/orders/grouped?page=${page}&limit=${limit}`, {
       method: 'GET',
@@ -802,24 +803,24 @@ class ApiClient {
   }
 
   async getHandoverOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
-    console.log('🔵 API CLIENT: getHandoverOrders called');
-    console.log('  - page:', page);
-    console.log('  - limit:', limit);
+    if (process.env.NODE_ENV !== 'production') console.log('🔵 API CLIENT: getHandoverOrders called');
+    if (process.env.NODE_ENV !== 'production') console.log('  - page:', page);
+    if (process.env.NODE_ENV !== 'production') console.log('  - limit:', limit);
 
     // Use vendor token for handover orders endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-    console.log('🔑 API CLIENT: Token check');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    if (process.env.NODE_ENV !== 'production') console.log('🔑 API CLIENT: Token check');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/handover');
-    console.log('  - Method: GET');
-    console.log('  - Headers: Authorization');
-    console.log('  - Query params: page=' + page + ', limit=' + limit);
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/handover');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Method: GET');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers: Authorization');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Query params: page=' + page + ', limit=' + limit);
 
     return this.makeRequest(`/orders/handover?page=${page}&limit=${limit}`, {
       method: 'GET',
@@ -830,24 +831,24 @@ class ApiClient {
   }
 
   async getOrderTrackingOrders(page: number = 1, limit: number = 50): Promise<ApiResponse> {
-    console.log('🔵 API CLIENT: getOrderTrackingOrders called');
-    console.log('  - page:', page);
-    console.log('  - limit:', limit);
+    if (process.env.NODE_ENV !== 'production') console.log('🔵 API CLIENT: getOrderTrackingOrders called');
+    if (process.env.NODE_ENV !== 'production') console.log('  - page:', page);
+    if (process.env.NODE_ENV !== 'production') console.log('  - limit:', limit);
 
     // Use vendor token for order tracking endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-    console.log('🔑 API CLIENT: Token check');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    if (process.env.NODE_ENV !== 'production') console.log('🔑 API CLIENT: Token check');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/order-tracking');
-    console.log('  - Method: GET');
-    console.log('  - Headers: Authorization');
-    console.log('  - Query params: page=' + page + ', limit=' + limit);
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/order-tracking');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Method: GET');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers: Authorization');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Query params: page=' + page + ', limit=' + limit);
 
     return this.makeRequest(`/orders/order-tracking?page=${page}&limit=${limit}`, {
       method: 'GET',
@@ -858,21 +859,21 @@ class ApiClient {
   }
 
   async getDashboardStats(): Promise<ApiResponse> {
-    console.log('📊 API CLIENT: getDashboardStats called');
+    if (process.env.NODE_ENV !== 'production') console.log('📊 API CLIENT: getDashboardStats called');
 
     // Use vendor token for dashboard stats endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-    console.log('🔑 API CLIENT: Token check');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    if (process.env.NODE_ENV !== 'production') console.log('🔑 API CLIENT: Token check');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/dashboard-stats');
-    console.log('  - Method: GET');
-    console.log('  - Headers: Authorization');
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/dashboard-stats');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Method: GET');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers: Authorization');
 
     return this.makeRequest(`/orders/dashboard-stats`, {
       method: 'GET',
@@ -883,23 +884,23 @@ class ApiClient {
   }
 
   async reverseOrder(unique_id: string): Promise<ApiResponse> {
-    console.log('🔵 API CLIENT: reverseOrder called');
-    console.log('  - unique_id:', unique_id);
+    if (process.env.NODE_ENV !== 'production') console.log('🔵 API CLIENT: reverseOrder called');
+    if (process.env.NODE_ENV !== 'production') console.log('  - unique_id:', unique_id);
 
     // Use vendor token for reverse endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-    console.log('🔑 API CLIENT: Token check');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    if (process.env.NODE_ENV !== 'production') console.log('🔑 API CLIENT: Token check');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/reverse');
-    console.log('  - Method: POST');
-    console.log('  - Headers: Content-Type, Authorization');
-    console.log('  - Body:', JSON.stringify({ unique_id }));
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/reverse');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Method: POST');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers: Content-Type, Authorization');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Body:', JSON.stringify({ unique_id }));
 
     return this.makeRequest('/orders/reverse', {
       method: 'POST',
@@ -912,24 +913,24 @@ class ApiClient {
   }
 
   async reverseGroupedOrder(order_id: string, unique_ids: string[]): Promise<ApiResponse> {
-    console.log('🔵 API CLIENT: reverseGroupedOrder called');
-    console.log('  - order_id:', order_id);
-    console.log('  - unique_ids:', unique_ids);
+    if (process.env.NODE_ENV !== 'production') console.log('🔵 API CLIENT: reverseGroupedOrder called');
+    if (process.env.NODE_ENV !== 'production') console.log('  - order_id:', order_id);
+    if (process.env.NODE_ENV !== 'production') console.log('  - unique_ids:', unique_ids);
 
     // Use vendor token for reverse grouped endpoint
     const vendorToken = localStorage.getItem('vendorToken')
-    console.log('🔑 API CLIENT: Token check');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    if (process.env.NODE_ENV !== 'production') console.log('🔑 API CLIENT: Token check');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
 
     if (!vendorToken) {
-      console.log('❌ API CLIENT: No vendor token found');
+      if (process.env.NODE_ENV !== 'production') console.log('❌ API CLIENT: No vendor token found');
       throw new Error('No vendor token found. Please login again.')
     }
 
-    console.log('📤 API CLIENT: Making request to /orders/reverse-grouped');
-    console.log('  - Method: POST');
-    console.log('  - Headers: Content-Type, Authorization');
-    console.log('  - Body:', JSON.stringify({ order_id, unique_ids }));
+    if (process.env.NODE_ENV !== 'production') console.log('📤 API CLIENT: Making request to /orders/reverse-grouped');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Method: POST');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers: Content-Type, Authorization');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Body:', JSON.stringify({ order_id, unique_ids }));
 
     return this.makeRequest('/orders/reverse-grouped', {
       method: 'POST',
@@ -1018,7 +1019,7 @@ class ApiClient {
 
       return data;
     } catch (error) {
-      console.error('API request failed:', error);
+      if (process.env.NODE_ENV !== 'production') console.error('API request failed:', error);
       throw error;
     }
   }
@@ -1048,7 +1049,7 @@ class ApiClient {
 
       return response.blob();
     } catch (error) {
-      console.error('CSV export failed:', error);
+      if (process.env.NODE_ENV !== 'production') console.error('CSV export failed:', error);
       throw error;
     }
   }
@@ -1071,7 +1072,7 @@ class ApiClient {
 
       return response.blob();
     } catch (error) {
-      console.error('Payment proof fetch failed:', error);
+      if (process.env.NODE_ENV !== 'production') console.error('Payment proof fetch failed:', error);
       throw error;
     }
   }
@@ -1146,7 +1147,7 @@ class ApiClient {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
-      console.error('Error downloading carriers CSV:', error);
+      if (process.env.NODE_ENV !== 'production') console.error('Error downloading carriers CSV:', error);
       throw error;
     }
   }
@@ -1159,7 +1160,7 @@ class ApiClient {
       formData.append('csvFile', file, file.name); // Add filename explicitly
       // Note: account_code should be in CSV file itself for multi-store upload
 
-      console.log('🔍 Uploading file:', {
+      if (process.env.NODE_ENV !== 'production') console.log('🔍 Uploading file:', {
         name: file.name,
         size: file.size,
         type: file.type
@@ -1174,8 +1175,8 @@ class ApiClient {
         body: formData,
       });
 
-      console.log('🔍 Response status:', response.status);
-      console.log('🔍 Response headers:', response.headers);
+      if (process.env.NODE_ENV !== 'production') console.log('🔍 Response status:', response.status);
+      if (process.env.NODE_ENV !== 'production') console.log('🔍 Response headers:', response.headers);
 
       let data;
       const contentType = response.headers.get('content-type');
@@ -1183,11 +1184,11 @@ class ApiClient {
         data = await response.json();
       } else {
         const text = await response.text();
-        console.log('🔍 Response text:', text);
+        if (process.env.NODE_ENV !== 'production') console.log('🔍 Response text:', text);
         throw new Error(`Unexpected response format: ${text}`);
       }
 
-      console.log('🔍 Response data:', data);
+      if (process.env.NODE_ENV !== 'production') console.log('🔍 Response data:', data);
 
       if (!response.ok) {
         throw new Error(data.message || `HTTP error! status: ${response.status}`);
@@ -1195,7 +1196,7 @@ class ApiClient {
 
       return data;
     } catch (error) {
-      console.error('Error uploading carrier priorities:', error);
+      if (process.env.NODE_ENV !== 'production') console.error('Error uploading carrier priorities:', error);
       throw error;
     }
   }
@@ -1340,12 +1341,12 @@ class ApiClient {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
-    console.log('🔍 DOWNLOAD LABEL API CLIENT DEBUG:');
-    console.log('  - Order ID being sent:', orderId);
-    console.log('  - Order ID type:', typeof orderId);
-    console.log('  - Format being sent:', format);
-    console.log('  - runAsync:', runAsync);
-    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    if (process.env.NODE_ENV !== 'production') console.log('🔍 DOWNLOAD LABEL API CLIENT DEBUG:');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Order ID being sent:', orderId);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Order ID type:', typeof orderId);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Format being sent:', format);
+    if (process.env.NODE_ENV !== 'production') console.log('  - runAsync:', runAsync);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
       method: 'POST',
@@ -1356,16 +1357,16 @@ class ApiClient {
       body: JSON.stringify({ order_id: orderId, format: format, async: runAsync })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_id: orderId, format: format, async: runAsync }));
+    if (process.env.NODE_ENV !== 'production') console.log('  - Request body:', JSON.stringify({ order_id: orderId, format: format, async: runAsync }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/download-label`, config)
       const data = await response.json()
 
-      console.log('🔍 DOWNLOAD LABEL API RESPONSE DEBUG:');
-      console.log('  - Status:', response.status);
-      console.log('  - OK:', response.ok);
-      console.log('  - Data:', data);
+      if (process.env.NODE_ENV !== 'production') console.log('🔍 DOWNLOAD LABEL API RESPONSE DEBUG:');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Status:', response.status);
+      if (process.env.NODE_ENV !== 'production') console.log('  - OK:', response.ok);
+      if (process.env.NODE_ENV !== 'production') console.log('  - Data:', data);
 
       if (!response.ok) {
         throw new Error(data.message || `HTTP error! status: ${response.status}`)
@@ -1382,13 +1383,13 @@ class ApiClient {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
-    console.log('🔍 BULK DOWNLOAD LABELS API CLIENT DEBUG:');
-    console.log('  - Order IDs being sent:', orderIds);
-    console.log('  - Order IDs count:', orderIds.length);
-    console.log('  - Format being sent:', format);
-    console.log('  - Generate only:', generateOnly);
-    console.log('  - runAsync:', runAsync);
-    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    if (process.env.NODE_ENV !== 'production') console.log('🔍 BULK DOWNLOAD LABELS API CLIENT DEBUG:');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Order IDs being sent:', orderIds);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Order IDs count:', orderIds.length);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Format being sent:', format);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Generate only:', generateOnly);
+    if (process.env.NODE_ENV !== 'production') console.log('  - runAsync:', runAsync);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
       method: 'POST',
@@ -1399,15 +1400,15 @@ class ApiClient {
       body: JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly, async: runAsync })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly, async: runAsync }));
+    if (process.env.NODE_ENV !== 'production') console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, generate_only: generateOnly, async: runAsync }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels`, config)
 
-      console.log('🔍 BULK DOWNLOAD LABELS API RESPONSE DEBUG:');
-      console.log('  - Status:', response.status);
-      console.log('  - OK:', response.ok);
-      console.log('  - Content-Type:', response.headers.get('content-type'));
+      if (process.env.NODE_ENV !== 'production') console.log('🔍 BULK DOWNLOAD LABELS API RESPONSE DEBUG:');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Status:', response.status);
+      if (process.env.NODE_ENV !== 'production') console.log('  - OK:', response.ok);
+      if (process.env.NODE_ENV !== 'production') console.log('  - Content-Type:', response.headers.get('content-type'));
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -1423,32 +1424,32 @@ class ApiClient {
       // If generate_only is true, return JSON response
       if (generateOnly) {
         const data = await response.json();
-        console.log('✅ Bulk labels generated successfully (generate_only=true)');
-        console.log('  - Response data:', data);
+        if (process.env.NODE_ENV !== 'production') console.log('✅ Bulk labels generated successfully (generate_only=true)');
+        if (process.env.NODE_ENV !== 'production') console.log('  - Response data:', data);
         return data as ApiResponse;
       }
 
       // Get the blob from the response
       const blob = await response.blob()
-      console.log('✅ Bulk labels PDF downloaded successfully');
-      console.log('  - Blob size:', blob.size, 'bytes');
+      if (process.env.NODE_ENV !== 'production') console.log('✅ Bulk labels PDF downloaded successfully');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Blob size:', blob.size, 'bytes');
 
       // Check for warning headers and store them in blob object
       const warningsHeader = response.headers.get('X-Download-Warnings');
       const failedOrdersHeader = response.headers.get('X-Failed-Orders');
 
       if (warningsHeader) {
-        console.log('⚠️ Some orders failed during bulk download');
+        if (process.env.NODE_ENV !== 'production') console.log('⚠️ Some orders failed during bulk download');
         const warnings = atob(warningsHeader);
         const failedOrders = failedOrdersHeader ? JSON.parse(failedOrdersHeader) : [];
-        console.log('  - Warnings:', warnings);
-        console.log('  - Failed orders:', failedOrders);
+        if (process.env.NODE_ENV !== 'production') console.log('  - Warnings:', warnings);
+        if (process.env.NODE_ENV !== 'production') console.log('  - Failed orders:', failedOrders);
 
         // Store warnings in blob object for later access
         (blob as any)._warnings = warnings;
         (blob as any)._failedOrders = failedOrders;
       }
-      console.log('  - Blob type:', blob.type);
+      if (process.env.NODE_ENV !== 'production') console.log('  - Blob type:', blob.type);
 
       return blob
     } catch (error) {
@@ -1461,12 +1462,12 @@ class ApiClient {
     // For vendor endpoints, use vendorToken instead of authHeader
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
-    console.log('🔍 BULK DOWNLOAD LABELS MERGE API CLIENT DEBUG:');
-    console.log('  - Order IDs being sent:', orderIds);
-    console.log('  - Order IDs count:', orderIds.length);
-    console.log('  - Format being sent:', format);
-    console.log('  - runAsync:', runAsync);
-    console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    if (process.env.NODE_ENV !== 'production') console.log('🔍 BULK DOWNLOAD LABELS MERGE API CLIENT DEBUG:');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Order IDs being sent:', orderIds);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Order IDs count:', orderIds.length);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Format being sent:', format);
+    if (process.env.NODE_ENV !== 'production') console.log('  - runAsync:', runAsync);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Vendor token:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
       method: 'POST',
@@ -1477,15 +1478,15 @@ class ApiClient {
       body: JSON.stringify({ order_ids: orderIds, format: format, async: runAsync })
     }
 
-    console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, async: runAsync }));
+    if (process.env.NODE_ENV !== 'production') console.log('  - Request body:', JSON.stringify({ order_ids: orderIds, format: format, async: runAsync }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/orders/bulk-download-labels-merge`, config)
 
-      console.log('🔍 BULK DOWNLOAD LABELS MERGE API RESPONSE DEBUG:');
-      console.log('  - Status:', response.status);
-      console.log('  - OK:', response.ok);
-      console.log('  - Content-Type:', response.headers.get('content-type'));
+      if (process.env.NODE_ENV !== 'production') console.log('🔍 BULK DOWNLOAD LABELS MERGE API RESPONSE DEBUG:');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Status:', response.status);
+      if (process.env.NODE_ENV !== 'production') console.log('  - OK:', response.ok);
+      if (process.env.NODE_ENV !== 'production') console.log('  - Content-Type:', response.headers.get('content-type'));
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -1500,27 +1501,27 @@ class ApiClient {
 
       // Get the blob from the response
       const blob = await response.blob()
-      console.log('✅ Bulk labels PDF merged and downloaded successfully');
-      console.log('  - Blob size:', blob.size, 'bytes');
-      console.log('  - Blob type:', blob.type);
+      if (process.env.NODE_ENV !== 'production') console.log('✅ Bulk labels PDF merged and downloaded successfully');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Blob size:', blob.size, 'bytes');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Blob type:', blob.type);
 
       return blob
     } catch (error) {
-      console.error('Bulk download labels merge API request failed:', error)
+      if (process.env.NODE_ENV !== 'production') console.error('Bulk download labels merge API request failed:', error)
       throw error
     }
   }
 
   async downloadLabelFile(shippingUrl: string): Promise<Blob> {
     console.log('🔍 DOWNLOAD LABEL FILE DEBUG:');
-    console.log('  - Shipping URL:', shippingUrl);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Shipping URL:', shippingUrl);
 
     // Use backend proxy to avoid CORS issues (same as before migration)
     const vendorToken = typeof window !== 'undefined' ? localStorage.getItem('vendorToken') : null;
 
-    console.log('🔍 FRONTEND TOKEN DEBUG:');
-    console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
-    console.log('  - vendorToken value:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
+    if (process.env.NODE_ENV !== 'production') console.log('🔍 FRONTEND TOKEN DEBUG:');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken exists:', vendorToken ? 'YES' : 'NO');
+    if (process.env.NODE_ENV !== 'production') console.log('  - vendorToken value:', vendorToken ? vendorToken.substring(0, 20) + '...' : 'null');
 
     const config: RequestInit = {
       method: 'POST',
@@ -1531,24 +1532,24 @@ class ApiClient {
       body: JSON.stringify({ pdfUrl: shippingUrl })
     }
 
-    console.log('🔍 REQUEST CONFIG DEBUG:');
-    console.log('  - Headers:', config.headers);
-    console.log('  - Body:', config.body);
+    if (process.env.NODE_ENV !== 'production') console.log('🔍 REQUEST CONFIG DEBUG:');
+    if (process.env.NODE_ENV !== 'production') console.log('  - Headers:', config.headers);
+    if (process.env.NODE_ENV !== 'production') console.log('  - Body:', config.body);
 
     try {
-      console.log('🔄 Fetching label file via backend proxy...');
+      if (process.env.NODE_ENV !== 'production') console.log('🔄 Fetching label file via backend proxy...');
       const response = await fetch(`${API_BASE_URL}/orders/download-pdf`, config)
 
-      console.log('🔍 Label file response:');
-      console.log('  - Status:', response.status);
-      console.log('  - OK:', response.ok);
-      console.log('  - Content-Type:', response.headers.get('content-type'));
+      if (process.env.NODE_ENV !== 'production') console.log('🔍 Label file response:');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Status:', response.status);
+      if (process.env.NODE_ENV !== 'production') console.log('  - OK:', response.ok);
+      if (process.env.NODE_ENV !== 'production') console.log('  - Content-Type:', response.headers.get('content-type'));
 
       if (!response.ok) {
         // Try to get the error message from the response
         try {
           const errorData = await response.json();
-          console.log('🔍 Error response data:', errorData);
+          if (process.env.NODE_ENV !== 'production') console.log('🔍 Error response data:', errorData);
           throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
         } catch (jsonError) {
           throw new Error(`HTTP error! status: ${response.status}`)
@@ -1556,9 +1557,9 @@ class ApiClient {
       }
 
       const blob = await response.blob()
-      console.log('✅ Label file downloaded successfully via proxy');
-      console.log('  - Blob size:', blob.size, 'bytes');
-      console.log('  - Blob type:', blob.type);
+      if (process.env.NODE_ENV !== 'production') console.log('✅ Label file downloaded successfully via proxy');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Blob size:', blob.size, 'bytes');
+      if (process.env.NODE_ENV !== 'production') console.log('  - Blob type:', blob.type);
 
       return blob
     } catch (error) {
@@ -1899,7 +1900,7 @@ class ApiClient {
         database: data.database,
       };
     } catch (error: any) {
-      console.error('❌ Backend health check failed:', error.message);
+      if (process.env.NODE_ENV !== 'production') console.error('❌ Backend health check failed:', error.message);
       return {
         success: false,
         message: `Cannot connect to backend server at ${API_BASE_URL}. Please ensure the backend is running on port 5000.`,

@@ -5,6 +5,7 @@
 
 const webpush = require('web-push');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 class PushNotificationService {
   constructor() {
@@ -21,9 +22,9 @@ class PushNotificationService {
         this.vapidKeys.publicKey,
         this.vapidKeys.privateKey
       );
-      console.log('🔔 Push Notification Service initialized with VAPID keys');
+      logger.info('🔔 Push Notification Service initialized with VAPID keys');
     } else {
-      console.log('🔔 Push Notification Service initialized (VAPID keys not configured)');
+      logger.info('🔔 Push Notification Service initialized (VAPID keys not configured)');
     }
   }
 
@@ -46,8 +47,8 @@ class PushNotificationService {
    */
   async subscribeAdmin(adminId, subscription) {
     try {
-      console.log('📱 [PUSH SUBSCRIBE] Starting subscription process for admin:', adminId);
-      console.log('📱 [PUSH SUBSCRIBE] Subscription data:', {
+      logger.info('📱 [PUSH SUBSCRIBE] Starting subscription process for admin:', adminId);
+      logger.info('📱 [PUSH SUBSCRIBE] Subscription data:', {
         endpoint: subscription.endpoint,
         hasP256dh: !!subscription.keys.p256dh,
         hasAuth: !!subscription.keys.auth,
@@ -77,7 +78,7 @@ class PushNotificationService {
         updated_at = NOW()
       `;
 
-      console.log('📱 [PUSH SUBSCRIBE] Executing database query...');
+      logger.info('📱 [PUSH SUBSCRIBE] Executing database query...');
       const result = await database.query(query, [
         adminId,
         subscription.endpoint,
@@ -85,7 +86,7 @@ class PushNotificationService {
         subscription.keys.auth
       ]);
 
-      console.log('📱 [PUSH SUBSCRIBE] Database query result:', {
+      logger.info('📱 [PUSH SUBSCRIBE] Database query result:', {
         insertId: result.insertId,
         affectedRows: result.affectedRows,
         changedRows: result.changedRows
@@ -97,17 +98,17 @@ class PushNotificationService {
         [adminId]
       );
 
-      console.log('📱 [PUSH SUBSCRIBE] Verification query result:', savedSubscription);
+      logger.info('📱 [PUSH SUBSCRIBE] Verification query result:', savedSubscription);
 
       if (!savedSubscription) {
         throw new Error('Subscription was not saved to database');
       }
 
-      console.log('✅ [PUSH SUBSCRIBE] Admin subscribed successfully:', adminId);
+      logger.info('✅ [PUSH SUBSCRIBE] Admin subscribed successfully:', adminId);
       return { success: true, message: 'Subscribed to push notifications' };
     } catch (error) {
-      console.error('❌ [PUSH SUBSCRIBE] Error subscribing admin:', error);
-      console.error('❌ [PUSH SUBSCRIBE] Error details:', {
+      logger.error('❌ [PUSH SUBSCRIBE] Error subscribing admin:', error);
+      logger.error('❌ [PUSH SUBSCRIBE] Error details:', {
         message: error.message,
         code: error.code,
         sqlState: error.sqlState,
@@ -122,17 +123,17 @@ class PushNotificationService {
    */
   async unsubscribeAdmin(adminId) {
     try {
-      console.log('📱 Unsubscribing admin from push notifications:', adminId);
+      logger.info('📱 Unsubscribing admin from push notifications:', adminId);
 
       await database.query(
         'DELETE FROM push_subscriptions WHERE admin_id = ?',
         [adminId]
       );
 
-      console.log('✅ Admin unsubscribed successfully:', adminId);
+      logger.info('✅ Admin unsubscribed successfully:', adminId);
       return { success: true, message: 'Unsubscribed from push notifications' };
     } catch (error) {
-      console.error('❌ Error unsubscribing admin:', error);
+      logger.error('❌ Error unsubscribing admin:', error);
       throw error;
     }
   }
@@ -163,7 +164,7 @@ class PushNotificationService {
         subscription: subscription || null
       };
     } catch (error) {
-      console.error('❌ Error getting subscription status:', error);
+      logger.error('❌ Error getting subscription status:', error);
       return {
         isSubscribed: false,
         isEnabled: false,
@@ -186,7 +187,7 @@ class PushNotificationService {
       );
 
       if (!admin || !admin.push_notifications_enabled) {
-        console.log('📱 Admin has push notifications disabled:', adminId);
+        logger.info('📱 Admin has push notifications disabled:', adminId);
         return { success: false, message: 'Push notifications disabled for this admin' };
       }
 
@@ -197,7 +198,7 @@ class PushNotificationService {
       );
 
       if (!subscription) {
-        console.log('📱 No push subscription found for admin:', adminId);
+        logger.info('📱 No push subscription found for admin:', adminId);
         return { success: false, message: 'No push subscription found' };
       }
 
@@ -242,14 +243,14 @@ class PushNotificationService {
 
       await webpush.sendNotification(pushSubscription, payload);
       
-      console.log('✅ Push notification sent to admin:', adminId);
+      logger.info('✅ Push notification sent to admin:', adminId);
       return { success: true, message: 'Push notification sent successfully' };
     } catch (error) {
-      console.error('❌ Error sending push notification:', error);
+      logger.error('❌ Error sending push notification:', error);
       
       // If subscription is invalid, remove it
       if (error.statusCode === 410 || error.statusCode === 404) {
-        console.log('🗑️ Removing invalid subscription for admin:', adminId);
+        logger.info('🗑️ Removing invalid subscription for admin:', adminId);
         await this.unsubscribeAdmin(adminId);
       }
       
@@ -262,11 +263,11 @@ class PushNotificationService {
    */
   async sendNotificationToAllAdmins(notification) {
     try {
-      console.log('📢 Sending push notification to all subscribed admins');
+      logger.info('📢 Sending push notification to all subscribed admins');
 
       // Check if VAPID is configured
       if (!this.isVapidConfigured()) {
-        console.log('📱 VAPID keys not configured, skipping push notifications');
+        logger.info('📱 VAPID keys not configured, skipping push notifications');
         return { success: true, message: 'VAPID keys not configured, notifications stored in database only', sentCount: 0 };
       }
 
@@ -281,7 +282,7 @@ class PushNotificationService {
       `);
 
       if (admins.length === 0) {
-        console.log('📱 No subscribed admins found');
+        logger.info('📱 No subscribed admins found');
         return { success: true, message: 'No subscribed admins found', sentCount: 0 };
       }
 
@@ -291,13 +292,13 @@ class PushNotificationService {
           const result = await this.sendNotificationToAdmin(admin.id, notification);
           results.push({ adminId: admin.id, ...result });
         } catch (error) {
-          console.error(`❌ Failed to send notification to admin ${admin.id}:`, error.message);
+          logger.error(`❌ Failed to send notification to admin ${admin.id}:`, error.message);
           results.push({ adminId: admin.id, success: false, error: error.message });
         }
       }
 
       const successCount = results.filter(r => r.success).length;
-      console.log(`✅ Push notifications sent: ${successCount}/${admins.length}`);
+      logger.info(`✅ Push notifications sent: ${successCount}/${admins.length}`);
 
       return {
         success: true,
@@ -307,7 +308,7 @@ class PushNotificationService {
         results
       };
     } catch (error) {
-      console.error('❌ Error sending push notifications to all admins:', error);
+      logger.error('❌ Error sending push notifications to all admins:', error);
       throw error;
     }
   }
@@ -322,10 +323,10 @@ class PushNotificationService {
         [enabled ? 1 : 0, adminId]
       );
 
-      console.log(`✅ Updated push notification preference for admin ${adminId}: ${enabled ? 'enabled' : 'disabled'}`);
+      logger.info(`✅ Updated push notification preference for admin ${adminId}: ${enabled ? 'enabled' : 'disabled'}`);
       return { success: true, message: `Push notifications ${enabled ? 'enabled' : 'disabled'}` };
     } catch (error) {
-      console.error('❌ Error updating push notification preference:', error);
+      logger.error('❌ Error updating push notification preference:', error);
       throw error;
     }
   }
@@ -351,7 +352,7 @@ class PushNotificationService {
         data: stats
       };
     } catch (error) {
-      console.error('❌ Error getting push notification stats:', error);
+      logger.error('❌ Error getting push notification stats:', error);
       throw error;
     }
   }

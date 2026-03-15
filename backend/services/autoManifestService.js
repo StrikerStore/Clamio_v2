@@ -1,4 +1,5 @@
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 /**
  * Auto Manifest Service
@@ -55,14 +56,14 @@ class AutoManifestService {
    */
   async processAutoManifest() {
     if (this.isRunning) {
-      console.log('🔄 [Auto-Manifest] Process already running, skipping...');
+      logger.info('🔄 [Auto-Manifest] Process already running, skipping...');
       return { success: false, message: 'Auto-manifest process already in progress' };
     }
 
     this.isRunning = true;
     
     try {
-      console.log('🚀 [Auto-Manifest] Starting auto-manifest process...');
+      logger.info('🚀 [Auto-Manifest] Starting auto-manifest process...');
       
       const database = require('../config/database');
       await database.waitForMySQLInitialization();
@@ -73,19 +74,19 @@ class AutoManifestService {
 
       // Get orders that need auto-manifest
       const ordersNeedingManifest = await database.getOrdersNeedingAutoManifest();
-      console.log(`📦 [Auto-Manifest] Found ${ordersNeedingManifest.length} orders needing auto-manifest`);
+      logger.info(`📦 [Auto-Manifest] Found ${ordersNeedingManifest.length} orders needing auto-manifest`);
       
       // Log details of orders that need manifesting
       if (ordersNeedingManifest.length > 0) {
-        console.log('📋 [Auto-Manifest] Orders needing manifest:');
+        logger.info('📋 [Auto-Manifest] Orders needing manifest:');
         ordersNeedingManifest.forEach((order, index) => {
-          console.log(`  ${index + 1}. Order ${order.order_id} - ${order.customer_name} - ${order.product_name}`);
-          console.log(`     Status: ${order.current_shipment_status}, Handover: ${order.is_handover}, AWB: ${order.awb || 'N/A'}`);
+          logger.info(`  ${index + 1}. Order ${order.order_id} - ${order.customer_name} - ${order.product_name}`);
+          logger.info(`     Status: ${order.current_shipment_status}, Handover: ${order.is_handover}, AWB: ${order.awb || 'N/A'}`);
         });
       }
 
       if (ordersNeedingManifest.length === 0) {
-        console.log('✅ [Auto-Manifest] No orders need auto-manifest');
+        logger.info('✅ [Auto-Manifest] No orders need auto-manifest');
         return {
           success: true,
           message: 'No orders need auto-manifest',
@@ -99,7 +100,7 @@ class AutoManifestService {
       const ordersByStore = {};
       ordersNeedingManifest.forEach(order => {
         if (!order.account_code) {
-          console.warn(`⚠️ [Auto-Manifest] Order ${order.order_id} missing account_code, skipping`);
+          logger.warn(`⚠️ [Auto-Manifest] Order ${order.order_id} missing account_code, skipping`);
           return;
         }
         if (!ordersByStore[order.account_code]) {
@@ -113,15 +114,15 @@ class AutoManifestService {
 
       // Process each store's orders separately
       for (const [accountCode, storeOrders] of Object.entries(ordersByStore)) {
-        console.log(`🏪 [Auto-Manifest] Processing ${storeOrders.length} orders for store: ${accountCode}`);
+        logger.info(`🏪 [Auto-Manifest] Processing ${storeOrders.length} orders for store: ${accountCode}`);
         
         const batchSize = 10; // Batch size per store
         for (let i = 0; i < storeOrders.length; i += batchSize) {
           const batch = storeOrders.slice(i, i + batchSize);
           const orderIds = batch.map(order => order.order_id);
           
-          console.log(`🔄 [Auto-Manifest] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(storeOrders.length/batchSize)} for store ${accountCode} (${batch.length} orders)`);
-          console.log(`📦 [Auto-Manifest] Order IDs in batch: ${orderIds.join(', ')}`);
+          logger.info(`🔄 [Auto-Manifest] Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(storeOrders.length/batchSize)} for store ${accountCode} (${batch.length} orders)`);
+          logger.info(`📦 [Auto-Manifest] Order IDs in batch: ${orderIds.join(', ')}`);
           
           try {
             // Collect AWB numbers for all orders in batch
@@ -132,9 +133,8 @@ class AutoManifestService {
               current_shipment_status: order.current_shipment_status
             }));
             
-            console.log(`📦 [Auto-Manifest] Batch details:`);
+            logger.info(`📦 [Auto-Manifest] Batch details:`);
             orderDetails.forEach(order => {
-              console.log(`  - Order ${order.order_id}: AWB=${order.awb || 'N/A'}, Customer=${order.customer_name}, Status=${order.current_shipment_status}`);
             });
             
             // Call Shipway Create Manifest API with all orders in batch (store-specific)
@@ -159,15 +159,15 @@ class AutoManifestService {
                 }
                 
                 successCount++;
-                console.log(`✅ [Auto-Manifest] Successfully created manifest and updated status for order ${orderId}`);
+                logger.info(`✅ [Auto-Manifest] Successfully created manifest and updated status for order ${orderId}`);
               } catch (dbError) {
                 errorCount++;
-                console.error(`❌ [Auto-Manifest] Failed to update database for order ${orderId}:`, dbError.message);
+                logger.error(`❌ [Auto-Manifest] Failed to update database for order ${orderId}:`, dbError.message);
               }
             }
           } else {
             // If bulk API fails, try smart individual retry
-            console.log(`⚠️ [Auto-Manifest] Bulk API failed, attempting smart individual retry...`);
+            logger.info(`⚠️ [Auto-Manifest] Bulk API failed, attempting smart individual retry...`);
             const retryResults = await this.smartIndividualRetry(batch);
             
             // Update counters based on retry results
@@ -178,7 +178,7 @@ class AutoManifestService {
             errorCount += failedRetries;
           }
         } catch (error) {
-          console.error(`❌ [Auto-Manifest] Batch processing failed:`, error.message);
+          logger.error(`❌ [Auto-Manifest] Batch processing failed:`, error.message);
           errorCount += batch.length;
         }
 
@@ -188,7 +188,7 @@ class AutoManifestService {
         }
       }
 
-      console.log(`✅ [Auto-Manifest] Process completed: ${successCount} success, ${errorCount} errors`);
+      logger.info(`✅ [Auto-Manifest] Process completed: ${successCount} success, ${errorCount} errors`);
       
       return {
         success: true,
@@ -200,7 +200,7 @@ class AutoManifestService {
       };
       
     } catch (error) {
-      console.error('💥 [Auto-Manifest] Process failed:', error.message);
+      logger.error('💥 [Auto-Manifest] Process failed:', error.message);
       return {
         success: false,
         message: error.message,
@@ -221,7 +221,7 @@ class AutoManifestService {
         throw new Error(`Order ${order.order_id} missing account_code`);
       }
 
-      console.log(`🔄 [Auto-Manifest] Processing order: ${order.order_id} (store: ${order.account_code})`);
+      logger.info(`🔄 [Auto-Manifest] Processing order: ${order.order_id} (store: ${order.account_code})`);
       
       // Call Shipway Create Manifest API with store-specific credentials
       const manifestResponse = await this.callShipwayCreateManifestAPI([order.order_id], null, order.account_code);
@@ -242,7 +242,7 @@ class AutoManifestService {
         });
       }
       
-      console.log(`✅ [Auto-Manifest] Successfully created manifest and updated status for order ${order.order_id}`);
+      logger.info(`✅ [Auto-Manifest] Successfully created manifest and updated status for order ${order.order_id}`);
       
       return {
         success: true,
@@ -251,7 +251,7 @@ class AutoManifestService {
       };
       
     } catch (error) {
-      console.error(`❌ [Auto-Manifest] Failed to process order ${order.order_id}:`, error.message);
+      logger.error(`❌ [Auto-Manifest] Failed to process order ${order.order_id}:`, error.message);
       return {
         success: false,
         message: error.message,
@@ -272,8 +272,8 @@ class AutoManifestService {
         throw new Error('account_code is required for creating manifest');
       }
 
-      console.log(`🔄 [Auto-Manifest] Calling Shipway Create Manifest API (Bulk) for store: ${accountCode}`);
-      console.log(`📦 [Auto-Manifest] Processing ${orderIds.length} orders: ${orderIds.join(', ')}`);
+      logger.info(`🔄 [Auto-Manifest] Calling Shipway Create Manifest API (Bulk) for store: ${accountCode}`);
+      logger.info(`📦 [Auto-Manifest] Processing ${orderIds.length} orders: ${orderIds.join(', ')}`);
       
       // Get store-specific credentials
       const basicAuthHeader = await this.getStoreCredentials(accountCode);
@@ -290,11 +290,11 @@ class AutoManifestService {
         
         if (awbNumbers.length > 0) {
           requestBody.awb_numbers = awbNumbers;
-          console.log(`📦 [Auto-Manifest] Including AWB numbers: ${awbNumbers.join(', ')}`);
+          logger.info(`📦 [Auto-Manifest] Including AWB numbers: ${awbNumbers.join(', ')}`);
         }
       }
 
-      console.log('📤 [Auto-Manifest] Bulk Manifest API Request:', requestBody);
+      logger.info('📤 [Auto-Manifest] Bulk Manifest API Request:', requestBody);
 
       const response = await fetch('https://app.shipway.com/api/Createmanifest/', {
         method: 'POST',
@@ -308,13 +308,13 @@ class AutoManifestService {
 
       const data = await response.json();
 
-      console.log('📦 [Auto-Manifest] Manifest API Response:', data);
+      logger.info('📦 [Auto-Manifest] Manifest API Response:', data);
 
       if (!response.ok || data.success !== 1) {
         throw new Error(`Shipway Create Manifest API error: ${data.message || response.statusText}`);
       }
 
-      console.log(`✅ [Auto-Manifest] Shipway Create Manifest API call successful for ${orderIds.length} orders`);
+      logger.info(`✅ [Auto-Manifest] Shipway Create Manifest API call successful for ${orderIds.length} orders`);
       
       return {
         success: true,
@@ -324,7 +324,7 @@ class AutoManifestService {
       };
 
     } catch (error) {
-      console.error('❌ [Auto-Manifest] Shipway Create Manifest API call failed:', error);
+      logger.error('❌ [Auto-Manifest] Shipway Create Manifest API call failed:', error);
       return {
         success: false,
         message: error.message
@@ -338,7 +338,7 @@ class AutoManifestService {
    * @returns {Array} Array of retry results with status for each order
    */
   async smartIndividualRetry(batch) {
-    console.log(`🧠 [Auto-Manifest] Starting smart individual retry for ${batch.length} orders...`);
+    logger.info(`🧠 [Auto-Manifest] Starting smart individual retry for ${batch.length} orders...`);
     
     const database = require('../config/database');
     const retryResults = [];
@@ -346,7 +346,7 @@ class AutoManifestService {
     // Try each order individually
     for (const order of batch) {
       try {
-        console.log(`🔄 [Auto-Manifest] Retrying order ${order.order_id} individually...`);
+        logger.info(`🔄 [Auto-Manifest] Retrying order ${order.order_id} individually...`);
         
         // Check if order is already manifested (might have succeeded in bulk but API didn't confirm)
         const existingLabel = await database.mysqlConnection.execute(
@@ -355,7 +355,7 @@ class AutoManifestService {
         );
         
         if (existingLabel.length > 0 && existingLabel[0].is_manifest === 1) {
-          console.log(`✅ [Auto-Manifest] Order ${order.order_id} already manifested, skipping retry`);
+          logger.info(`✅ [Auto-Manifest] Order ${order.order_id} already manifested, skipping retry`);
           retryResults.push({ orderId: order.order_id, status: 'already_manifested' });
           continue;
         }
@@ -365,15 +365,15 @@ class AutoManifestService {
         
         if (individualResult.success) {
           retryResults.push({ orderId: order.order_id, status: 'success' });
-          console.log(`✅ [Auto-Manifest] Order ${order.order_id} retry successful`);
+          logger.info(`✅ [Auto-Manifest] Order ${order.order_id} retry successful`);
         } else {
           retryResults.push({ orderId: order.order_id, status: 'failed', reason: individualResult.message });
-          console.log(`❌ [Auto-Manifest] Order ${order.order_id} retry failed: ${individualResult.message}`);
+          logger.info(`❌ [Auto-Manifest] Order ${order.order_id} retry failed: ${individualResult.message}`);
         }
         
       } catch (error) {
         retryResults.push({ orderId: order.order_id, status: 'error', reason: error.message });
-        console.error(`❌ [Auto-Manifest] Order ${order.order_id} retry error:`, error.message);
+        logger.error(`❌ [Auto-Manifest] Order ${order.order_id} retry error:`, error.message);
       }
     }
     
@@ -381,10 +381,7 @@ class AutoManifestService {
     const successRetries = retryResults.filter(r => r.status === 'success' || r.status === 'already_manifested').length;
     const failedRetries = retryResults.filter(r => r.status === 'failed' || r.status === 'error').length;
     
-    console.log(`📊 [Auto-Manifest] Smart retry completed:`);
-    console.log(`  - Successful: ${successRetries}`);
-    console.log(`  - Failed: ${failedRetries}`);
-    console.log(`  - Total processed: ${retryResults.length}`);
+    logger.info(`📊 [Auto-Manifest] Smart retry completed:`);
     
     return retryResults;
   }

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 // Simple UUID generation function
 function generateUUID() {
@@ -25,7 +26,7 @@ class UserSessionService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.error('MySQL connection not available for user session service');
+        logger.error('MySQL connection not available for user session service');
         return;
       }
 
@@ -49,7 +50,7 @@ class UserSessionService {
         }
       }
     } catch (error) {
-      console.error('Error ensuring tokens and sessions:', error);
+      logger.error('Error ensuring tokens and sessions:', error);
       throw error;
     }
   }
@@ -60,14 +61,14 @@ class UserSessionService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.error('MySQL connection not available for user session service');
+        logger.error('MySQL connection not available for user session service');
         return;
       }
 
       // Get specific user instead of all users
       const user = await database.getUserById(userId);
       if (!user) {
-        console.error('User not found for token/session initialization:', userId);
+        logger.error('User not found for token/session initialization:', userId);
         return;
       }
 
@@ -87,7 +88,7 @@ class UserSessionService {
         await database.updateUser(user.id, updates);
       }
     } catch (error) {
-      console.error('Error ensuring user token and session:', error);
+      logger.error('Error ensuring user token and session:', error);
       throw error;
     }
   }
@@ -98,7 +99,7 @@ class UserSessionService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.error('MySQL connection not available for user session service');
+        logger.error('MySQL connection not available for user session service');
         return null;
       }
 
@@ -119,7 +120,7 @@ class UserSessionService {
       
       return updates.token || user.token;
     } catch (error) {
-      console.error('Error in loginVendor:', error);
+      logger.error('Error in loginVendor:', error);
       return null;
     }
   }
@@ -130,7 +131,7 @@ class UserSessionService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.error('MySQL connection not available for user session service');
+        logger.error('MySQL connection not available for user session service');
         return null;
       }
 
@@ -138,7 +139,7 @@ class UserSessionService {
       const activeUser = users.find(user => user.active_session === 'TRUE');
       return activeUser ? activeUser.warehouseId : null;
     } catch (error) {
-      console.error('Error in getActiveVendor:', error);
+      logger.error('Error in getActiveVendor:', error);
       return null;
     }
   }
@@ -149,7 +150,7 @@ class UserSessionService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.error('MySQL connection not available for user session service');
+        logger.error('MySQL connection not available for user session service');
         return null;
       }
 
@@ -159,7 +160,7 @@ class UserSessionService {
       }
       return null;
     } catch (error) {
-      console.error('Error in getVendorByToken:', error);
+      logger.error('Error in getVendorByToken:', error);
       return null;
     }
   }
@@ -170,7 +171,7 @@ class UserSessionService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.error('MySQL connection not available for user session service');
+        logger.error('MySQL connection not available for user session service');
         return;
       }
 
@@ -179,7 +180,7 @@ class UserSessionService {
         await database.updateUser(user.id, { active_session: 'FALSE' });
       }
     } catch (error) {
-      console.error('Error in logoutVendor:', error);
+      logger.error('Error in logoutVendor:', error);
     }
   }
 
@@ -190,13 +191,13 @@ class UserSessionService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.error('MySQL connection not available for user session service');
+        logger.error('MySQL connection not available for user session service');
         return null;
       }
 
       return await database.getUserByEmail(email);
     } catch (error) {
-      console.error('Error in getVendorByEmail:', error);
+      logger.error('Error in getVendorByEmail:', error);
       return null;
     }
   }
@@ -208,13 +209,13 @@ class UserSessionService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.error('MySQL connection not available for user session service');
+        logger.error('MySQL connection not available for user session service');
         return null;
       }
 
       return await database.getUserByPhone(phone);
     } catch (error) {
-      console.error('Error in getVendorByPhone:', error);
+      logger.error('Error in getVendorByPhone:', error);
       return null;
     }
   }

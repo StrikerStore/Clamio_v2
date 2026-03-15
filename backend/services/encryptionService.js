@@ -5,6 +5,7 @@
  */
 
 const crypto = require('crypto');
+const logger = require('../utils/logger');
 
 class EncryptionService {
   constructor() {
@@ -76,7 +77,7 @@ class EncryptionService {
       return result.toString('hex');
       
     } catch (error) {
-      console.error('❌ Encryption error:', error.message);
+      logger.error('❌ Encryption error:', error.message);
       throw new Error(`Encryption failed: ${error.message}`);
     }
   }
@@ -119,7 +120,7 @@ class EncryptionService {
       return decrypted.toString('utf8');
       
     } catch (error) {
-      console.error('❌ Decryption error:', error.message);
+      logger.error('❌ Decryption error:', error.message);
       throw new Error(`Decryption failed: ${error.message}`);
     }
   }
@@ -135,14 +136,14 @@ class EncryptionService {
       const decrypted = this.decrypt(encrypted);
       
       if (testString === decrypted) {
-        console.log('✅ Encryption service test passed');
+        logger.info('✅ Encryption service test passed');
         return true;
       } else {
-        console.error('❌ Encryption service test failed: decrypted text does not match');
+        logger.error('❌ Encryption service test failed: decrypted text does not match');
         return false;
       }
     } catch (error) {
-      console.error('❌ Encryption service test failed:', error.message);
+      logger.error('❌ Encryption service test failed:', error.message);
       return false;
     }
   }

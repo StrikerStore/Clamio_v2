@@ -1,6 +1,7 @@
 const { ShipwayCarrierService } = require('./shipwayCarrierService');
 const ShiprocketService = require('./shiprocketService');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 class CarrierSyncService {
   constructor() {
@@ -14,14 +15,14 @@ class CarrierSyncService {
    */
   async startCarrierSync() {
     if (this.isRunning) {
-      console.log('🔄 Carrier sync already running, skipping...');
+      logger.info('🔄 Carrier sync already running, skipping...');
       return { success: false, message: 'Carrier sync already in progress' };
     }
 
     this.isRunning = true;
     
     try {
-      console.log('🚀 CARRIER SYNC: Starting store-specific carrier sync...');
+      logger.info('🚀 CARRIER SYNC: Starting store-specific carrier sync...');
       
       // Wait for MySQL initialization
       await database.waitForMySQLInitialization();
@@ -30,7 +31,7 @@ class CarrierSyncService {
       const activeStores = await database.getActiveStores();
       
       if (activeStores.length === 0) {
-        console.log('⚠️ CARRIER SYNC: No active stores found');
+        logger.info('⚠️ CARRIER SYNC: No active stores found');
         return {
           success: true,
           message: 'No active stores to sync',
@@ -41,13 +42,13 @@ class CarrierSyncService {
         };
       }
       
-      console.log(`📦 Found ${activeStores.length} active store(s) to sync`);
+      logger.info(`📦 Found ${activeStores.length} active store(s) to sync`);
       
       // Sync carriers for all stores in PARALLEL for better speed
       const syncPromises = activeStores.map(async (store) => {
         try {
           const shippingPartner = (store.shipping_partner || 'Shipway').toLowerCase();
-          console.log(`\n🔄 [${store.account_code}] Syncing carriers for "${store.store_name}" (${shippingPartner})...`);
+          logger.info(`\n🔄 [${store.account_code}] Syncing carriers for "${store.store_name}" (${shippingPartner})...`);
           
           let result;
           if (shippingPartner === 'shiprocket') {
@@ -60,7 +61,7 @@ class CarrierSyncService {
           
           const carrierCount = result.carrierCount || result.total || 0;
           
-          console.log(`✅ [${store.account_code}] Carriers synced: ${carrierCount} (${shippingPartner})`);
+          logger.info(`✅ [${store.account_code}] Carriers synced: ${carrierCount} (${shippingPartner})`);
           
           return {
             accountCode: store.account_code,
@@ -71,7 +72,7 @@ class CarrierSyncService {
           };
           
         } catch (storeError) {
-          console.error(`❌ [${store.account_code}] Carrier sync failed:`, storeError.message);
+          logger.error(`❌ [${store.account_code}] Carrier sync failed:`, storeError.message);
           return {
             accountCode: store.account_code,
             storeName: store.store_name,
@@ -102,18 +103,12 @@ class CarrierSyncService {
       
       const totalCarriers = processedResults.reduce((sum, r) => sum + (r.carrierCount || 0), 0);
       
-      console.log('\n✅ CARRIER SYNC: Completed');
-      console.log(`  - Total stores: ${activeStores.length}`);
-      console.log(`  - Successful: ${processedResults.filter(r => r.success).length}`);
-      console.log(`  - Failed: ${processedResults.filter(r => !r.success).length}`);
-      console.log(`  - Total carriers synced: ${totalCarriers}`);
+      logger.info('\n✅ CARRIER SYNC: Completed');
       
       // Show per-store breakdown
       processedResults.forEach(result => {
         if (result.success) {
-          console.log(`  - ${result.storeName} (${result.accountCode}): ${result.carrierCount} carriers`);
         } else {
-          console.log(`  - ${result.storeName} (${result.accountCode}): FAILED - ${result.error}`);
         }
       });
       
@@ -128,7 +123,7 @@ class CarrierSyncService {
       };
       
     } catch (error) {
-      console.error('💥 CARRIER SYNC: Failed:', error.message);
+      logger.error('💥 CARRIER SYNC: Failed:', error.message);
       return {
         success: false,
         message: error.message,

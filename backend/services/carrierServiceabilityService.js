@@ -3,6 +3,7 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 class CarrierServiceabilityService {
   constructor() {
@@ -95,7 +96,7 @@ class CarrierServiceabilityService {
    */
   async checkShiprocketServiceability(pickupPincode, deliveryPincode, partnerOrderId, accountCode, cod = 0) {
     try {
-      console.log(`🔵 SHIPROCKET SERVICEABILITY: Checking for pickup=${pickupPincode}, delivery=${deliveryPincode}, order=${partnerOrderId}, cod=${cod} (store: ${accountCode})...`);
+      logger.info(`🔵 SHIPROCKET SERVICEABILITY: Checking for pickup=${pickupPincode}, delivery=${deliveryPincode}, order=${partnerOrderId}, cod=${cod} (store: ${accountCode})...`);
       
       const store = await this.getStoreInfo(accountCode);
       
@@ -117,23 +118,21 @@ class CarrierServiceabilityService {
         timeout: 30000,
       });
 
-      console.log('✅ SHIPROCKET SERVICEABILITY: API response received');
-      console.log('  - Status:', response.status);
+      logger.info('✅ SHIPROCKET SERVICEABILITY: API response received');
 
       if (response.status !== 200 || !response.data) {
         throw new Error('Invalid response from Shiprocket serviceability API');
       }
 
       const availableCouriers = response.data?.data?.available_courier_companies || [];
-      console.log(`  - Available courier companies: ${availableCouriers.length}`);
 
       return availableCouriers;
     } catch (error) {
-      console.error('💥 SHIPROCKET SERVICEABILITY: Error:', error.message);
+      logger.error('💥 SHIPROCKET SERVICEABILITY: Error:', error.message);
       
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', JSON.stringify(error.response.data));
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', JSON.stringify(error.response.data));
         
         if (error.response.status === 401) {
           throw new Error('Shiprocket authentication failed. Please check your store credentials.');
@@ -158,7 +157,7 @@ class CarrierServiceabilityService {
         throw new Error('account_code is required for checking serviceability');
       }
 
-      console.log(`🔵 CARRIER SERVICEABILITY: Checking serviceability for pincode ${pincode} (store: ${accountCode})...`);
+      logger.info(`🔵 CARRIER SERVICEABILITY: Checking serviceability for pincode ${pincode} (store: ${accountCode})...`);
       
       // Get store-specific credentials
       const basicAuthHeader = await this.getStoreCredentials(accountCode);
@@ -172,24 +171,21 @@ class CarrierServiceabilityService {
         }
       });
 
-      console.log('✅ CARRIER SERVICEABILITY: API response received');
-      console.log('  - Status:', response.status);
-      console.log('  - Success:', response.data.success);
+      logger.info('✅ CARRIER SERVICEABILITY: API response received');
 
       if (response.data.success !== 1) {
         throw new Error(`Serviceability check failed: ${response.data.error || 'Unknown error'}`);
       }
 
       const serviceableCarriers = response.data.message || [];
-      console.log(`  - Serviceable carriers found: ${serviceableCarriers.length}`);
 
       return serviceableCarriers;
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error checking serviceability:', error.message);
+      logger.error('💥 CARRIER SERVICEABILITY: Error checking serviceability:', error.message);
       
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', error.response.data);
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', error.response.data);
         
         if (error.response.status === 401) {
           throw new Error('Authentication failed. Please check your store credentials configuration.');
@@ -218,7 +214,7 @@ class CarrierServiceabilityService {
       await database.waitForMySQLInitialization();
       
       if (!database.isMySQLAvailable()) {
-        console.log('📝 CARRIER SERVICEABILITY: MySQL connection not available');
+        logger.info('📝 CARRIER SERVICEABILITY: MySQL connection not available');
         return [];
       }
 
@@ -232,12 +228,11 @@ class CarrierServiceabilityService {
          WHERE o.is_in_new_order = 1 OR c.label_downloaded = 1`
       );
 
-      console.log('✅ CARRIER SERVICEABILITY: Orders loaded from MySQL');
-      console.log('  - Total orders:', orders.length);
+      logger.info('✅ CARRIER SERVICEABILITY: Orders loaded from MySQL');
 
       return orders;
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error reading orders from MySQL:', error.message);
+      logger.error('💥 CARRIER SERVICEABILITY: Error reading orders from MySQL:', error.message);
       throw new Error(`Failed to read orders from MySQL: ${error.message}`);
     }
   }
@@ -256,12 +251,11 @@ class CarrierServiceabilityService {
 
       const carriers = await database.getAllCarriers();
       
-      console.log('✅ CARRIER SERVICEABILITY: Carriers loaded from MySQL');
-      console.log('  - Total carriers:', carriers.length);
+      logger.info('✅ CARRIER SERVICEABILITY: Carriers loaded from MySQL');
 
       return carriers;
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error reading carriers from MySQL:', error.message);
+      logger.error('💥 CARRIER SERVICEABILITY: Error reading carriers from MySQL:', error.message);
       throw new Error(`Failed to read carriers from database: ${error.message}`);
     }
   }
@@ -276,7 +270,7 @@ class CarrierServiceabilityService {
    */
   findHighestPriorityCarrier(serviceableCarriers, carrierData, paymentType) {
     try {
-      console.log(`🔍 CARRIER SERVICEABILITY: Finding highest priority carrier for payment type: ${paymentType}`);
+      logger.info(`🔍 CARRIER SERVICEABILITY: Finding highest priority carrier for payment type: ${paymentType}`);
       
       // Create a map of carrier data for quick lookup
       const carrierMap = new Map(carrierData.map(carrier => [carrier.carrier_id, carrier]));
@@ -286,10 +280,8 @@ class CarrierServiceabilityService {
         carrier.payment_type === paymentType
       );
       
-      console.log(`  - Serviceable carriers with payment type ${paymentType}: ${matchingCarriers.length}`);
       
       if (matchingCarriers.length === 0) {
-        console.log(`  - No carriers found with payment type ${paymentType}`);
         return null;
       }
       
@@ -298,10 +290,8 @@ class CarrierServiceabilityService {
         carrierMap.has(carrier.carrier_id)
       );
       
-      console.log(`  - Valid carriers in our data: ${validCarriers.length}`);
       
       if (validCarriers.length === 0) {
-        console.log(`  - No valid carriers found in our data for payment type ${paymentType}`);
         return null;
       }
       
@@ -328,11 +318,10 @@ class CarrierServiceabilityService {
         }
       });
       
-      console.log(`  - Selected carrier: ${highestPriorityCarrier.carrier_id} with priority ${highestPriorityCarrier.priority}`);
       
       return highestPriorityCarrier;
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error finding highest priority carrier:', error.message);
+      logger.error('💥 CARRIER SERVICEABILITY: Error finding highest priority carrier:', error.message);
       throw new Error(`Failed to find highest priority carrier: ${error.message}`);
     }
   }
@@ -344,7 +333,7 @@ class CarrierServiceabilityService {
    */
   async saveOrdersToDatabase(orders) {
     try {
-      console.log('🔵 CARRIER SERVICEABILITY: Saving orders to MySQL...');
+      logger.info('🔵 CARRIER SERVICEABILITY: Saving orders to MySQL...');
       
       // Wait for MySQL initialization
       await database.waitForMySQLInitialization();
@@ -365,8 +354,7 @@ class CarrierServiceabilityService {
         }
       }
       
-      console.log('✅ CARRIER SERVICEABILITY: Orders saved to MySQL');
-      console.log('  - Total orders updated:', updatedCount);
+      logger.info('✅ CARRIER SERVICEABILITY: Orders saved to MySQL');
 
       return {
         success: true,
@@ -374,7 +362,7 @@ class CarrierServiceabilityService {
         orderCount: updatedCount
       };
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error saving to MySQL:', error.message);
+      logger.error('💥 CARRIER SERVICEABILITY: Error saving to MySQL:', error.message);
       throw new Error(`Failed to save orders to MySQL: ${error.message}`);
     }
   }
@@ -385,7 +373,7 @@ class CarrierServiceabilityService {
    */
   async assignPriorityCarriersToOrders() {
     try {
-      console.log('🔵 CARRIER SERVICEABILITY: Starting priority carrier assignment...');
+      logger.info('🔵 CARRIER SERVICEABILITY: Starting priority carrier assignment...');
       
       // Read orders from MySQL and carriers from database
       const orders = await this.readOrdersFromDatabase();
@@ -399,19 +387,19 @@ class CarrierServiceabilityService {
         throw new Error('No carriers found in database');
       }
       
-      console.log(`📊 Processing ${orders.length} orders with ${carriers.length} carriers`);
+      logger.info(`📊 Processing ${orders.length} orders with ${carriers.length} carriers`);
       
       // Filter only claimed orders
       const claimedOrders = orders.filter(order => 
         order.status === 'claimed' && order.claimed_by && order.claimed_by.trim() !== ''
       );
       
-      console.log(`📊 Total orders: ${orders.length}`);
-      console.log(`📊 Claimed orders: ${claimedOrders.length}`);
-      console.log(`📊 Unclaimed orders: ${orders.length - claimedOrders.length}`);
+      logger.info(`📊 Total orders: ${orders.length}`);
+      logger.info(`📊 Claimed orders: ${claimedOrders.length}`);
+      logger.info(`📊 Unclaimed orders: ${orders.length - claimedOrders.length}`);
       
       if (claimedOrders.length === 0) {
-        console.log('⚠️ No claimed orders found. No serviceability checks needed.');
+        logger.info('⚠️ No claimed orders found. No serviceability checks needed.');
         return {
           success: true,
           message: 'No claimed orders found. No carrier assignment needed.',
@@ -433,7 +421,7 @@ class CarrierServiceabilityService {
       const ordersByStore = new Map();
       claimedOrders.forEach(order => {
         if (!order.account_code) {
-          console.log(`⚠️ Order ${order.order_id}: Missing account_code, skipping serviceability check`);
+          logger.info(`⚠️ Order ${order.order_id}: Missing account_code, skipping serviceability check`);
           return;
         }
         
@@ -443,7 +431,7 @@ class CarrierServiceabilityService {
         ordersByStore.get(order.account_code).push(order);
       });
       
-      console.log(`📊 Processing orders from ${ordersByStore.size} store(s)`);
+      logger.info(`📊 Processing orders from ${ordersByStore.size} store(s)`);
       
       // Check serviceability for each unique pincode per store
       for (const [accountCode, storeOrders] of ordersByStore.entries()) {
@@ -454,22 +442,21 @@ class CarrierServiceabilityService {
           }
         });
         
-        console.log(`\n🔍 Store ${accountCode}: Checking serviceability for ${uniquePincodes.size} unique pincode(s)`);
+        logger.info(`\n🔍 Store ${accountCode}: Checking serviceability for ${uniquePincodes.size} unique pincode(s)`);
         
         const pincodeServiceabilityMap = new Map();
         
         for (const pincode of uniquePincodes) {
           try {
-            console.log(`  🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
+            logger.info(`  🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
             const serviceableCarriers = await this.checkServiceability(pincode, accountCode);
             pincodeServiceabilityMap.set(pincode, serviceableCarriers);
             
-            console.log(`  - Serviceable carriers: ${serviceableCarriers.length}`);
             serviceableCarriers.forEach(carrier => {
-              console.log(`    * ${carrier.carrier_id} - ${carrier.name} (${carrier.payment_type})`);
+              logger.info(`    * ${carrier.carrier_id} - ${carrier.name} (${carrier.payment_type})`);
             });
           } catch (error) {
-            console.error(`  - Error checking serviceability for pincode ${pincode} (store: ${accountCode}):`, error.message);
+            logger.error(`  - Error checking serviceability for pincode ${pincode} (store: ${accountCode}):`, error.message);
             // Continue with other pincodes
             pincodeServiceabilityMap.set(pincode, []);
           }
@@ -504,7 +491,7 @@ class CarrierServiceabilityService {
           const accountCode = order.account_code;
           
           if (!pincode || !paymentType) {
-            console.log(`⚠️ Order ${order.order_id}: Missing pincode or payment_type`);
+            logger.info(`⚠️ Order ${order.order_id}: Missing pincode or payment_type`);
             skippedOrders++;
             return {
               ...order,
@@ -513,7 +500,7 @@ class CarrierServiceabilityService {
           }
           
           if (!accountCode) {
-            console.log(`⚠️ Order ${order.order_id}: Missing account_code, cannot check serviceability`);
+            logger.info(`⚠️ Order ${order.order_id}: Missing account_code, cannot check serviceability`);
             skippedOrders++;
             return {
               ...order,
@@ -526,7 +513,7 @@ class CarrierServiceabilityService {
           const serviceableCarriers = storeServiceabilityMap ? (storeServiceabilityMap.get(pincode) || []) : [];
           
           if (serviceableCarriers.length === 0) {
-            console.log(`⚠️ Order ${order.order_id}: No serviceable carriers for pincode ${pincode}`);
+            logger.info(`⚠️ Order ${order.order_id}: No serviceable carriers for pincode ${pincode}`);
             skippedOrders++;
             return {
               ...order,
@@ -541,14 +528,14 @@ class CarrierServiceabilityService {
           );
           
           if (selectedCarrier) {
-            console.log(`✅ Order ${order.order_id}: Assigned carrier ${selectedCarrier.carrier_id} (priority ${selectedCarrier.priority})`);
+            logger.info(`✅ Order ${order.order_id}: Assigned carrier ${selectedCarrier.carrier_id} (priority ${selectedCarrier.priority})`);
             assignedCarriers++;
             return {
               ...order,
               priority_carrier: selectedCarrier.carrier_id
             };
           } else {
-            console.log(`⚠️ Order ${order.order_id}: No suitable carrier found for payment type ${paymentType}`);
+            logger.info(`⚠️ Order ${order.order_id}: No suitable carrier found for payment type ${paymentType}`);
             skippedOrders++;
             return {
               ...order,
@@ -556,7 +543,7 @@ class CarrierServiceabilityService {
             };
           }
         } catch (error) {
-          console.error(`💥 Error processing order ${order.order_id}:`, error.message);
+          logger.error(`💥 Error processing order ${order.order_id}:`, error.message);
           skippedOrders++;
           return {
             ...order,
@@ -570,14 +557,8 @@ class CarrierServiceabilityService {
       // Save updated orders to MySQL
       const result = await this.saveOrdersToDatabase(updatedOrders);
       
-      console.log('\n🎉 CARRIER SERVICEABILITY: Priority carrier assignment completed!');
-      console.log(`📊 Summary:`);
-      console.log(`  - Total orders: ${processedOrders}`);
-      console.log(`  - Claimed orders processed: ${claimedOrders.length}`);
-      console.log(`  - Unclaimed orders preserved: ${unclaimedOrders}`);
-      console.log(`  - Orders with assigned carriers: ${assignedCarriers}`);
-      console.log(`  - Orders skipped: ${skippedOrders}`);
-      console.log(`  - Success rate: ${((assignedCarriers / claimedOrders.length) * 100).toFixed(2)}%`);
+      logger.info('\n🎉 CARRIER SERVICEABILITY: Priority carrier assignment completed!');
+      logger.info(`📊 Summary:`);
       
       return {
         ...result,
@@ -591,7 +572,7 @@ class CarrierServiceabilityService {
         }
       };
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error assigning priority carriers:', error.message);
+      logger.error('💥 CARRIER SERVICEABILITY: Error assigning priority carriers:', error.message);
       throw error;
     }
   }
@@ -603,7 +584,7 @@ class CarrierServiceabilityService {
    */
   async assignPriorityCarrierToOrder(orderId) {
     try {
-      console.log(`🔵 CARRIER SERVICEABILITY: Assigning priority carrier to order ${orderId}...`);
+      logger.info(`🔵 CARRIER SERVICEABILITY: Assigning priority carrier to order ${orderId}...`);
       
       // Read orders from MySQL and carriers from database
       const orders = await this.readOrdersFromDatabase();
@@ -630,10 +611,7 @@ class CarrierServiceabilityService {
         throw new Error(`Order ${orderId} is not claimed`);
       }
       
-      console.log(`📊 Processing claimed order: ${orderId}`);
-      console.log(`  - Pincode: ${order.pincode}`);
-      console.log(`  - Payment Type: ${order.payment_type}`);
-      console.log(`  - Claimed by: ${order.claimed_by}`);
+      logger.info(`📊 Processing claimed order: ${orderId}`);
       
       // Check serviceability for this specific pincode
       const pincode = order.pincode;
@@ -648,7 +626,7 @@ class CarrierServiceabilityService {
         throw new Error(`Order ${orderId}: Missing account_code, cannot check serviceability`);
       }
       
-      console.log(`🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
+      logger.info(`🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
       const serviceableCarriers = await this.checkServiceability(pincode, accountCode);
       
       if (serviceableCarriers.length === 0) {
@@ -672,7 +650,7 @@ class CarrierServiceabilityService {
       // Save updated orders to MySQL
       const result = await this.saveOrdersToDatabase(orders);
       
-      console.log(`✅ Order ${orderId}: Assigned carrier ${selectedCarrier.carrier_id} (priority ${selectedCarrier.priority})`);
+      logger.info(`✅ Order ${orderId}: Assigned carrier ${selectedCarrier.carrier_id} (priority ${selectedCarrier.priority})`);
       
       return {
         success: true,
@@ -688,7 +666,7 @@ class CarrierServiceabilityService {
       };
       
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error assigning priority carrier to order:', error.message);
+      logger.error('💥 CARRIER SERVICEABILITY: Error assigning priority carrier to order:', error.message);
       throw error;
     }
   }
@@ -700,7 +678,7 @@ class CarrierServiceabilityService {
    */
   async assignPriorityCarrierToOrderInMemory(order) {
     try {
-      console.log(`🔵 CARRIER SERVICEABILITY: Assigning priority carrier to order ${order.order_id} (in-memory)...`);
+      logger.info(`🔵 CARRIER SERVICEABILITY: Assigning priority carrier to order ${order.order_id} (in-memory)...`);
       
       // Read carriers from database
       const carriers = await this.readCarriersFromDatabase();
@@ -714,10 +692,7 @@ class CarrierServiceabilityService {
         throw new Error(`Order ${order.order_id} is not claimed`);
       }
       
-      console.log(`📊 Processing claimed order: ${order.order_id}`);
-      console.log(`  - Pincode: ${order.pincode}`);
-      console.log(`  - Payment Type: ${order.payment_type}`);
-      console.log(`  - Claimed by: ${order.claimed_by}`);
+      logger.info(`📊 Processing claimed order: ${order.order_id}`);
       
       // Check serviceability for this specific pincode
       const pincode = order.pincode;
@@ -732,7 +707,7 @@ class CarrierServiceabilityService {
         throw new Error(`Order ${order.order_id}: Missing account_code, cannot check serviceability`);
       }
       
-      console.log(`🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
+      logger.info(`🔍 Checking serviceability for pincode: ${pincode} (store: ${accountCode})`);
       const serviceableCarriers = await this.checkServiceability(pincode, accountCode);
       
       if (serviceableCarriers.length === 0) {
@@ -750,7 +725,7 @@ class CarrierServiceabilityService {
         throw new Error(`Order ${order.order_id}: No suitable carrier found for payment type ${paymentType}`);
       }
       
-      console.log(`✅ Order ${order.order_id}: Assigned carrier ${selectedCarrier.carrier_id} (priority ${selectedCarrier.priority})`);
+      logger.info(`✅ Order ${order.order_id}: Assigned carrier ${selectedCarrier.carrier_id} (priority ${selectedCarrier.priority})`);
       
       return {
         success: true,
@@ -766,7 +741,7 @@ class CarrierServiceabilityService {
       };
       
     } catch (error) {
-      console.error('💥 CARRIER SERVICEABILITY: Error assigning priority carrier to order (in-memory):', error.message);
+      logger.error('💥 CARRIER SERVICEABILITY: Error assigning priority carrier to order (in-memory):', error.message);
       throw error;
     }
   }
@@ -780,10 +755,7 @@ class CarrierServiceabilityService {
    */
   async getTop3PriorityCarriers(order) {
     try {
-      console.log(`🔵 GET TOP 3 CARRIERS: Starting for order ${order.order_id || order.unique_id}...`);
-      console.log(`  - Pincode: ${order.pincode}`);
-      console.log(`  - Payment Type: ${order.payment_type}`);
-      console.log(`  - Account Code (Store): ${order.account_code || 'NOT SET'}`);
+      logger.info(`🔵 GET TOP 3 CARRIERS: Starting for order ${order.order_id || order.unique_id}...`);
       
       // Validate input
       if (!order.pincode || !order.payment_type) {
@@ -798,7 +770,6 @@ class CarrierServiceabilityService {
       // Determine the shipping partner for this store
       const store = await this.getStoreInfo(order.account_code);
       const shippingPartner = (store.shipping_partner || 'Shipway').toLowerCase();
-      console.log(`  - Shipping Partner: ${shippingPartner}`);
       
       if (shippingPartner === 'shiprocket') {
         return await this._getTop3ShiprocketCarriers(order, store);
@@ -807,7 +778,7 @@ class CarrierServiceabilityService {
       }
       
     } catch (error) {
-      console.error('💥 GET TOP 3 CARRIERS ERROR:', error.message);
+      logger.error('💥 GET TOP 3 CARRIERS ERROR:', error.message);
       throw error;
     }
   }
@@ -820,7 +791,7 @@ class CarrierServiceabilityService {
    * @returns {Promise<string>} JSON string of top 3 carrier IDs
    */
   async _getTop3ShiprocketCarriers(order, store) {
-    console.log(`🚀 SHIPROCKET: Getting top 3 carriers for order ${order.order_id}...`);
+    logger.info(`🚀 SHIPROCKET: Getting top 3 carriers for order ${order.order_id}...`);
     
     // Get vendor's pincode (pickup_postcode) from users table using claimed_by
     if (!order.claimed_by) {
@@ -847,10 +818,6 @@ class CarrierServiceabilityService {
     // Determine cod value from payment_type: C (COD) → 1, P (Prepaid) → 0
     const codValue = order.payment_type === 'C' ? 1 : 0;
     
-    console.log(`  - Pickup Pincode (Vendor): ${pickupPincode}`);
-    console.log(`  - Delivery Pincode (Customer): ${deliveryPincode}`);
-    console.log(`  - Partner Order ID (order.id): ${partnerOrderId}`);
-    console.log(`  - COD: ${codValue} (payment_type: ${order.payment_type})`);
     
     // Get carriers from database - filter by store (account_code)
     const allCarriers = await this.readCarriersFromDatabase();
@@ -858,8 +825,6 @@ class CarrierServiceabilityService {
       String(carrier.account_code) === String(order.account_code)
     );
     
-    console.log(`  - Total carriers in database: ${allCarriers.length}`);
-    console.log(`  - Carriers for store ${order.account_code}: ${storeCarriers.length}`);
     
     if (storeCarriers.length === 0) {
       throw new Error(`No carriers found for store ${order.account_code}`);
@@ -872,23 +837,20 @@ class CarrierServiceabilityService {
     );
     
     if (availableCouriers.length === 0) {
-      console.log(`⚠️ No serviceable couriers found from Shiprocket API`);
+      logger.info(`⚠️ No serviceable couriers found from Shiprocket API`);
       return JSON.stringify([]);
     }
     
-    console.log(`  - Available couriers from Shiprocket API: ${availableCouriers.length}`);
     
     // For COD orders (payment_type = C), filter couriers that support COD (cod = 1)
     let filteredCouriers = availableCouriers;
     if (order.payment_type === 'C') {
       filteredCouriers = availableCouriers.filter(courier => courier.cod === 1);
-      console.log(`  - COD order: Filtered to couriers with cod=1: ${filteredCouriers.length} (out of ${availableCouriers.length})`);
     } else {
-      console.log(`  - Prepaid order: Using all ${availableCouriers.length} available couriers`);
     }
     
     if (filteredCouriers.length === 0) {
-      console.log(`⚠️ No couriers found${order.payment_type === 'C' ? ' with COD support' : ''} for this delivery`);
+      logger.info(`⚠️ No couriers found${order.payment_type === 'C' ? ' with COD support' : ''} for this delivery`);
       return JSON.stringify([]);
     }
     
@@ -915,7 +877,6 @@ class CarrierServiceabilityService {
         };
       });
     
-    console.log(`  - Valid active carriers for store ${order.account_code}: ${validCarriers.length}`);
     
     // Log which store carriers are NOT serviceable (for debugging)
     const nonServiceableStoreCarriers = storeCarriers
@@ -923,11 +884,10 @@ class CarrierServiceabilityService {
       .sort((a, b) => (parseInt(a.priority) || 999) - (parseInt(b.priority) || 999));
     
     if (nonServiceableStoreCarriers.length > 0) {
-      console.log(`  - Store carriers NOT serviceable: ${nonServiceableStoreCarriers.map(c => `${c.carrier_id} (Priority ${c.priority})`).join(', ')}`);
     }
     
     if (validCarriers.length === 0) {
-      console.log(`⚠️ No valid active carriers found for store ${order.account_code}`);
+      logger.info(`⚠️ No valid active carriers found for store ${order.account_code}`);
       return JSON.stringify([]);
     }
     
@@ -937,14 +897,14 @@ class CarrierServiceabilityService {
       .slice(0, 3)
       .map(carrier => carrier.carrier_id);
     
-    console.log(`✅ Top 3 Shiprocket carriers selected for store ${order.account_code}: ${JSON.stringify(top3Carriers)}`);
+    logger.info(`✅ Top 3 Shiprocket carriers selected for store ${order.account_code}: ${JSON.stringify(top3Carriers)}`);
     top3Carriers.forEach((carrierId, index) => {
       const carrier = validCarriers.find(c => c.carrier_id === carrierId);
-      console.log(`  ${index + 1}. ${carrierId} - ${carrier.name} (Priority: ${carrier.priority}, COD: ${carrier.cod})`);
+      logger.info(`  ${index + 1}. ${carrierId} - ${carrier.name} (Priority: ${carrier.priority}, COD: ${carrier.cod})`);
     });
     
     if (top3Carriers.length < 3) {
-      console.log(`  ⚠️ Only ${top3Carriers.length} carriers selected (less than 3).`);
+      logger.info(`  ⚠️ Only ${top3Carriers.length} carriers selected (less than 3).`);
     }
     
     return JSON.stringify(top3Carriers);
@@ -956,7 +916,7 @@ class CarrierServiceabilityService {
    * @returns {Promise<string>} JSON string of top 3 carrier IDs
    */
   async _getTop3ShipwayCarriers(order) {
-    console.log(`📦 SHIPWAY: Getting top 3 carriers for order ${order.order_id}...`);
+    logger.info(`📦 SHIPWAY: Getting top 3 carriers for order ${order.order_id}...`);
     
     // Get carriers from database - filter by store (account_code)
     const allCarriers = await this.readCarriersFromDatabase();
@@ -966,23 +926,20 @@ class CarrierServiceabilityService {
       String(carrier.account_code) === String(order.account_code)
     );
     
-    console.log(`  - Total carriers in database: ${allCarriers.length}`);
-    console.log(`  - Carriers for store ${order.account_code}: ${storeCarriers.length}`);
     
     if (storeCarriers.length === 0) {
       throw new Error(`No carriers found for store ${order.account_code}`);
     }
     
     // Check serviceability for the pincode (Shipway API)
-    console.log(`🔍 Checking serviceability for pincode: ${order.pincode} (store: ${order.account_code})`);
+    logger.info(`🔍 Checking serviceability for pincode: ${order.pincode} (store: ${order.account_code})`);
     const serviceableCarriers = await this.checkServiceability(order.pincode, order.account_code);
     
     if (serviceableCarriers.length === 0) {
-      console.log(`⚠️ No serviceable carriers found for pincode ${order.pincode}`);
+      logger.info(`⚠️ No serviceable carriers found for pincode ${order.pincode}`);
       return JSON.stringify([]);
     }
     
-    console.log(`  - Found ${serviceableCarriers.length} serviceable carriers`);
     
     // Create a map of carrier data for quick lookup (store-specific)
     const carrierMap = new Map();
@@ -999,10 +956,9 @@ class CarrierServiceabilityService {
       carrier.payment_type === order.payment_type
     );
     
-    console.log(`  - Carriers matching payment type ${order.payment_type}: ${matchingCarriers.length}`);
     
     if (matchingCarriers.length === 0) {
-      console.log(`⚠️ No carriers found with payment type ${order.payment_type}`);
+      logger.info(`⚠️ No carriers found with payment type ${order.payment_type}`);
       return JSON.stringify([]);
     }
     
@@ -1028,7 +984,6 @@ class CarrierServiceabilityService {
       })
       .filter(carrier => carrier !== null && carrier.status === 'active');
     
-    console.log(`  - Valid active carriers for store ${order.account_code}: ${validCarriers.length}`);
     
     // Log which store carriers are NOT serviceable (for debugging)
     const serviceableCarrierIds = new Set(serviceableCarriers.map(c => String(c.carrier_id)));
@@ -1037,11 +992,10 @@ class CarrierServiceabilityService {
       .sort((a, b) => (parseInt(a.priority) || 999) - (parseInt(b.priority) || 999));
     
     if (nonServiceableStoreCarriers.length > 0) {
-      console.log(`  - Store carriers NOT serviceable for pincode ${order.pincode}: ${nonServiceableStoreCarriers.map(c => `${c.carrier_id} (Priority ${c.priority})`).join(', ')}`);
     }
     
     if (validCarriers.length === 0) {
-      console.log(`⚠️ No valid active carriers found for store ${order.account_code}`);
+      logger.info(`⚠️ No valid active carriers found for store ${order.account_code}`);
       return JSON.stringify([]);
     }
     
@@ -1051,14 +1005,14 @@ class CarrierServiceabilityService {
       .slice(0, 3)
       .map(carrier => carrier.carrier_id);
     
-    console.log(`✅ Top 3 Shipway carriers selected for store ${order.account_code}: ${JSON.stringify(top3Carriers)}`);
+    logger.info(`✅ Top 3 Shipway carriers selected for store ${order.account_code}: ${JSON.stringify(top3Carriers)}`);
     top3Carriers.forEach((carrierId, index) => {
       const carrier = validCarriers.find(c => c.carrier_id === carrierId);
-      console.log(`  ${index + 1}. ${carrierId} - ${carrier.name} (Priority: ${carrier.priority}, Store: ${carrier.account_code})`);
+      logger.info(`  ${index + 1}. ${carrierId} - ${carrier.name} (Priority: ${carrier.priority}, Store: ${carrier.account_code})`);
     });
     
     if (top3Carriers.length < 3 && validCarriers.length >= 3) {
-      console.log(`  ⚠️ Only ${top3Carriers.length} carriers selected (expected 3). This may be due to serviceability or payment type filtering.`);
+      logger.info(`  ⚠️ Only ${top3Carriers.length} carriers selected (expected 3). This may be due to serviceability or payment type filtering.`);
     }
     
     return JSON.stringify(top3Carriers);
@@ -1117,7 +1071,7 @@ class CarrierServiceabilityService {
         }
       };
     } catch (error) {
-      console.error('Error getting assignment statistics:', error);
+      logger.error('Error getting assignment statistics:', error);
       throw error;
     }
   }

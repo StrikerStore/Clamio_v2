@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const orderEnhancementService = require('./orderEnhancementService');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 /**
  * Generate stable unique_id from order and product data.
@@ -56,11 +57,11 @@ class ShipwayService {
         }
 
         this.basicAuthHeader = store.auth_token;
-        console.log(`✅ ShipwayService initialized for store: ${this.accountCode}`);
+        logger.info(`✅ ShipwayService initialized for store: ${this.accountCode}`);
       } else {
         // Legacy mode: use environment variable (backward compatibility)
         this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
-        console.log(`✅ ShipwayService initialized in legacy mode (env variables)`);
+        logger.info(`✅ ShipwayService initialized in legacy mode (env variables)`);
       }
 
       if (!this.basicAuthHeader) {
@@ -69,7 +70,7 @@ class ShipwayService {
 
       this.initialized = true;
     } catch (error) {
-      console.error('❌ ShipwayService initialization failed:', error.message);
+      logger.error('❌ ShipwayService initialization failed:', error.message);
       throw error;
     }
   }
@@ -159,12 +160,12 @@ class ShipwayService {
       });
 
       if (isValidationFailure) {
-        console.log('⚠️ Warehouse validation failed (expected):', {
+        logger.info('⚠️ Warehouse validation failed (expected):', {
           warehouseId,
           reason: error.message
         });
       } else {
-        console.error('Error fetching for warehouseId:', warehouseId, 'from Shipway API:', error.message);
+        logger.error('Error fetching for warehouseId:', warehouseId, 'from Shipway API:', error.message);
       }
 
       // Handle specific error cases
@@ -253,7 +254,7 @@ class ShipwayService {
       });
       return warehouse;
     } catch (error) {
-      console.error('Error formatting warehouse data:', error);
+      logger.error('Error formatting warehouse data:', error);
       throw new Error('Failed to format warehouse data');
     }
   }
@@ -305,7 +306,7 @@ class ShipwayService {
       let page = 1;
       let hasMorePages = true;
       
-      console.log('🔄 Starting paginated fetch from Shipway API...');
+      logger.info('🔄 Starting paginated fetch from Shipway API...');
       
       while (hasMorePages) {
         const currentParams = { 
@@ -321,7 +322,7 @@ class ShipwayService {
           page: page
         });
         
-        console.log(`📄 Fetching page ${page}...`);
+        logger.info(`📄 Fetching page ${page}...`);
         
         const response = await axios.get(url, {
           params: currentParams,
@@ -348,18 +349,18 @@ class ShipwayService {
         } else if (typeof response.data === 'object' && response.data.message === 'No orders found') {
           // Handle "No orders found" response gracefully
           currentPageOrders = [];
-          console.log(`  ℹ️ Page ${page}: No orders found, stopping pagination`);
+          logger.info(`  ℹ️ Page ${page}: No orders found, stopping pagination`);
         } else if (typeof response.data === 'object' && !response.data.order_id && !Array.isArray(response.data.orders) && !Array.isArray(response.data.message)) {
           // Handle empty/unexpected response - treat as no orders instead of erroring
           this.logApiActivity({ type: 'shipway-empty-or-unexpected-format', data: response.data });
           currentPageOrders = [];
-          console.log(`  ⚠️ Page ${page}: Empty or unexpected response, treating as no orders - stopping pagination`);
+          logger.info(`  ⚠️ Page ${page}: Empty or unexpected response, treating as no orders - stopping pagination`);
         } else {
           this.logApiActivity({ type: 'shipway-unexpected-format', data: response.data });
           throw new Error('Unexpected Shipway API response format');
         }
         
-        console.log(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
+        logger.info(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
         
         // Add orders from this page to our collection
         allOrders = allOrders.concat(currentPageOrders);
@@ -367,12 +368,12 @@ class ShipwayService {
         // If we got 0 orders or fewer than 100 orders, we've reached the last page
         if (currentPageOrders.length === 0) {
           hasMorePages = false;
-          console.log(`  🏁 Last page reached (0 orders found, no more data)`);
+          logger.info(`  🏁 Last page reached (0 orders found, no more data)`);
         } else if (currentPageOrders.length < 100) {
           hasMorePages = false;
-          console.log(`  🏁 Last page reached (${currentPageOrders.length} < 100 orders)`);
+          logger.info(`  🏁 Last page reached (${currentPageOrders.length} < 100 orders)`);
         } else {
-          console.log(`  ➡️ More pages available (${currentPageOrders.length} = 100 orders)`);
+          logger.info(`  ➡️ More pages available (${currentPageOrders.length} = 100 orders)`);
         }
         
         this.logApiActivity({ 
@@ -386,13 +387,13 @@ class ShipwayService {
         
         // Safety check to prevent infinite loops
         if (page > 20) {
-          console.log('⚠️ Safety limit reached (20 pages), stopping pagination');
+          logger.info('⚠️ Safety limit reached (20 pages), stopping pagination');
           this.logApiActivity({ type: 'shipway-pagination-limit-reached', totalOrders: allOrders.length });
           break;
         }
       }
       
-      console.log(`🎉 Pagination complete! Total orders fetched: ${allOrders.length}`);
+      logger.info(`🎉 Pagination complete! Total orders fetched: ${allOrders.length}`);
       
       // Filter orders to only include last N days (configurable from utility table)
       let numberOfDays = 60; // default
@@ -400,12 +401,12 @@ class ShipwayService {
         const daysValue = await database.getUtilityParameter('number_of_day_of_order_include');
         if (daysValue) {
           numberOfDays = parseInt(daysValue, 10);
-          console.log(`📅 Using ${numberOfDays} days from utility configuration`);
+          logger.info(`📅 Using ${numberOfDays} days from utility configuration`);
         } else {
-          console.log(`⚠️ Utility parameter not found, using default: ${numberOfDays} days`);
+          logger.info(`⚠️ Utility parameter not found, using default: ${numberOfDays} days`);
         }
       } catch (dbError) {
-        console.log(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`, dbError.message);
+        logger.info(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`, dbError.message);
       }
       
       const cutoffDate = new Date();
@@ -418,13 +419,13 @@ class ShipwayService {
         const isWithinDateRange = orderDate >= cutoffDate;
         
         if (!isWithinDateRange) {
-          console.log(`  ⏰ Filtering out old order: ${order.order_id} (${order.order_date})`);
+          logger.info(`  ⏰ Filtering out old order: ${order.order_id} (${order.order_date})`);
         }
         
         return isWithinDateRange;
       });
       
-      console.log(`📅 Date filter applied: ${filteredOrders.length} orders within last ${numberOfDays} days (filtered out ${allOrders.length - filteredOrders.length} old orders)`);
+      logger.info(`📅 Date filter applied: ${filteredOrders.length} orders within last ${numberOfDays} days (filtered out ${allOrders.length - filteredOrders.length} old orders)`);
       
       shipwayOrders = filteredOrders;
       rawApiResponse = { success: 1, message: allOrders }; // Keep all orders in raw JSON
@@ -684,7 +685,7 @@ class ShipwayService {
       let page = 1;
       let hasMorePages = true;
 
-      console.log(`🔄 Starting paginated fetch from Shipway API${this.accountCode ? ` (${this.accountCode})` : ''}...`);
+      logger.info(`🔄 Starting paginated fetch from Shipway API${this.accountCode ? ` (${this.accountCode})` : ''}...`);
 
       while (hasMorePages) {
         const currentParams = {
@@ -700,7 +701,7 @@ class ShipwayService {
           page: page
         });
 
-        console.log(`📄 Fetching page ${page}...`);
+        logger.info(`📄 Fetching page ${page}...`);
 
         const response = await axios.get(url, {
           params: currentParams,
@@ -727,18 +728,18 @@ class ShipwayService {
         } else if (typeof response.data === 'object' && response.data.message === 'No orders found') {
           // Handle "No orders found" response gracefully
           currentPageOrders = [];
-          console.log(`  ℹ️ Page ${page}: No orders found, stopping pagination`);
+          logger.info(`  ℹ️ Page ${page}: No orders found, stopping pagination`);
         } else if (typeof response.data === 'object' && !response.data.order_id && !Array.isArray(response.data.orders) && !Array.isArray(response.data.message)) {
           // Handle empty/unexpected response - treat as no orders instead of erroring
           this.logApiActivity({ type: 'shipway-empty-or-unexpected-format', data: response.data });
           currentPageOrders = [];
-          console.log(`  ⚠️ Page ${page}: Empty or unexpected response, treating as no orders - stopping pagination`);
+          logger.info(`  ⚠️ Page ${page}: Empty or unexpected response, treating as no orders - stopping pagination`);
         } else {
           this.logApiActivity({ type: 'shipway-unexpected-format', data: response.data });
           throw new Error('Unexpected Shipway API response format');
         }
 
-        console.log(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
+        logger.info(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
 
         // Add orders from this page to our collection
         allOrders = allOrders.concat(currentPageOrders);
@@ -746,12 +747,12 @@ class ShipwayService {
         // If we got 0 orders or fewer than 100 orders, we've reached the last page
         if (currentPageOrders.length === 0) {
           hasMorePages = false;
-          console.log(`  🏁 Last page reached (0 orders found, no more data)`);
+          logger.info(`  🏁 Last page reached (0 orders found, no more data)`);
         } else if (currentPageOrders.length < 100) {
           hasMorePages = false;
-          console.log(`  🏁 Last page reached (${currentPageOrders.length} < 100 orders)`);
+          logger.info(`  🏁 Last page reached (${currentPageOrders.length} < 100 orders)`);
         } else {
-          console.log(`  ➡️ More pages available (${currentPageOrders.length} = 100 orders)`);
+          logger.info(`  ➡️ More pages available (${currentPageOrders.length} = 100 orders)`);
         }
 
         this.logApiActivity({
@@ -765,13 +766,13 @@ class ShipwayService {
 
         // Safety check to prevent infinite loops
         if (page > 20) {
-          console.log('⚠️ Safety limit reached (20 pages), stopping pagination');
+          logger.info('⚠️ Safety limit reached (20 pages), stopping pagination');
           this.logApiActivity({ type: 'shipway-pagination-limit-reached', totalOrders: allOrders.length });
           break;
         }
       }
 
-      console.log(`🎉 Pagination complete! Total orders fetched: ${allOrders.length}`);
+      logger.info(`🎉 Pagination complete! Total orders fetched: ${allOrders.length}`);
 
       // Filter orders to only include last N days (configurable from utility table)
       let numberOfDays = 60; // default
@@ -779,12 +780,12 @@ class ShipwayService {
         const daysValue = await database.getUtilityParameter('number_of_day_of_order_include');
         if (daysValue) {
           numberOfDays = parseInt(daysValue, 10);
-          console.log(`📅 Using ${numberOfDays} days from utility configuration`);
+          logger.info(`📅 Using ${numberOfDays} days from utility configuration`);
         } else {
-          console.log(`⚠️ Utility parameter not found, using default: ${numberOfDays} days`);
+          logger.info(`⚠️ Utility parameter not found, using default: ${numberOfDays} days`);
         }
       } catch (dbError) {
-        console.log(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`, dbError.message);
+        logger.info(`⚠️ Could not fetch utility parameter, using default: ${numberOfDays} days`, dbError.message);
       }
 
       const cutoffDate = new Date();
@@ -797,13 +798,13 @@ class ShipwayService {
         const isWithinDateRange = orderDate >= cutoffDate;
 
         if (!isWithinDateRange) {
-          console.log(`  ⏰ Filtering out old order: ${order.order_id} (${order.order_date})`);
+          logger.info(`  ⏰ Filtering out old order: ${order.order_id} (${order.order_date})`);
         }
 
         return isWithinDateRange;
       });
 
-      console.log(`📅 Date filter applied: ${filteredOrders.length} orders within last ${numberOfDays} days (filtered out ${allOrders.length - filteredOrders.length} old orders)`);
+      logger.info(`📅 Date filter applied: ${filteredOrders.length} orders within last ${numberOfDays} days (filtered out ${allOrders.length - filteredOrders.length} old orders)`);
 
       shipwayOrders = filteredOrders;
       rawApiResponse = { success: 1, message: allOrders }; // Keep all orders in raw JSON
@@ -1083,7 +1084,7 @@ class ShipwayService {
       }
     }
 
-    console.log(`📊 Sync Summary: ${newOrdersCount} new orders, ${existingOrders.length} existing orders`);
+    logger.info(`📊 Sync Summary: ${newOrdersCount} new orders, ${existingOrders.length} existing orders`);
 
     // Note: We no longer check for removed rows to preserve historical data
     // Orders that are no longer in Shipway API will remain in our database
@@ -1138,7 +1139,7 @@ class ShipwayService {
               });
               updatedOrdersCount++;
               changed = true;
-              console.log(`🔄 Payment type changed - Recalculated financial values: ${orderRow.order_id}|${orderRow.product_code}`);
+              logger.info(`🔄 Payment type changed - Recalculated financial values: ${orderRow.order_id}|${orderRow.product_code}`);
             } else if (hasNonFinancialChanges) {
               // FREEZE: Payment type unchanged - preserve financial values, only update non-financial fields
               await database.updateOrder(existingOrder.unique_id, {
@@ -1149,13 +1150,13 @@ class ShipwayService {
               });
               updatedOrdersCount++;
               changed = true;
-              console.log(`✅ Non-financial update (frozen financial values): ${orderRow.order_id}|${orderRow.product_code}`);
+              logger.info(`✅ Non-financial update (frozen financial values): ${orderRow.order_id}|${orderRow.product_code}`);
             } else {
               // No changes at all - just update the is_in_new_order flag
               await database.updateOrder(existingOrder.unique_id, {
                 is_in_new_order: true
               });
-              console.log(`✅ No changes - Preserved all values: ${orderRow.order_id}|${orderRow.product_code}`);
+              logger.info(`✅ No changes - Preserved all values: ${orderRow.order_id}|${orderRow.product_code}`);
             }
           }
         } else {
@@ -1164,13 +1165,13 @@ class ShipwayService {
             await database.createOrder(orderRow);
             newOrdersCount++;
             changed = true;
-            console.log(`➕ Added new order: ${orderRow.order_id}|${orderRow.product_code}`);
+            logger.info(`➕ Added new order: ${orderRow.order_id}|${orderRow.product_code}`);
           } catch (insertError) {
             // Handle any insertion errors gracefully
             if (insertError.message && insertError.message.includes('ER_DUP_ENTRY')) {
-              console.error(`❌ COLLISION DETECTED: Duplicate unique_id for ${orderRow.order_id}|${orderRow.product_code}`);
-              console.error(`   unique_id: ${orderRow.unique_id}`);
-              console.error(`   Error: ${insertError.message}`);
+              logger.error(`❌ COLLISION DETECTED: Duplicate unique_id for ${orderRow.order_id}|${orderRow.product_code}`);
+              logger.error(`   unique_id: ${orderRow.unique_id}`);
+              logger.error(`   Error: ${insertError.message}`);
               this.logApiActivity({
                 type: 'unique-id-collision',
                 orderId: orderRow.order_id,
@@ -1180,7 +1181,7 @@ class ShipwayService {
               });
             } else {
               // Log other database errors but continue processing
-              console.error(`❌ Error inserting order ${orderRow.order_id}|${orderRow.product_code}:`, insertError.message);
+              logger.error(`❌ Error inserting order ${orderRow.order_id}|${orderRow.product_code}:`, insertError.message);
               this.logApiActivity({
                 type: 'order-insert-error',
                 orderId: orderRow.order_id,
@@ -1206,7 +1207,7 @@ class ShipwayService {
         flagsUpdated: true
       });
 
-      console.log(`📊 Sync Results: ${newOrdersCount} new, ${updatedOrdersCount} updated, ${flatOrders.length - newOrdersCount - updatedOrdersCount} preserved`);
+      logger.info(`📊 Sync Results: ${newOrdersCount} new, ${updatedOrdersCount} updated, ${flatOrders.length - newOrdersCount - updatedOrdersCount} preserved`);
 
       // Only update other data if there were actual changes to orders
       if (changed || existingOrders.length === 0) {
@@ -1254,7 +1255,7 @@ class ShipwayService {
 
         // Automatically populate customer_info table from orders
         try {
-          console.log('📋 Populating customer_info table...');
+          logger.info('📋 Populating customer_info table...');
           let customerInfoCount = 0;
 
           // Get unique order_ids from shipway orders
@@ -1295,7 +1296,7 @@ class ShipwayService {
             customerInfoCount++;
           }
 
-          console.log(`✅ Customer info populated: ${customerInfoCount} new records`);
+          logger.info(`✅ Customer info populated: ${customerInfoCount} new records`);
           this.logApiActivity({
             type: 'customer-info-sync',
             success: true,
@@ -1303,7 +1304,7 @@ class ShipwayService {
             message: `Successfully populated ${customerInfoCount} customer info records`
           });
         } catch (customerInfoError) {
-          console.error('⚠️ Failed to populate customer_info:', customerInfoError.message);
+          logger.error('⚠️ Failed to populate customer_info:', customerInfoError.message);
           this.logApiActivity({
             type: 'customer-info-sync-error',
             error: customerInfoError.message
@@ -1325,7 +1326,7 @@ class ShipwayService {
     const timestamp = new Date().toISOString();
     const logEntry = `[${timestamp}] ${JSON.stringify(activity)}\n`;
     fs.appendFile(logPath, logEntry, err => {
-      if (err) console.error('Failed to write API log:', err);
+      if (err) logger.error('Failed to write API log:', err);
     });
   }
 
@@ -1343,7 +1344,7 @@ class ShipwayService {
       let page = 1;
       let hasMorePages = true;
 
-      console.log('🔄 Starting paginated fetch from Shipway API (for clone verification)...');
+      logger.info('🔄 Starting paginated fetch from Shipway API (for clone verification)...');
 
       while (hasMorePages) {
         const currentParams = {
@@ -1358,7 +1359,7 @@ class ShipwayService {
           page: page
         });
 
-        console.log(`📄 Fetching page ${page} for clone verification...`);
+        logger.info(`📄 Fetching page ${page} for clone verification...`);
 
         const response = await axios.get(url, {
           params: currentParams,
@@ -1385,17 +1386,17 @@ class ShipwayService {
         } else if (typeof response.data === 'object' && response.data.message === 'No orders found') {
           // Handle "No orders found" response gracefully
           currentPageOrders = [];
-          console.log(`  ℹ️ Page ${page}: No orders found, stopping pagination`);
+          logger.info(`  ℹ️ Page ${page}: No orders found, stopping pagination`);
         } else if (typeof response.data === 'object' && !response.data.order_id && !Array.isArray(response.data.orders) && !Array.isArray(response.data.message)) {
           // Handle empty/unexpected response - treat as no orders instead of erroring
           this.logApiActivity({ type: 'shipway-empty-or-unexpected-format', data: response.data });
           currentPageOrders = [];
-          console.log(`  ⚠️ Page ${page}: Empty or unexpected response, treating as no orders - stopping pagination`);
+          logger.info(`  ⚠️ Page ${page}: Empty or unexpected response, treating as no orders - stopping pagination`);
         } else {
           throw new Error('Unexpected Shipway API response format');
         }
 
-        console.log(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
+        logger.info(`  ✅ Page ${page}: ${currentPageOrders.length} orders`);
 
         // Add orders from this page to our collection
         allOrders = allOrders.concat(currentPageOrders);
@@ -1403,24 +1404,24 @@ class ShipwayService {
         // If we got 0 orders or fewer than 100 orders, we've reached the last page
         if (currentPageOrders.length === 0) {
           hasMorePages = false;
-          console.log(`  🏁 Last page reached (0 orders found, no more data)`);
+          logger.info(`  🏁 Last page reached (0 orders found, no more data)`);
         } else if (currentPageOrders.length < 100) {
           hasMorePages = false;
-          console.log(`  🏁 Last page reached (${currentPageOrders.length} < 100 orders)`);
+          logger.info(`  🏁 Last page reached (${currentPageOrders.length} < 100 orders)`);
         } else {
-          console.log(`  ➡️ More pages available (${currentPageOrders.length} = 100 orders)`);
+          logger.info(`  ➡️ More pages available (${currentPageOrders.length} = 100 orders)`);
         }
 
         page++;
 
         // Safety check to prevent infinite loops (lower limit for clone verification)
         if (page > 10) {
-          console.log('⚠️ Safety limit reached (10 pages), stopping pagination for clone verification');
+          logger.info('⚠️ Safety limit reached (10 pages), stopping pagination for clone verification');
           break;
         }
       }
 
-      console.log(`🎉 Clone verification pagination complete! Total orders fetched: ${allOrders.length}`);
+      logger.info(`🎉 Clone verification pagination complete! Total orders fetched: ${allOrders.length}`);
 
       return allOrders;
     } catch (error) {
@@ -1454,7 +1455,7 @@ class ShipwayService {
         headers: { Authorization: '***' }
       });
 
-      console.log(`🔍 Fetching single order from Shipway: ${orderId}`);
+      logger.info(`🔍 Fetching single order from Shipway: ${orderId}`);
 
       const response = await axios.get(url, {
         params,
@@ -1487,10 +1488,10 @@ class ShipwayService {
       }
 
       if (order && order.order_id === orderId) {
-        console.log(`✅ Order found in Shipway: ${orderId}`);
+        logger.info(`✅ Order found in Shipway: ${orderId}`);
         return order;
       } else {
-        console.log(`ℹ️ Order not found in Shipway: ${orderId}`);
+        logger.info(`ℹ️ Order not found in Shipway: ${orderId}`);
         return null;
       }
 
@@ -1504,16 +1505,16 @@ class ShipwayService {
 
       // If 404 or "not found" error, return null instead of throwing
       if (error.response && error.response.status === 404) {
-        console.log(`ℹ️ Order not found (404): ${orderId}`);
+        logger.info(`ℹ️ Order not found (404): ${orderId}`);
         return null;
       }
 
       if (error.message && error.message.toLowerCase().includes('not found')) {
-        console.log(`ℹ️ Order not found: ${orderId}`);
+        logger.info(`ℹ️ Order not found: ${orderId}`);
         return null;
       }
 
-      console.error(`❌ Error fetching order ${orderId} from Shipway:`, error.message);
+      logger.error(`❌ Error fetching order ${orderId} from Shipway:`, error.message);
       throw new Error(`Failed to fetch order from Shipway API: ${error.message}`);
     }
   }
@@ -1587,7 +1588,7 @@ class ShipwayService {
         error: error.message,
         stack: error.stack,
       });
-      console.error('Error cancelling shipment for AWB numbers:', awbNumbers, 'from Shipway API:', error.message);
+      logger.error('Error cancelling shipment for AWB numbers:', awbNumbers, 'from Shipway API:', error.message);
 
       // Handle specific error cases
       if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {

@@ -5,10 +5,11 @@
 
 const database = require('../config/database');
 const pushNotificationService = require('./pushNotificationService');
+const logger = require('../utils/logger');
 
 class VendorErrorTrackingService {
   constructor() {
-    console.log('🔍 Vendor Error Tracking Service initialized');
+    logger.info('🔍 Vendor Error Tracking Service initialized');
 
     // Allowed notification types based on notifications.type ENUM definition
     this.allowedNotificationTypes = new Set([
@@ -90,7 +91,7 @@ class VendorErrorTrackingService {
         error_details: this.formatErrorDetails(error, context)
       };
 
-      console.log('📢 Creating vendor error notification:', notificationData.title);
+      logger.info('📢 Creating vendor error notification:', notificationData.title);
 
       // Create notification in database
       const query = `
@@ -118,12 +119,12 @@ class VendorErrorTrackingService {
       } catch (dbError) {
         // MySQL ENUM mismatch or truncation (e.g. column 'type') should not break main flow
         if (dbError && (dbError.code === 'WARN_DATA_TRUNCATED' || dbError.errno === 1265)) {
-          console.error('⚠️ Notification insert warning (type may not exist in ENUM):', dbError.sqlMessage || dbError.message);
+          logger.error('⚠️ Notification insert warning (type may not exist in ENUM):', dbError.sqlMessage || dbError.message);
           return { success: false, warning: 'notification_insert_truncated' };
         }
         throw dbError;
       }
-      console.log('✅ Vendor error notification created with ID:', result.insertId);
+      logger.info('✅ Vendor error notification created with ID:', result.insertId);
 
       // Get the created notification
       const [newNotification] = await database.query(
@@ -134,9 +135,9 @@ class VendorErrorTrackingService {
       // Send push notification to all subscribed admins
       try {
         const pushResult = await pushNotificationService.sendNotificationToAllAdmins(newNotification);
-        console.log('📱 Push notification sent for vendor error:', pushResult.sentCount, 'admins notified');
+        logger.info('📱 Push notification sent for vendor error:', pushResult.sentCount, 'admins notified');
       } catch (pushError) {
-        console.error('❌ Error sending push notification for vendor error:', pushError);
+        logger.error('❌ Error sending push notification for vendor error:', pushError);
         // Don't fail the error tracking if push fails
       }
 
@@ -147,7 +148,7 @@ class VendorErrorTrackingService {
       };
 
     } catch (error) {
-      console.error('❌ Error tracking vendor error:', error);
+      logger.error('❌ Error tracking vendor error:', error);
       throw error;
     }
   }
@@ -398,7 +399,7 @@ class VendorErrorTrackingService {
 
       return await this.trackVendorError(errorData);
     } catch (trackingError) {
-      console.error('❌ Error tracking API error:', trackingError);
+      logger.error('❌ Error tracking API error:', trackingError);
       // Don't throw - error tracking should not break the main flow
     }
   }
@@ -433,7 +434,7 @@ class VendorErrorTrackingService {
 
       return await this.trackVendorError(errorData);
     } catch (trackingError) {
-      console.error('❌ Error tracking frontend error:', trackingError);
+      logger.error('❌ Error tracking frontend error:', trackingError);
       // Don't throw - error tracking should not break the main flow
     }
   }
@@ -470,7 +471,7 @@ class VendorErrorTrackingService {
 
       return await this.trackVendorError(errorData);
     } catch (trackingError) {
-      console.error('❌ Error tracking network error:', trackingError);
+      logger.error('❌ Error tracking network error:', trackingError);
     }
   }
 
@@ -499,7 +500,7 @@ class VendorErrorTrackingService {
         data: stats
       };
     } catch (error) {
-      console.error('❌ Error getting vendor error stats:', error);
+      logger.error('❌ Error getting vendor error stats:', error);
       throw error;
     }
   }

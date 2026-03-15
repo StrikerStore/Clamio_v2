@@ -6,6 +6,7 @@
  */
 
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 class AutoReversalService {
   constructor() {
@@ -21,13 +22,13 @@ class AutoReversalService {
    */
   async executeAutoReversal() {
     if (this.isRunning) {
-      console.log('🔄 Auto-reversal already running, skipping...');
+      logger.info('🔄 Auto-reversal already running, skipping...');
       return { success: false, message: 'Auto-reversal already in progress' };
     }
 
     this.isRunning = true;
     const startTime = new Date();
-    console.log(`[${startTime.toISOString()}] 🔄 Starting auto-reversal process...`);
+    logger.info(`[${startTime.toISOString()}] 🔄 Starting auto-reversal process...`);
 
     try {
       // Wait for database initialization
@@ -48,7 +49,7 @@ class AutoReversalService {
 
       const [expiredOrders] = await database.mysqlConnection.execute(expiredOrdersQuery);
       
-      console.log(`🔍 Found ${expiredOrders.length} orders eligible for auto-reversal`);
+      logger.info(`🔍 Found ${expiredOrders.length} orders eligible for auto-reversal`);
 
       if (expiredOrders.length === 0) {
         this.isRunning = false;
@@ -76,9 +77,8 @@ class AutoReversalService {
         hours_claimed: Math.round((new Date() - new Date(order.claimed_at)) / (1000 * 60 * 60))
       }));
 
-      console.log('📋 Orders to be auto-reversed:');
+      logger.info('📋 Orders to be auto-reversed:');
       details.forEach(detail => {
-        console.log(`  - ${detail.order_id} (${detail.order_unique_id}) - claimed by ${detail.claimed_by} for ${detail.hours_claimed} hours`);
       });
 
       // Auto-reverse the expired orders
@@ -95,12 +95,11 @@ class AutoReversalService {
       const [updateResult] = await database.mysqlConnection.execute(updateQuery);
       const affectedRows = updateResult.affectedRows;
 
-      console.log(`✅ AUTO-REVERSAL COMPLETE`);
-      console.log(`  - Orders auto-reversed: ${affectedRows}`);
+      logger.info(`✅ AUTO-REVERSAL COMPLETE`);
 
       // Log the auto-reversal event
       const timestamp = new Date().toISOString();
-      console.log(`[${timestamp}] AUTO-REVERSAL: ${affectedRows} orders auto-reversed due to 24+ hour claim without label download`);
+      logger.info(`[${timestamp}] AUTO-REVERSAL: ${affectedRows} orders auto-reversed due to 24+ hour claim without label download`);
 
       // Update service statistics
       this.isRunning = false;
@@ -123,7 +122,7 @@ class AutoReversalService {
       return result;
 
     } catch (error) {
-      console.error('❌ AUTO-REVERSE ERROR:', error);
+      logger.error('❌ AUTO-REVERSE ERROR:', error);
       this.isRunning = false;
       this.lastRun = new Date();
       this.totalRuns++;
@@ -158,7 +157,7 @@ class AutoReversalService {
     this.totalRuns = 0;
     this.totalReversed = 0;
     this.lastRun = null;
-    console.log('📊 Auto-reversal service statistics reset');
+    logger.info('📊 Auto-reversal service statistics reset');
   }
 }
 

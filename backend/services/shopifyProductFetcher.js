@@ -2,6 +2,7 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 /**
  * Check if there are any running bulk operations
@@ -28,13 +29,13 @@ async function checkForRunningBulkOperations(shopifyGraphqlUrl, headers) {
     const currentOperation = response.data.data.currentBulkOperation;
     
     if (currentOperation && currentOperation.status === 'RUNNING') {
-      console.log('[Shopify] Found running bulk operation:', currentOperation.id);
+      logger.info('[Shopify] Found running bulk operation:', currentOperation.id);
       return currentOperation;
     }
     
     return null;
   } catch (error) {
-    console.error('[Shopify] Error checking for running bulk operations:', error);
+    logger.error('[Shopify] Error checking for running bulk operations:', error);
     return null;
   }
 }
@@ -65,13 +66,13 @@ async function cancelBulkOperation(shopifyGraphqlUrl, headers, bulkOperationId) 
     const response = await axios.post(shopifyGraphqlUrl, body, { headers });
     
     if (response.data.data.bulkOperationCancel.userErrors.length > 0) {
-      console.error('[Shopify] Error canceling bulk operation:', response.data.data.bulkOperationCancel.userErrors);
+      logger.error('[Shopify] Error canceling bulk operation:', response.data.data.bulkOperationCancel.userErrors);
       throw new Error('Failed to cancel bulk operation');
     }
     
-    console.log('[Shopify] Successfully canceled bulk operation:', bulkOperationId);
+    logger.info('[Shopify] Successfully canceled bulk operation:', bulkOperationId);
   } catch (error) {
-    console.error('[Shopify] Error canceling bulk operation:', error);
+    logger.error('[Shopify] Error canceling bulk operation:', error);
     throw error;
   }
 }
@@ -84,10 +85,10 @@ async function cancelBulkOperation(shopifyGraphqlUrl, headers, bulkOperationId) 
  */
 async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, forceNew = false, overrideAccountCode = null) {
   try {
-    console.log('[Shopify] Starting bulk product fetch...');
-    console.log('[Shopify] Endpoint:', shopifyGraphqlUrl);
-    console.log('[Shopify] Headers:', Object.keys(headers));
-    console.log('[Shopify] Output: MySQL database');
+    logger.info('[Shopify] Starting bulk product fetch...');
+    logger.info('[Shopify] Endpoint:', shopifyGraphqlUrl);
+    logger.info('[Shopify] Headers:', Object.keys(headers));
+    logger.info('[Shopify] Output: MySQL database');
 
     // Get account_code: use override if provided (multi-store sync), otherwise derive from credentials
     await database.waitForMySQLInitialization();
@@ -108,9 +109,9 @@ async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, forceNew 
           }
         }
         
-        console.log(`⚠️ [Shopify] Store not found in store_info table for Shopify URL: ${shopifyGraphqlUrl} (domain: ${storeDomain})`);
-        console.log(`ℹ️ [Shopify] No stores configured yet. Superadmin can create stores via the admin panel.`);
-        console.log(`ℹ️ [Shopify] Skipping product fetch until stores are configured.`);
+        logger.info(`⚠️ [Shopify] Store not found in store_info table for Shopify URL: ${shopifyGraphqlUrl} (domain: ${storeDomain})`);
+        logger.info(`ℹ️ [Shopify] No stores configured yet. Superadmin can create stores via the admin panel.`);
+        logger.info(`ℹ️ [Shopify] Skipping product fetch until stores are configured.`);
         return {
           success: false,
           message: 'No store found for the provided Shopify credentials',
@@ -119,9 +120,9 @@ async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, forceNew 
       }
       
       accountCode = store.account_code;
-      console.log(`[Shopify] Found store: ${store.store_name} (account_code: ${accountCode})`);
+      logger.info(`[Shopify] Found store: ${store.store_name} (account_code: ${accountCode})`);
     } else {
-      console.log(`[Shopify] Using provided account_code: ${accountCode}`);
+      logger.info(`[Shopify] Using provided account_code: ${accountCode}`);
     }
 
     // Check for existing running operations
@@ -129,18 +130,18 @@ async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, forceNew 
     
     if (runningOperation) {
       if (forceNew) {
-        console.log('[Shopify] Canceling existing bulk operation to start new one...');
+        logger.info('[Shopify] Canceling existing bulk operation to start new one...');
         await cancelBulkOperation(shopifyGraphqlUrl, headers, runningOperation.id);
         
         // Wait a bit for the cancellation to process
-        console.log('[Shopify] Waiting for cancellation to process...');
+        logger.info('[Shopify] Waiting for cancellation to process...');
         await new Promise(resolve => setTimeout(resolve, 10000));
       } else {
-        console.log('[Shopify] Using existing running bulk operation...');
+        logger.info('[Shopify] Using existing running bulk operation...');
         const completedOperation = await waitForBulkOperationCompletion(shopifyGraphqlUrl, headers, runningOperation.id);
         
         if (completedOperation.status === 'COMPLETED') {
-          console.log('[Shopify] Existing bulk operation completed successfully');
+          logger.info('[Shopify] Existing bulk operation completed successfully');
           
           // Download and parse the data
           const jsonlData = await downloadBulkOperationData(completedOperation.url);
@@ -166,36 +167,36 @@ async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, forceNew 
       query: `mutation { bulkOperationRunQuery( query: """ { products { edges { node { id title variants(first: 1) { edges { node { sku } } } images(first: 1) { edges { node { src altText } } } } } } } """ ) { bulkOperation { id status } userErrors { field message } } }`
     };
 
-    console.log('[Shopify] Sending bulk operation request to Shopify...');
+    logger.info('[Shopify] Sending bulk operation request to Shopify...');
     const response = await axios.post(
       shopifyGraphqlUrl,
       body,
       { headers }
     );
-    console.log('[Shopify] Bulk operation response received from Shopify.');
+    logger.info('[Shopify] Bulk operation response received from Shopify.');
 
     // Check for user errors
     if (response.data.data.bulkOperationRunQuery.userErrors.length > 0) {
-      console.error('[Shopify] User errors in bulk operation:', response.data.data.bulkOperationRunQuery.userErrors);
+      logger.error('[Shopify] User errors in bulk operation:', response.data.data.bulkOperationRunQuery.userErrors);
       throw new Error('Bulk operation failed with user errors');
     }
 
     // Get the bulk operation details
     const bulkOperation = response.data.data.bulkOperationRunQuery.bulkOperation;
-    console.log('[Shopify] Bulk operation status:', bulkOperation.status);
+    logger.info('[Shopify] Bulk operation status:', bulkOperation.status);
 
     // Log cost information if available
     if (response.data.extensions && response.data.extensions.cost) {
       const cost = response.data.extensions.cost;
-      console.log('[Shopify] Query cost - Requested:', cost.requestedQueryCost, 'Actual:', cost.actualQueryCost);
-      console.log('[Shopify] Throttle status - Available:', cost.throttleStatus.currentlyAvailable, '/', cost.throttleStatus.maximumAvailable);
+      logger.info('[Shopify] Query cost - Requested:', cost.requestedQueryCost, 'Actual:', cost.actualQueryCost);
+      logger.info('[Shopify] Throttle status - Available:', cost.throttleStatus.currentlyAvailable, '/', cost.throttleStatus.maximumAvailable);
     }
 
     // Wait for bulk operation to complete
     const completedOperation = await waitForBulkOperationCompletion(shopifyGraphqlUrl, headers, bulkOperation.id);
     
     if (completedOperation.status === 'COMPLETED') {
-      console.log('[Shopify] Bulk operation completed successfully');
+      logger.info('[Shopify] Bulk operation completed successfully');
       
       // Download and parse the data
       const jsonlData = await downloadBulkOperationData(completedOperation.url);
@@ -215,7 +216,7 @@ async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, forceNew 
     }
 
   } catch (error) {
-    console.error('[Shopify] Error in bulk product fetch:', error.message);
+    logger.error('[Shopify] Error in bulk product fetch:', error.message);
     // Return error result instead of throwing to prevent server crash
     return {
       success: false,
@@ -233,7 +234,7 @@ async function fetchAndSaveShopifyProducts(shopifyGraphqlUrl, headers, forceNew 
  * @returns {Object} The completed bulk operation details
  */
 async function waitForBulkOperationCompletion(shopifyGraphqlUrl, headers, bulkOperationId) {
-  console.log('[Shopify] Waiting for bulk operation to complete...');
+  logger.info('[Shopify] Waiting for bulk operation to complete...');
   
   const maxAttempts = 60; // 5 minutes with 5-second intervals
   let attempts = 0;
@@ -259,12 +260,12 @@ async function waitForBulkOperationCompletion(shopifyGraphqlUrl, headers, bulkOp
       const response = await axios.post(shopifyGraphqlUrl, body, { headers });
       const bulkOperation = response.data.data.node;
       
-      console.log(`[Shopify] Bulk operation status: ${bulkOperation.status} (attempt ${attempts + 1}/${maxAttempts})`);
+      logger.info(`[Shopify] Bulk operation status: ${bulkOperation.status} (attempt ${attempts + 1}/${maxAttempts})`);
       
       if (bulkOperation.status === 'COMPLETED') {
-        console.log('[Shopify] Bulk operation completed successfully');
-        console.log(`[Shopify] Object count: ${bulkOperation.objectCount}`);
-        console.log(`[Shopify] File size: ${bulkOperation.fileSize} bytes`);
+        logger.info('[Shopify] Bulk operation completed successfully');
+        logger.info(`[Shopify] Object count: ${bulkOperation.objectCount}`);
+        logger.info(`[Shopify] File size: ${bulkOperation.fileSize} bytes`);
         return bulkOperation;
       } else if (bulkOperation.status === 'FAILED') {
         throw new Error(`Bulk operation failed: ${bulkOperation.errorCode}`);
@@ -277,7 +278,7 @@ async function waitForBulkOperationCompletion(shopifyGraphqlUrl, headers, bulkOp
       attempts++;
       
     } catch (error) {
-      console.error('[Shopify] Error polling bulk operation status:', error);
+      logger.error('[Shopify] Error polling bulk operation status:', error);
       attempts++;
       await new Promise(resolve => setTimeout(resolve, 5000));
     }
@@ -292,15 +293,15 @@ async function waitForBulkOperationCompletion(shopifyGraphqlUrl, headers, bulkOp
  * @returns {string} The JSONL data content
  */
 async function downloadBulkOperationData(url) {
-  console.log('[Shopify] Downloading bulk operation data...');
-  console.log('[Shopify] Download URL:', url);
+  logger.info('[Shopify] Downloading bulk operation data...');
+  logger.info('[Shopify] Download URL:', url);
   
   try {
     const response = await axios.get(url);
-    console.log('[Shopify] Data download completed');
+    logger.info('[Shopify] Data download completed');
     return response.data;
   } catch (error) {
-    console.error('[Shopify] Error downloading bulk operation data:', error);
+    logger.error('[Shopify] Error downloading bulk operation data:', error);
     throw error;
   }
 }
@@ -312,7 +313,7 @@ async function downloadBulkOperationData(url) {
  * @returns {Promise<Object>} Result with counts
  */
 async function saveToDatabase(products, accountCode) {
-  console.log('[Shopify] Saving products to MySQL database...');
+  logger.info('[Shopify] Saving products to MySQL database...');
   
   if (!accountCode) {
     throw new Error('account_code is required for saving products');
@@ -359,10 +360,7 @@ async function saveToDatabase(products, accountCode) {
       
       // Debug log for first 3 products
       if (products.indexOf(product) < 3) {
-        console.log(`[Shopify] Product #${products.indexOf(product) + 1}:`, product.name);
-        console.log(`  - Has variants: ${product.variants ? product.variants.length : 0}`);
-        console.log(`  - Raw SKU: ${rawSku || 'NULL'}`);
-        console.log(`  - Cleaned SKU: ${cleanedSku || 'NULL'}`);
+        logger.info(`[Shopify] Product #${products.indexOf(product) + 1}:`, product.name);
       }
       
       return {
@@ -379,10 +377,10 @@ async function saveToDatabase(products, accountCode) {
     // Bulk upsert products
     const result = await database.bulkUpsertProducts(dbProducts);
     
-    console.log(`[Shopify] Products saved to database: ${result.inserted} inserted, ${result.updated} updated`);
+    logger.info(`[Shopify] Products saved to database: ${result.inserted} inserted, ${result.updated} updated`);
     return result;
   } catch (error) {
-    console.error('[Shopify] Error saving to database:', error);
+    logger.error('[Shopify] Error saving to database:', error);
     throw error;
   }
 }
@@ -396,7 +394,7 @@ function parseShopifyBulkData(jsonlData) {
   const lines = jsonlData.trim().split('\n');
   const products = new Map(); // Use Map to group products by ID
   
-  console.log(`[Shopify] Parsing ${lines.length} lines of JSONL data...`);
+  logger.info(`[Shopify] Parsing ${lines.length} lines of JSONL data...`);
   
   let variantCount = 0;
   let imageCount = 0;
@@ -427,7 +425,7 @@ function parseShopifyBulkData(jsonlData) {
         }
         // Debug: Log first 3 variants
         if (variantCount <= 3) {
-          console.log(`[Shopify] Variant #${variantCount}: SKU="${data.sku}", Parent="${data.__parentId}"`);
+          logger.info(`[Shopify] Variant #${variantCount}: SKU="${data.sku}", Parent="${data.__parentId}"`);
         }
       } else if (data.src && data.__parentId) {
         // This is an image line
@@ -441,12 +439,12 @@ function parseShopifyBulkData(jsonlData) {
         }
       }
     } catch (error) {
-      console.error(`[Shopify] Error parsing line ${index + 1}:`, error);
+      logger.error(`[Shopify] Error parsing line ${index + 1}:`, error);
     }
   });
 
-  console.log(`[Shopify] Parsed ${products.size} products from bulk data`);
-  console.log(`[Shopify] Stats: ${productCount} products, ${variantCount} variants, ${imageCount} images`);
+  logger.info(`[Shopify] Parsed ${products.size} products from bulk data`);
+  logger.info(`[Shopify] Stats: ${productCount} products, ${variantCount} variants, ${imageCount} images`);
   return Array.from(products.values());
 }
 

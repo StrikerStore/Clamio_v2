@@ -2,6 +2,7 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 class ShipwayCarrierService {
   constructor(accountCode = null) {
@@ -34,11 +35,11 @@ class ShipwayCarrierService {
         }
         
         this.basicAuthHeader = store.auth_token;
-        console.log(`✅ ShipwayCarrierService initialized for store: ${this.accountCode}`);
+        logger.info(`✅ ShipwayCarrierService initialized for store: ${this.accountCode}`);
       } else {
         // Legacy mode: use environment variable
         this.basicAuthHeader = process.env.SHIPWAY_BASIC_AUTH_HEADER;
-        console.log(`✅ ShipwayCarrierService initialized in legacy mode`);
+        logger.info(`✅ ShipwayCarrierService initialized in legacy mode`);
       }
 
       if (!this.basicAuthHeader) {
@@ -47,7 +48,7 @@ class ShipwayCarrierService {
 
       this.initialized = true;
     } catch (error) {
-      console.error('❌ ShipwayCarrierService initialization failed:', error.message);
+      logger.error('❌ ShipwayCarrierService initialization failed:', error.message);
       throw error;
     }
   }
@@ -61,7 +62,7 @@ class ShipwayCarrierService {
     await this.initialize();
     
     try {
-      console.log(`🔵 SHIPWAY CARRIER: Fetching carriers from Shipway API${this.accountCode ? ` (${this.accountCode})` : ''}...`);
+      logger.info(`🔵 SHIPWAY CARRIER: Fetching carriers from Shipway API${this.accountCode ? ` (${this.accountCode})` : ''}...`);
       
       if (!this.basicAuthHeader) {
         throw new Error('Shipway API configuration error. SHIPWAY_BASIC_AUTH_HEADER not found in environment variables.');
@@ -76,17 +77,15 @@ class ShipwayCarrierService {
         }
       });
 
-      console.log('✅ SHIPWAY CARRIER: API response received');
-      console.log('  - Status:', response.status);
-      console.log('  - Data length:', response.data ? Object.keys(response.data).length : 'No data');
+      logger.info('✅ SHIPWAY CARRIER: API response received');
 
       return response.data;
     } catch (error) {
-      console.error('💥 SHIPWAY CARRIER: Error fetching carriers:', error.message);
+      logger.error('💥 SHIPWAY CARRIER: Error fetching carriers:', error.message);
       
       if (error.response) {
-        console.error('  - Response status:', error.response.status);
-        console.error('  - Response data:', error.response.data);
+        logger.error('  - Response status:', error.response.status);
+        logger.error('  - Response data:', error.response.data);
         
         // Handle specific error cases
         if (error.response.status === 401) {
@@ -113,7 +112,7 @@ class ShipwayCarrierService {
    */
   extractCarrierData(shipwayData) {
     try {
-      console.log('🔵 SHIPWAY CARRIER: Extracting carrier data...');
+      logger.info('🔵 SHIPWAY CARRIER: Extracting carrier data...');
       
       const carriers = [];
       
@@ -139,7 +138,6 @@ class ShipwayCarrierService {
         }
       }
 
-      console.log('  - Found carriers:', carrierArray.length);
 
       carrierArray.forEach((carrier, index) => {
         try {
@@ -167,18 +165,16 @@ class ShipwayCarrierService {
             account_code: this.accountCode || 'STRI' // Multi-store: Tag carrier with account_code
           });
 
-          console.log(`  - Extracted: ${carrierId} - ${carrierName} (${status}) - Weight: ${weightInKg || 'N/A'} - Priority: ${priority}`);
         } catch (carrierError) {
-          console.error(`  - Error processing carrier ${index}:`, carrierError.message);
+          logger.error(`  - Error processing carrier ${index}:`, carrierError.message);
         }
       });
 
-      console.log('✅ SHIPWAY CARRIER: Data extraction completed');
-      console.log('  - Total carriers extracted:', carriers.length);
+      logger.info('✅ SHIPWAY CARRIER: Data extraction completed');
 
       return carriers;
     } catch (error) {
-      console.error('💥 SHIPWAY CARRIER: Error extracting carrier data:', error.message);
+      logger.error('💥 SHIPWAY CARRIER: Error extracting carrier data:', error.message);
       throw new Error(`Failed to extract carrier data: ${error.message}`);
     }
   }
@@ -195,14 +191,11 @@ class ShipwayCarrierService {
         throw new Error('MySQL connection not available. Please ensure MySQL is running and configured.');
       }
 
-      console.log('🔵 SHIPWAY CARRIER: Saving carriers to MySQL...');
+      logger.info('🔵 SHIPWAY CARRIER: Saving carriers to MySQL...');
       
       const result = await database.bulkUpsertCarriers(carriers);
       
-      console.log('✅ SHIPWAY CARRIER: Carriers saved to MySQL');
-      console.log('  - Total carriers processed:', result.total);
-      console.log('  - Inserted:', result.inserted);
-      console.log('  - Updated:', result.updated);
+      logger.info('✅ SHIPWAY CARRIER: Carriers saved to MySQL');
 
       return {
         success: true,
@@ -213,7 +206,7 @@ class ShipwayCarrierService {
         updated: result.updated
       };
     } catch (error) {
-      console.error('💥 SHIPWAY CARRIER: Error saving to MySQL:', error.message);
+      logger.error('💥 SHIPWAY CARRIER: Error saving to MySQL:', error.message);
       throw new Error(`Failed to save carriers to database: ${error.message}`);
     }
   }
@@ -226,37 +219,37 @@ class ShipwayCarrierService {
    */
   async syncCarriersToMySQL() {
     try {
-      console.log('🔵 SHIPWAY CARRIER: Starting smart carrier sync to MySQL...');
+      logger.info('🔵 SHIPWAY CARRIER: Starting smart carrier sync to MySQL...');
       
       // Read existing carriers from database (preserves admin-set priorities)
       const existingCarriers = await this.readCarriersFromDatabase();
       const existingCarrierMap = new Map(existingCarriers.map(carrier => [carrier.carrier_id, carrier]));
       
-      console.log(`📊 Existing carriers: ${existingCarriers.length}`);
-      console.log(`📊 Existing carrier IDs: ${Array.from(existingCarrierMap.keys()).join(', ')}`);
+      logger.info(`📊 Existing carriers: ${existingCarriers.length}`);
+      logger.info(`📊 Existing carrier IDs: ${Array.from(existingCarrierMap.keys()).join(', ')}`);
       
       // Fetch carriers from Shipway API
       const shipwayData = await this.fetchCarriersFromShipway();
       const newCarriersFromAPI = this.extractCarrierData(shipwayData);
       const newCarrierMap = new Map(newCarriersFromAPI.map(carrier => [carrier.carrier_id, carrier]));
       
-      console.log(`📊 New carriers from API: ${newCarriersFromAPI.length}`);
-      console.log(`📊 New carrier IDs: ${Array.from(newCarrierMap.keys()).join(', ')}`);
+      logger.info(`📊 New carriers from API: ${newCarriersFromAPI.length}`);
+      logger.info(`📊 New carrier IDs: ${Array.from(newCarrierMap.keys()).join(', ')}`);
       
       // Find new carriers (not in existing database)
       const newCarrierIds = newCarriersFromAPI.filter(carrier => !existingCarrierMap.has(carrier.carrier_id));
-      console.log(`📊 New carrier IDs to add: ${newCarrierIds.map(c => c.carrier_id).join(', ')}`);
+      logger.info(`📊 New carrier IDs to add: ${newCarrierIds.map(c => c.carrier_id).join(', ')}`);
       
       // Find removed carriers (in existing database but not in API)
       const removedCarrierIds = existingCarriers.filter(carrier => !newCarrierMap.has(carrier.carrier_id));
-      console.log(`📊 Removed carrier IDs: ${removedCarrierIds.map(c => c.carrier_id).join(', ')}`);
+      logger.info(`📊 Removed carrier IDs: ${removedCarrierIds.map(c => c.carrier_id).join(', ')}`);
       
       // Calculate next available priority for new carriers
       const existingPriorities = existingCarriers.map(c => parseInt(c.priority) || 0);
       const maxPriority = Math.max(0, ...existingPriorities);
       let nextPriority = maxPriority + 1;
       
-      console.log(`📊 Next available priority: ${nextPriority}`);
+      logger.info(`📊 Next available priority: ${nextPriority}`);
       
       // Build final carrier list
       const finalCarriers = [];
@@ -288,7 +281,7 @@ class ShipwayCarrierService {
           account_code: this.accountCode || newCarrier.account_code, // Ensure account_code is set
           priority: nextPriority++
         });
-        console.log(`➕ Added new carrier: ${newCarrier.carrier_id} with priority ${nextPriority - 1}`);
+        logger.info(`➕ Added new carrier: ${newCarrier.carrier_id} with priority ${nextPriority - 1}`);
       });
       
       // 3. Re-sort by priority and renumber if there are gaps
@@ -308,8 +301,8 @@ class ShipwayCarrierService {
         !this.accountCode || carrier.account_code === this.accountCode
       );
       
-      console.log(`📊 Final carriers for store ${this.accountCode || 'all'}: ${storeCarriers.length}`);
-      console.log(`📊 Final priorities: ${storeCarriers.map(c => `${c.carrier_id}:${c.priority}`).join(', ')}`);
+      logger.info(`📊 Final carriers for store ${this.accountCode || 'all'}: ${storeCarriers.length}`);
+      logger.info(`📊 Final priorities: ${storeCarriers.map(c => `${c.carrier_id}:${c.priority}`).join(', ')}`);
       
       // Save to MySQL database (only save carriers for this store)
       const result = await this.saveCarriersToDatabase(storeCarriers);
@@ -322,12 +315,12 @@ class ShipwayCarrierService {
       // Update carrierCount to reflect only this store's carriers
       result.carrierCount = storeCarriers.length;
       
-      console.log('✅ SHIPWAY CARRIER: Smart carrier sync completed');
-      console.log(`📊 Summary: ${newCarrierIds.length} added, ${removedCarrierIds.length} removed, ${storeCarriers.length} total for store ${this.accountCode || 'all'}`);
+      logger.info('✅ SHIPWAY CARRIER: Smart carrier sync completed');
+      logger.info(`📊 Summary: ${newCarrierIds.length} added, ${removedCarrierIds.length} removed, ${storeCarriers.length} total for store ${this.accountCode || 'all'}`);
       
       return result;
     } catch (error) {
-      console.error('💥 SHIPWAY CARRIER: Error syncing carriers to MySQL:', error.message);
+      logger.error('💥 SHIPWAY CARRIER: Error syncing carriers to MySQL:', error.message);
       throw error;
     }
   }
@@ -357,19 +350,17 @@ class ShipwayCarrierService {
       let carriers;
       if (this.accountCode) {
         carriers = await database.getCarriersByAccountCode(this.accountCode);
-        console.log(`✅ SHIPWAY CARRIER: Carriers loaded from MySQL for store: ${this.accountCode}`);
+        logger.info(`✅ SHIPWAY CARRIER: Carriers loaded from MySQL for store: ${this.accountCode}`);
       } else {
         // Legacy mode: get all carriers
         carriers = await database.getAllCarriers();
-        console.log('✅ SHIPWAY CARRIER: Carriers loaded from MySQL (all stores)');
+        logger.info('✅ SHIPWAY CARRIER: Carriers loaded from MySQL (all stores)');
       }
       
-      console.log('  - Total carriers:', carriers.length);
-      console.log('  - Ordered by priority (admin-set priorities)');
 
       return carriers;
     } catch (error) {
-      console.error('💥 SHIPWAY CARRIER: Error reading from MySQL:', error.message);
+      logger.error('💥 SHIPWAY CARRIER: Error reading from MySQL:', error.message);
       throw new Error(`Failed to read carriers from database: ${error.message}`);
     }
   }
@@ -399,7 +390,7 @@ class ShipwayCarrierService {
         return priorityA - priorityB;
       });
 
-      console.log('📊 CSV Export: Carriers sorted by priority (1, 2, 3...)');
+      logger.info('📊 CSV Export: Carriers sorted by priority (1, 2, 3...)');
 
       // Define headers with store info first, then carrier details
       const headers = [
@@ -430,7 +421,7 @@ class ShipwayCarrierService {
       
       return csvContent;
     } catch (error) {
-      console.error('Error exporting carriers to CSV:', error);
+      logger.error('Error exporting carriers to CSV:', error);
       throw error;
     }
   }
@@ -442,13 +433,13 @@ class ShipwayCarrierService {
    */
   async updateCarrierPrioritiesFromCSV(csvContent) {
     try {
-      console.log('🔍 CSV Content received:', csvContent.substring(0, 200) + '...');
-      console.log('🔍 CSV Content length:', csvContent.length);
+      logger.info('🔍 CSV Content received:', csvContent.substring(0, 200) + '...');
+      logger.info('🔍 CSV Content length:', csvContent.length);
       
       // Normalize line endings and parse CSV content
       const normalizedContent = csvContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       const lines = normalizedContent.trim().split('\n');
-      console.log('🔍 Number of lines:', lines.length);
+      logger.info('🔍 Number of lines:', lines.length);
       
       if (lines.length < 2) {
         throw new Error('CSV file must contain header and at least one data row');
@@ -457,7 +448,7 @@ class ShipwayCarrierService {
       // Parse header - handle quoted values properly
       const headerLine = lines[0];
       const header = this.parseCSVLine(headerLine);
-      console.log('🔍 Parsed header:', header);
+      logger.info('🔍 Parsed header:', header);
       
       // Validate required columns exist
       const requiredColumns = ['carrier_id', 'carrier_name', 'status', 'weight_in_kg', 'priority'];
@@ -477,9 +468,9 @@ class ShipwayCarrierService {
       const priorityIndex = header.indexOf('priority');
       const statusIndex = header.indexOf('status');
 
-      console.log('🔍 carrier_id index:', carrierIdIndex);
-      console.log('🔍 priority index:', priorityIndex);
-      console.log('🔍 account_code index:', accountCodeIndex);
+      logger.info('🔍 carrier_id index:', carrierIdIndex);
+      logger.info('🔍 priority index:', priorityIndex);
+      logger.info('🔍 account_code index:', accountCodeIndex);
 
       // Read ALL carriers from database (for validation across all stores)
       // Use database directly to get all carriers regardless of accountCode
@@ -509,7 +500,7 @@ class ShipwayCarrierService {
         const status = statusNormalized === 'inactive' ? 'inactive' : (statusNormalized === 'active' ? 'active' : statusRaw);
         const accountCode = values[accountCodeIndex];
 
-        console.log(`🔍 Row ${i}: carrier_id="${carrierId}", account_code="${accountCode}", priority="${values[priorityIndex]}" -> ${priority}`);
+        logger.info(`🔍 Row ${i}: carrier_id="${carrierId}", account_code="${accountCode}", priority="${values[priorityIndex]}" -> ${priority}`);
 
         if (!carrierId || !accountCode || isNaN(priority) || priority < 1) {
           throw new Error(`Invalid data in row ${i + 1}: carrier_id="${carrierId}", account_code="${accountCode}", priority="${values[priorityIndex]}"`);
@@ -539,7 +530,7 @@ class ShipwayCarrierService {
         storeUpdates.push({ carrier_id: carrierId, account_code: accountCode, priority, status });
       }
 
-      console.log('🔍 Updates grouped by store:', Array.from(updatesByStore.entries()).map(([code, updates]) => `${code}: ${updates.length} carriers`));
+      logger.info('🔍 Updates grouped by store:', Array.from(updatesByStore.entries()).map(([code, updates]) => `${code}: ${updates.length} carriers`));
 
       if (updatesByStore.size === 0) {
         throw new Error('No valid data rows found in CSV');
@@ -584,14 +575,14 @@ class ShipwayCarrierService {
             await database.updateCarrier(update.carrier_id, updateData, accountCode);
             storeUpdatedCount++;
           } else {
-            console.warn(`⚠️ Carrier ${update.carrier_id} not found for store ${accountCode}`);
+            logger.warn(`⚠️ Carrier ${update.carrier_id} not found for store ${accountCode}`);
           }
         }
 
         // Normalize priorities after updating to ensure continuity (1, 2, 3...)
         if (storeUpdatedCount > 0) {
           await this.normalizeCarrierPriorities(accountCode);
-          console.log(`✅ Store "${accountCode}": Normalized priorities after update`);
+          logger.info(`✅ Store "${accountCode}": Normalized priorities after update`);
         }
 
         totalUpdated += storeUpdatedCount;
@@ -601,7 +592,7 @@ class ShipwayCarrierService {
           totalCarriers: storeCarriers.length
         });
 
-        console.log(`✅ Store "${accountCode}": Updated ${storeUpdatedCount}/${updates.length} carriers`);
+        logger.info(`✅ Store "${accountCode}": Updated ${storeUpdatedCount}/${updates.length} carriers`);
       }
 
       const storeSummary = results.map(r => `${r.accountCode}: ${r.updatedCount}/${r.totalCarriers}`).join(', ');
@@ -620,7 +611,7 @@ class ShipwayCarrierService {
         }
       };
     } catch (error) {
-      console.error('Error updating carrier priorities from CSV:', error);
+      logger.error('Error updating carrier priorities from CSV:', error);
       throw error;
     }
   }
@@ -679,7 +670,7 @@ class ShipwayCarrierService {
 
       return { success: true, message: 'Carrier moved successfully' };
     } catch (error) {
-      console.error('Error moving carrier:', error.message);
+      logger.error('Error moving carrier:', error.message);
       throw new Error(error.message || 'Failed to move carrier');
     }
   }
@@ -734,7 +725,7 @@ class ShipwayCarrierService {
 
       return { success: true, message: `Normalized priorities for ${active.length} active carriers in store ${storeAccountCode}` };
     } catch (error) {
-      console.error('Error normalizing carrier priorities:', error.message);
+      logger.error('Error normalizing carrier priorities:', error.message);
       throw new Error(error.message || 'Failed to normalize carrier priorities');
     }
   }
@@ -762,7 +753,7 @@ class ShipwayCarrierService {
         ]
       };
     } catch (error) {
-      console.error('Error getting expected CSV format:', error);
+      logger.error('Error getting expected CSV format:', error);
       throw error;
     }
   }

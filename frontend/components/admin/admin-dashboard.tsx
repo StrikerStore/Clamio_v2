@@ -2156,13 +2156,6 @@ export function AdminDashboard() {
     // Set loading state for this order
     setAssignLoading(prev => ({ ...prev, [orderToAssign.unique_id]: true }));
 
-    // Optimistically update the order state immediately
-    setOrders(prevOrders => prevOrders.map(o =>
-      o.unique_id === orderToAssign.unique_id
-        ? { ...o, vendor_name: vendorName, status: 'claimed' }
-        : o
-    ));
-
     try {
       const response = await apiClient.assignOrderToVendor(
         orderToAssign.unique_id,
@@ -2182,36 +2175,42 @@ export function AdminDashboard() {
           setSelectedVendorId("");
         }
 
-        // Refresh orders list and dashboard stats to get latest data from server
+        // Refresh to get confirmed server state
         await fetchOrders();
         await fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders });
+      } else if ((response as any).already_claimed) {
+        // First-come-first-served: another vendor or admin got the lock first
+        toast({
+          title: "⚠️ Order Already Claimed",
+          description: `Order ${orderToAssign.order_id || orderToAssign.unique_id} has already been claimed by another vendor. Refreshing...`,
+          variant: "destructive",
+        });
+        // Refresh so UI shows current claimed state
+        await fetchOrders();
       } else {
-        // Revert optimistic update on failure
-        setOrders(prevOrders => prevOrders.map(o =>
-          o.unique_id === orderToAssign.unique_id
-            ? { ...o, vendor_name: orderToAssign.vendor_name, status: orderToAssign.status }
-            : o
-        ));
         toast({
           title: "Assignment Failed",
           description: response.message,
           variant: "destructive",
         });
       }
-    } catch (error) {
-      // Revert optimistic update on error
-      setOrders(prevOrders => prevOrders.map(o =>
-        o.unique_id === orderToAssign.unique_id
-          ? { ...o, vendor_name: orderToAssign.vendor_name, status: orderToAssign.status }
-          : o
-      ));
-      toast({
-        title: "Error",
-        description: "Failed to assign order",
-        variant: "destructive",
-      });
+    } catch (error: any) {
+      // HTTP 409 surfaces as a thrown error via makeRequest
+      if (error?.message?.includes('already been claimed') || error?.message?.includes('just claimed')) {
+        toast({
+          title: "⚠️ Order Already Claimed",
+          description: error.message + " Refreshing...",
+          variant: "destructive",
+        });
+        await fetchOrders();
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to assign order",
+          variant: "destructive",
+        });
+      }
     } finally {
-      // Clear loading state
       setAssignLoading(prev => ({ ...prev, [orderToAssign.unique_id]: false }));
     }
   };
@@ -6587,12 +6586,34 @@ export function AdminDashboard() {
                   // Assign chosen vendor to all selected
                   const res = await apiClient.bulkAssignOrdersToVendor(selectedOrders, selectedBulkVendorId)
                   if (res.success) {
-                    toast({ title: 'Bulk Assigned', description: res.message })
+                    // Show success — and a separate warning if some orders were blocked
+                    const claimedOrders: any[] = (res.data as any)?.already_claimed_orders || []
+                    if (claimedOrders.length > 0) {
+                      const orderIds = claimedOrders.map((o: any) => o.order_id || o.unique_id).join(', ')
+                      toast({
+                        title: `⚠️ ${claimedOrders.length} Order(s) Already Claimed`,
+                        description: `These orders were already claimed by another vendor and were skipped: ${orderIds}`,
+                        variant: 'destructive'
+                      })
+                    }
+                    if ((res.data as any)?.updated > 0) {
+                      toast({ title: 'Bulk Assigned', description: res.message })
+                    }
                     setShowBulkAssignModal(false)
                     setSelectedBulkVendorId('')
                     setSelectedOrders([])
                     await fetchOrders()
                     await fetchDashboardStats({ showInactiveStores: showInactiveStoreOrders })
+                  } else if ((res as any).already_claimed) {
+                    // All selected orders were already claimed
+                    const claimedOrders: any[] = (res.data as any)?.already_claimed_orders || []
+                    const orderIds = claimedOrders.map((o: any) => o.order_id || o.unique_id).join(', ')
+                    toast({
+                      title: '⚠️ All Orders Already Claimed',
+                      description: `All selected orders have already been claimed by other vendors${orderIds ? ': ' + orderIds : ''}`,
+                      variant: 'destructive'
+                    })
+                    await fetchOrders()
                   } else {
                     toast({ title: 'Error', description: res.message, variant: 'destructive' })
                   }

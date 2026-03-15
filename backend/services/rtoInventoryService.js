@@ -1,4 +1,5 @@
 const database = require('../config/database');
+const logger = require('../utils/logger');
 
 /**
  * RTO Inventory Service
@@ -17,7 +18,7 @@ class RTOInventoryService {
      */
     async processDeliveredRTOOrders() {
         if (this.isProcessing) {
-            console.log('🔄 [RTO Inventory Service] Processing already in progress, skipping...');
+            logger.info('🔄 [RTO Inventory Service] Processing already in progress, skipping...');
             return {
                 success: false,
                 message: 'RTO inventory processing already in progress'
@@ -27,7 +28,7 @@ class RTOInventoryService {
         this.isProcessing = true;
 
         try {
-            console.log('🚀 [RTO Inventory Service] Starting RTO inventory processing...');
+            logger.info('🚀 [RTO Inventory Service] Starting RTO inventory processing...');
 
             await database.waitForMySQLInitialization();
 
@@ -44,7 +45,7 @@ class RTOInventoryService {
             };
 
         } catch (error) {
-            console.error('💥 [RTO Inventory Service] Processing failed:', error.message);
+            logger.error('💥 [RTO Inventory Service] Processing failed:', error.message);
             return {
                 success: false,
                 message: error.message,
@@ -69,7 +70,7 @@ class RTOInventoryService {
 
             return await database.getRTOInventory();
         } catch (error) {
-            console.error('❌ [RTO Inventory Service] Error getting RTO inventory:', error.message);
+            logger.error('❌ [RTO Inventory Service] Error getting RTO inventory:', error.message);
             throw error;
         }
     }
@@ -88,7 +89,7 @@ class RTOInventoryService {
 
             return await database.getUnprocessedRTODeliveredOrders();
         } catch (error) {
-            console.error('❌ [RTO Inventory Service] Error getting unprocessed orders:', error.message);
+            logger.error('❌ [RTO Inventory Service] Error getting unprocessed orders:', error.message);
             throw error;
         }
     }
